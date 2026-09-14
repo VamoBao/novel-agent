@@ -1,0 +1,21 @@
+{
+  "name": "novel-agent",
+  "version": "1.0.0",
+  "module": "index.ts",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/bun": "latest",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0",
+    "typescript": "6",
+    "typescript-eslint": "^8.70.0"
+  },
+  "private": true,
+  "scripts": {
+    "dev": "bun run index.ts",
+    "test": "bun test",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module"
+}
