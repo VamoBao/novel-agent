@@ -6,6 +6,7 @@
 
 - 运行时：Bun 1.4（`bun.lock` 锁定依赖，`bun install` 安装）
 - 语言：TypeScript 6（`tsconfig.json` 开启 `strict`、`noUncheckedIndexedAccess`、`noImplicitOverride` 等严格选项）
+- LLM 接入：Vercel AI SDK 7（`ai`）+ 官方 `@ai-sdk/deepseek` provider，工具参数 schema 用 zod 4
 - 静态检查：ESLint 10 + typescript-eslint 8（`eslint.config.js` 扁平配置）
 - 测试：Bun 内置测试运行器（`bun:test`，测试文件命名为 `*.test.ts`）
 
@@ -21,12 +22,17 @@
 
 ## 目录结构与模块划分
 
-项目当前为单模块初始结构，尚无子模块划分：
+项目为单模块，源码集中在 `src/` 下按职责分层：
 
-- `index.ts`：应用入口
-- `index.test.ts`：冒烟测试（验证测试链路可用）
+- `src/index.ts`：应用入口（组装/触发 workflows，不承载业务逻辑）
+- `src/index.test.ts`：冒烟测试（验证测试链路可用）
+- `src/providers/`：LLM 接入层，封装各厂商 provider 实例（当前含 `deepseek.ts`，Key 读 `DEEPSEEK_API_KEY`）
+- `src/tools/`：提供给 LLM 使用的工具，经 `tools/index.ts` 汇总导出（当前为占位）
+- `src/workflows/`：Agent 工作流编排，多步骤流程与模型/工具组合所在层（当前为占位）
 - `docs/`：Agent 工作流指导文档
 - `eslint.config.js`、`tsconfig.json`：静态检查与编译配置
+
+依赖方向：`workflows/ → providers/ + tools/`，下层不得反向依赖上层（详见根目录 `ARCHITECTURE.md`）。
 
 > **维护约定**：当项目发生重大修改（新增目录或模块、调整模块职责与边界、技术栈变动）时，Agent 须同步更新本节，保持入口文档与项目实际结构一致。
 

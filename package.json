@@ -1,7 +1,7 @@
 {
   "name": "novel-agent",
   "version": "1.0.0",
-  "module": "index.ts",
+  "module": "src/index.ts",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/bun": "latest",
@@ -12,10 +12,15 @@
   },
   "private": true,
   "scripts": {
-    "dev": "bun run index.ts",
+    "dev": "bun run src/index.ts",
     "test": "bun test",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@ai-sdk/deepseek": "^3.0.44",
+    "ai": "^7.0.99",
+    "zod": "^4.6.5"
+  }
 }
