@@ -4,6 +4,7 @@
 
 ## 已完成
 
+- 2026-09-15 [feat] 大纲生成后按创作 ID 保存到 `output/<id>.json`（outline-writer，含 id 文件名安全校验；output/ 内容被 gitignore，保留 .gitkeep）。AC：typecheck/lint/test 通过（19 用例）；端到端真实 LLM 验证落盘成功（5 幕 26 情节点，JSON 过 schema 校验）
 - 2026-09-15 [feat] 完成小说创作工作流编排：createNovel 主流程（UUID 生成 → state 初始化 → 类型/受众/世界观/主角/核心冲突收集 → 大纲生成）；世界观 ReAct Agent（ask_user 多轮追问 + submit_worldview 终态提交）；大纲 ReAct Agent（save_outline）；通用 ReAct 运行器；CLI 双模式交互输入。AC：typecheck/lint/test 通过（15 用例）；两次端到端真实 LLM 验证全流程走通（《回声之蚀》《拾光书坊》）
 - 2026-09-15 [fix] 修复 Bun node:readline 管道输入丢行问题（非 TTY 场景改用自维护行缓冲）；主角归一化漂移（强约束 prompt + 用户确认门）；受众 state 只存标签
 - 2026-09-14 [feat] 接入 AI SDK（`ai@7` + `@ai-sdk/deepseek@3`），创建 `src/providers/deepseek.ts` 提供 provider 实例；搭建 `src/` 分层结构（providers / tools / workflows），入口迁移至 `src/index.ts`；`tools/` 与 `workflows/` 为占位。AC：typecheck / lint / test 通过，`bun run dev` 正常输出，provider 实例可创建 `deepseek-v4-flash` 模型（运行时冒烟验证）

@@ -22,6 +22,8 @@ src/
 │   ├── types.ts          # NovelState / NovelParams / NovelStateStore 接口
 │   ├── id.ts             # generateNovelId（UUID，state 入库主键）
 │   └── memory-store.ts   # 内存实现（数据库接入前的过渡，接口不变替换实现即可）
+├── output/
+│   └── outline-writer.ts # 大纲落盘：output/<id>.json（id 做文件名安全校验）
 └── workflows/
     ├── create-novel.ts   # 主编排：初始化 → 参数收集 → 大纲生成
     └── agents/
@@ -49,7 +51,7 @@ src/
 5. **世界观**：独立 ReAct Agent（`worldview-agent`）——ask_user 工具多轮追问 → submit_worldview 终态提交（schema 校验）
 6. **主角**：自由文本 → generateObject 按 characterSchema 归一化 → 用户确认（不满意可重新描述），循环支持多主角
 7. **核心冲突**：自由文本 → generateObject 归一化（由来/影响/理想解决）
-8. **大纲**：ReAct Agent（`outline-agent`）基于全部参数生成 ≥3 幕结构大纲 → save_outline 保存
+8. **大纲**：ReAct Agent（`outline-agent`）基于全部参数生成 ≥3 幕结构大纲 → save_outline 保存 → 按 ID 落盘 `output/<id>.json`（`outline-writer`）
 9. 全程通过 `NovelStateStore` 更新 state（initializing → gathering → outlined）
 
 ## ReAct 终态工具模式（src/agents/react.ts）

@@ -31,11 +31,12 @@
 - `src/agents/react.ts`：通用 ReAct Agent 运行器（终态工具模式）
 - `src/tools/`：提供给 LLM 使用的通用工具（`ask-user.ts`），经 `tools/index.ts` 汇总导出；workflow 私有终态工具在对应 agent 文件内定义
 - `src/state/`：小说创作状态（`NovelStateStore` 接口 + 内存实现 + UUID 生成，DB 接入点）
+- `src/output/`：产物落盘（大纲按创作 ID 保存为 `output/<id>.json`）
 - `src/workflows/`：工作流编排（`create-novel.ts` 主流程 + `agents/` 下 worldview / outline 两个 subAgent）
 - `docs/`：Agent 工作流指导文档
 - `eslint.config.js`、`tsconfig.json`：静态检查与编译配置
 
-依赖方向：`workflows/ → agents/ + tools/ + state/ + schemas/ + cli/ + providers/`，下层不得反向依赖上层（详见根目录 `ARCHITECTURE.md`）。
+依赖方向：`workflows/ → agents/ + tools/ + state/ + schemas/ + output/ + cli/ + providers/`，下层不得反向依赖上层（详见根目录 `ARCHITECTURE.md`）。
 
 > **维护约定**：当项目发生重大修改（新增目录或模块、调整模块职责与边界、技术栈变动）时，Agent 须同步更新本节，保持入口文档与项目实际结构一致。
 

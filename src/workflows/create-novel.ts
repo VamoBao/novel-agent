@@ -19,6 +19,7 @@ import {
 import type { NovelParams, NovelState, NovelStateStore } from "../state/types";
 import { generateNovelId } from "../state/id";
 import { memoryNovelStateStore } from "../state/memory-store";
+import { saveOutline } from "../output/outline-writer";
 import { collectWorldview } from "./agents/worldview-agent";
 import { createOutline } from "./agents/outline-agent";
 
@@ -148,6 +149,10 @@ ${description}`,
   console.log("\n🛠 大纲 Agent 启动…");
   const outline = await createOutline(params);
   printOutline(outline);
+
+  // 大纲按创作 ID 落盘到 output/
+  const savedPath = await saveOutline(id, outline);
+  console.log(`\n🗂 大纲已保存：${savedPath}`);
 
   const finalState = await store.update(id, { status: "outlined", outline });
   console.log(`\n✅ 小说《${outline.title}》初始化完成！创作 ID：${id}`);
