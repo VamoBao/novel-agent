@@ -11,3 +11,6 @@ import { createDeepSeek } from "@ai-sdk/deepseek";
 export const deepseek = createDeepSeek({
   apiKey: process.env.DEEPSEEK_API_KEY,
 });
+
+/** 当前配置的 DeepSeek 模型实例（模型名经环境变量 `DEEPSEEK_MODEL_NAME` 覆盖，默认 deepseek-flash） */
+export const model = deepseek(process.env.DEEPSEEK_MODEL_NAME ?? "deepseek-flash");

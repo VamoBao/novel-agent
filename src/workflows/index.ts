@@ -1,6 +1,4 @@
-// 工作流占位
-//
-// 本目录存放 Agent 工作流编排：多步骤流程、模型与工具的组合、
-// 面向「小说创作」等具体场景的 pipeline 均在此定义。
-// 当前为空占位，待首个工作流需求落地时补充。
-export {};
+// 工作流编排：多步骤流程、模型与工具组合所在层
+export { createNovel, type CreateNovelOptions } from "./create-novel";
+export { collectWorldview } from "./agents/worldview-agent";
+export { createOutline } from "./agents/outline-agent";

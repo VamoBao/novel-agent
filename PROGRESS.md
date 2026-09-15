@@ -4,13 +4,15 @@
 
 ## 已完成
 
+- 2026-09-15 [feat] 完成小说创作工作流编排：createNovel 主流程（UUID 生成 → state 初始化 → 类型/受众/世界观/主角/核心冲突收集 → 大纲生成）；世界观 ReAct Agent（ask_user 多轮追问 + submit_worldview 终态提交）；大纲 ReAct Agent（save_outline）；通用 ReAct 运行器；CLI 双模式交互输入。AC：typecheck/lint/test 通过（15 用例）；两次端到端真实 LLM 验证全流程走通（《回声之蚀》《拾光书坊》）
+- 2026-09-15 [fix] 修复 Bun node:readline 管道输入丢行问题（非 TTY 场景改用自维护行缓冲）；主角归一化漂移（强约束 prompt + 用户确认门）；受众 state 只存标签
 - 2026-09-14 [feat] 接入 AI SDK（`ai@7` + `@ai-sdk/deepseek@3`），创建 `src/providers/deepseek.ts` 提供 provider 实例；搭建 `src/` 分层结构（providers / tools / workflows），入口迁移至 `src/index.ts`；`tools/` 与 `workflows/` 为占位。AC：typecheck / lint / test 通过，`bun run dev` 正常输出，provider 实例可创建 `deepseek-v4-flash` 模型（运行时冒烟验证）
 - 2026-09-14 [chore] 初始化项目：Bun + TypeScript 6 脚手架、ESLint 10 工具链、Agent 工作流文档（AGENTS.md + docs/ 三份指引）、git init
 
 ## 已知 Bug
 
-（暂无）
+- （非阻塞）deepseek-flash 在主角归一化时仍可能小幅补全用户未提及字段——已有「确认门」兜底，用户答 n 可重新描述；若换更强模型（deepseek-v4-pro）可进一步降低漂移
 
 ## 流程复盘记录
 
-（暂无）
+- 2026-09-15 端到端验证时发现 Bun 1.4 `node:readline` 在管道输入下两次 question 之间丢弃缓冲并触发 close（Node 行为正常）。归因：环境差异类问题，需求校验阶段未覆盖「脚本化喂入交互输入」的验证方式。优化：本次已在 `cli/prompt.ts` 内置双模式输入解决；后续涉及 stdin 交互的需求，验证清单应同时覆盖 TTY 与管道两种模式
