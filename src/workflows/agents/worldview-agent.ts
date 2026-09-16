@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { runReactAgent } from "../../agents/react";
-import { askUserTool } from "../../tools";
+import { createAskUserTool } from "../../tools";
 import { worldviewSchema, type Worldview } from "../../schemas";
 
 const SUBMIT_TOOL = "submit_worldview";
@@ -22,6 +22,7 @@ const SYSTEM_PROMPT = `你是一名专业的小说世界观架构师。你的任
 提问原则：
 - 只问对构建小说大纲有影响的问题，不纠结琐碎细节；
 - 用户表示“不清楚/你决定”时，基于常识与题材惯例给出合理设定；
+- 若 ask_user 返回「用户已终止输入」，立即停止提问并基于已有信息调用 submit_worldview 提交；
 - 最多向用户提问 6 次，之后基于已有信息整理提交，不要拖延。`;
 
 /**
@@ -45,11 +46,12 @@ export async function collectWorldview(initialDescription: string): Promise<Worl
     system: SYSTEM_PROMPT,
     prompt: `用户提供的初始世界观描述如下：\n${initialDescription}`,
     tools: {
-      ask_user: askUserTool,
+      ask_user: createAskUserTool("世界观Agent"),
       submit_worldview: submitWorldview,
     },
     stopTool: SUBMIT_TOOL,
     maxSteps: 16,
+    isDone: () => submitted !== undefined,
   });
 
   if (!submitted) {

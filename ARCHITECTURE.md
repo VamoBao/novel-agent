@@ -27,8 +27,9 @@ src/
 └── workflows/
     ├── create-novel.ts   # 主编排：初始化 → 参数收集 → 大纲生成
     └── agents/
-        ├── worldview-agent.ts  # 世界观 ReAct Agent（多轮追问 + 终态提交）
-        └── outline-agent.ts    # 大纲 ReAct Agent（结构化保存）
+        ├── worldview-agent.ts   # 世界观 ReAct Agent（多轮追问 + 终态提交）
+        ├── character-agent.ts   # 角色 ReAct Agent（逐字段「概括→确认→保存」+ 终态组装校验）
+        └── outline-agent.ts     # 大纲 ReAct Agent（结构化保存）
 ```
 
 ## 依赖边界
@@ -49,7 +50,7 @@ src/
 3. **类型**：静态热门类型菜单单选 + 自定义输入
 4. **受众**：LLM（generateObject）按类型推断候选 → 用户多选 + 自由补充
 5. **世界观**：独立 ReAct Agent（`worldview-agent`）——ask_user 工具多轮追问 → submit_worldview 终态提交（schema 校验）
-6. **主角**：自由文本 → generateObject 按 characterSchema 归一化 → 用户确认（不满意可重新描述），循环支持多主角
+6. **角色**：独立 ReAct Agent（`character-agent`）——字段协议驱动（13 个扁平字段映射到角色卡 schema）：`ask_user` 征集文本 → `save_field` 逐字段「概括总结 → 用户确认 → 保存」（确认与反馈在工具 execute 内代码强制）→ 必填字段（姓名、内核三维、背景、创作目的、结局方向）齐全后 `submit_character` 由代码组装并过 schema 校验（杜绝模型漂移）；外层循环支持多角色，约束至少一名主角；内核/背景/创作目的/结局方向为生成后固定不变的属性
 7. **核心冲突**：自由文本 → generateObject 归一化（由来/影响/理想解决）
 8. **大纲**：ReAct Agent（`outline-agent`）基于全部参数生成 ≥3 幕结构大纲 → save_outline 保存 → 按 ID 落盘 `output/<id>.json`（`outline-writer`）
 9. 全程通过 `NovelStateStore` 更新 state（initializing → gathering → outlined）
@@ -59,6 +60,7 @@ src/
 - `runReactAgent` 封装 `generateText({ tools, stopWhen })`
 - 调用方定义携带 zod schema 的「终态工具」（submit_worldview / save_outline），execute 闭包记录结果
 - `stopWhen: [hasToolCall(终态工具), stepCountIs(maxSteps)]` 双保险停止
+- 续跑机制：传入 `isDone` 后，循环自然结束但终态未达成时（弱模型偶发「宣告调用工具却只输出文本」），自动注入提醒消息并携带完整对话历史续跑（默认 1 次）
 - 优点：结果天然过 schema 校验；无需解析 toolResults 结构
 
 ## 关键约定

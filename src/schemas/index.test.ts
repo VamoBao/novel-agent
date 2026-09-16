@@ -37,20 +37,49 @@ describe("worldviewSchema", () => {
 });
 
 describe("characterSchema", () => {
-  test("最小字段通过且数组字段应用默认值", () => {
-    const c = characterSchema.parse({
-      name: "林澜",
-      identity: "剑修",
-      personality: "外冷内热",
-      background: "下山寻找失踪的师姐",
-      motivation: "查明师姐失踪真相",
-    });
-    expect(c.abilities).toEqual([]);
-    expect(c.relationships).toEqual([]);
+  const validCharacter = {
+    basicInfo: { name: "林澜", gender: "女", appearance: "短发，左颊有疤" },
+    core: { desire: "找到失踪的妹妹", fear: "再次失去重要的人", narrativeRole: "主角" },
+    background: "殖民城市长大的孤儿领航员",
+    personality: "冷静理性",
+    characterGoal: "查明妹妹下落",
+    creationPurpose: "驱动主线冲突的核心视角",
+    trajectory: "领航员 → 追查者 → 拯救者",
+    endingDirection: "公开真相并拯救城市",
+    relationships: "与老周是师徒；与军方指挥官敌对",
+  };
+
+  test("完整角色卡通过校验", () => {
+    const c = characterSchema.parse(validCharacter);
+    expect(c.core.narrativeRole).toBe("主角");
+    expect(c.creationPurpose).toBe("驱动主线冲突的核心视角");
   });
 
-  test("缺少必填字段被拒绝", () => {
-    expect(() => characterSchema.parse({ name: "林澜" })).toThrow();
+  test("仅提供必填项通过，可选项缺省为 undefined", () => {
+    const c = characterSchema.parse({
+      basicInfo: { name: "灰袍人" },
+      core: { desire: "夺回神器", fear: "身份暴露", narrativeRole: "反派" },
+      background: "前朝国师",
+      creationPurpose: "逼迫主角觉醒上古血脉",
+      endingDirection: "被主角击败，临终揭露真相",
+    });
+    expect(c.personality).toBeUndefined();
+    expect(c.relationships).toBeUndefined();
+  });
+
+  test("缺少任一必填属性被拒绝（内核/背景/创作目的/结局方向）", () => {
+    const requiredKeys = ["core", "background", "creationPurpose", "endingDirection"] as const;
+    for (const key of requiredKeys) {
+      const broken: Record<string, unknown> = { ...validCharacter };
+      delete broken[key];
+      expect(() => characterSchema.parse(broken)).toThrow();
+    }
+    expect(() =>
+      characterSchema.parse({ ...validCharacter, core: { desire: "x", fear: "y" } }),
+    ).toThrow();
+    expect(() =>
+      characterSchema.parse({ ...validCharacter, basicInfo: { name: "" } }),
+    ).toThrow();
   });
 });
 

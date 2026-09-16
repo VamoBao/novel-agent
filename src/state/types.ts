@@ -7,7 +7,8 @@ export interface NovelParams {
   genre: string;
   audience: string[];
   worldview: Worldview;
-  protagonists: Character[];
+  /** 角色卡列表（内核/背景/创作目的/结局方向为固定属性；至少一名主角） */
+  characters: Character[];
   coreConflict: CoreConflict;
 }
 

@@ -63,7 +63,7 @@ class PipedLineSource implements LineSource {
   private partial = "";
   private eof = false;
 
-  constructor(stream: NodeJS.ReadableStream) {
+  constructor(private readonly stream: NodeJS.ReadableStream) {
     stream.setEncoding("utf8");
     stream.on("data", (chunk: string) => this.onData(chunk));
     stream.on("end", () => this.onEof());
@@ -110,6 +110,9 @@ class PipedLineSource implements LineSource {
 
   close(): void {
     this.onEof();
+    // 必须销毁流：打开的 stdin 数据监听会挂住事件循环，导致工作流完成后进程无法退出
+    //（NodeJS.ReadableStream 类型上无 destroy，运行时存在）
+    (this.stream as { destroy?: () => void }).destroy?.();
   }
 }
 

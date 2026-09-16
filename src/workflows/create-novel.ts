@@ -1,8 +1,6 @@
 import { generateObject } from "ai";
-import { z } from "zod";
 import { model } from "../providers/deepseek";
 import {
-  askConfirm,
   askMultiSelect,
   askOptional,
   askRequired,
@@ -10,7 +8,6 @@ import {
 } from "../cli/prompt";
 import {
   audienceSuggestionSchema,
-  characterSchema,
   coreConflictSchema,
   type Character,
   type CoreConflict,
@@ -21,6 +18,7 @@ import { generateNovelId } from "../state/id";
 import { memoryNovelStateStore } from "../state/memory-store";
 import { saveOutline } from "../output/outline-writer";
 import { collectWorldview } from "./agents/worldview-agent";
+import { createCharacter } from "./agents/character-agent";
 import { createOutline } from "./agents/outline-agent";
 
 /** 常见热门类型（用户也可自定义输入） */
@@ -97,35 +95,30 @@ export async function createNovel(options: CreateNovelOptions = {}): Promise<Nov
   const worldview = await collectWorldview(initialWorldview);
   printWorldview(worldview);
 
-  // 4. 主角设定（自由文本 → schema 归一化 → 用户确认，至少一名）
-  console.log("\n【4/5】主角设定");
-  const protagonists: Character[] = [];
+  // 4. 角色设定（ReAct Agent 逐字段确认，至少一名主角）
+  console.log("\n【4/5】角色设定");
+  const characters: Character[] = [];
   for (;;) {
-    const hint =
-      protagonists.length === 0
-        ? "请描述主角（自由文本，越具体越好；也可一次描述多名主角）> "
-        : "请描述下一位主角（自由文本）> ";
-    const description = await askRequired(hint);
-    console.log("正在整理为角色卡…");
-    const { object } = await generateObject({
-      model,
-      schema: z.object({ characters: z.array(characterSchema).min(1) }),
-      prompt: `任务：把用户对小说主角的描述整理为结构化角色卡。
-规则：
-1. 用户描述中明确给出的信息（姓名、性别、年龄、身份、人际关系等）必须逐字保留，严禁改写、替换或另起名字；
-2. 角色数量以描述为准：描述了几个人就输出几张角色卡，不得自行增加或删减；
-3. 用户未提及的字段方可基于小说类型（${genre}）惯例合理补全，补全不得与描述冲突。
-
-用户对主角的描述：
-${description}`,
-    });
-    object.characters.forEach((c) => printCharacter(c));
-    if (!(await askConfirm("\n以上角色卡是否符合你的设想？", true))) {
-      console.log("已丢弃，请重新描述。");
-      continue;
+    const hasProtagonist = characters.some((c) => c.core.narrativeRole.includes("主角"));
+    let description: string;
+    if (characters.length === 0) {
+      description = await askRequired(
+        "请描述首个角色（建议从主角开始，自由文本；缺少的必填属性 AI 会逐项追问确认）> ",
+      );
+    } else if (!hasProtagonist) {
+      console.log("⚠️ 尚无叙事定位为「主角」的角色，须继续添加。");
+      description = await askRequired("请描述下一个角色（自由文本）> ");
+    } else {
+      const line = await askOptional(
+        "请描述下一个角色（主角/配角/反派均可，直接回车结束角色创建）> ",
+      );
+      if (line.length === 0) break;
+      description = line;
     }
-    protagonists.push(...object.characters);
-    if (!(await askConfirm("是否继续添加其他主角？", false))) break;
+    console.log("\n🧙 角色 Agent 启动（逐字段确认角色卡）…");
+    const character = await createCharacter(description, characters);
+    characters.push(character);
+    printCharacter(character);
   }
 
   // 5. 核心冲突（自由文本 → schema 归一化）
@@ -142,7 +135,7 @@ ${description}`,
   printConflict(conflict);
 
   // 参数收集完毕，落 state
-  const params: NovelParams = { genre, audience, worldview, protagonists, coreConflict: conflict };
+  const params: NovelParams = { genre, audience, worldview, characters, coreConflict: conflict };
   await store.update(id, { status: "gathering", params });
 
   // 大纲（ReAct Agent）
@@ -172,10 +165,20 @@ function printWorldview(wv: Worldview): void {
 }
 
 function printCharacter(c: Character): void {
-  console.log(`\n  👤 ${c.name}（${c.identity}${c.age ? `，${c.age}` : ""}）`);
-  console.log(`     性格：${c.personality}`);
-  console.log(`     动机：${c.motivation}`);
-  if (c.abilities.length > 0) console.log(`     能力：${c.abilities.join("、")}`);
+  console.log(`\n✅ 角色卡已确认：`);
+  console.log(
+    `  👤 ${c.basicInfo.name}（${c.core.narrativeRole}${c.basicInfo.gender ? `，${c.basicInfo.gender}` : ""}）`,
+  );
+  if (c.basicInfo.appearance) console.log(`     外貌：${c.basicInfo.appearance}`);
+  console.log(`     渴望：${c.core.desire}`);
+  console.log(`     恐惧：${c.core.fear}`);
+  console.log(`     背景：${c.background}`);
+  if (c.personality) console.log(`     性格：${c.personality}`);
+  if (c.characterGoal) console.log(`     角色目的：${c.characterGoal}`);
+  console.log(`     创作目的：${c.creationPurpose}`);
+  if (c.trajectory) console.log(`     轨迹：${c.trajectory}`);
+  console.log(`     结局方向：${c.endingDirection}`);
+  if (c.relationships) console.log(`     关系：${c.relationships}`);
 }
 
 function printConflict(c: CoreConflict): void {
