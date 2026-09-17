@@ -22,7 +22,7 @@ src/
 │   └── index.ts          # 工具注册表（汇总导出）
 ├── state/
 │   ├── types.ts            # NovelState / NovelParams / NovelStateStore 接口
-│   ├── id.ts               # generateUuidV7（自实现 UUIDv7）+ generateNovelId
+│   ├── id.ts               # generateUuidV7（封装 Bun.randomUUIDv7，同毫秒单调递增）+ generateNovelId
 │   ├── memory-store.ts     # NovelState 内存实现（数据库接入前的过渡，接口不变替换实现即可）
 │   ├── db.ts               # SQLite 打开与建表（novels / characters / worldviews，外键开启）
 │   ├── novel-store.ts      # 小说信息持久化（create/get/update，name 大纲确认后回填）

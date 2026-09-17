@@ -15,16 +15,20 @@ describe("generateUuidV7", () => {
     expect(set.size).toBe(1000);
   });
 
-  test("前 48bit 为毫秒时间戳（可解析还原）", () => {
-    const ts = 1789000001234;
-    const u = generateUuidV7(ts);
-    const tsHex = u.replace(/-/g, "").slice(0, 12);
-    expect(Number.parseInt(tsHex, 16)).toBe(ts);
+  test("前 48bit 为毫秒时间戳（落在生成时刻区间内）", () => {
+    const before = Date.now();
+    const u = generateUuidV7();
+    const after = Date.now();
+    const ts = Number.parseInt(u.replace(/-/g, "").slice(0, 12), 16);
+    expect(ts).toBeGreaterThanOrEqual(before);
+    expect(ts).toBeLessThanOrEqual(after);
   });
 
-  test("时间戳不同则字典序不同（时间有序）", () => {
-    const early = generateUuidV7(1_000_000);
-    const late = generateUuidV7(2_000_000);
-    expect(early < late).toBe(true);
+  test("连续生成保持字典序（Bun 原生同毫秒单调递增）", () => {
+    for (let i = 0; i < 200; i++) {
+      const a = generateUuidV7();
+      const b = generateUuidV7();
+      expect(a < b).toBe(true);
+    }
   });
 });

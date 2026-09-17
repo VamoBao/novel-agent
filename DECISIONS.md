@@ -6,7 +6,7 @@
 
 - **背景**：需要 novels 表保存小说信息（id/name/author/description），角色与世界观经 novel_id 外键关联；ID 从 uuidv4（node randomUUID）切换为 uuidv7。
 - **设计要点**：
-  - UUIDv7 自实现（~15 行，48bit 毫秒时间戳 + 74bit 随机，RFC 9562）：前缀含时间戳、大致按生成时间有序，做主键索引局部性好；node 自带 randomUUID 仅 v4，引入 uuid 包无必要
+  - UUIDv7 生成：封装 Bun 原生 `Bun.randomUUIDv7()`（同毫秒内单调递增，主键索引友好）；node 自带 randomUUID 仅 v4，uuid npm 包则与项目零依赖取向不符。保留 `generateUuidV7` 函数壳作为项目内唯一出口（初版曾自实现 RFC 9562 布局，实测 Bun 原生可用后切换）
   - SQLite 外键默认关闭，`openDatabase` 按连接执行 `PRAGMA foreign_keys=ON`；novels 行必须先于角色/世界观入库（工作流在初始化即建行，name/description 大纲确认后回填，author 暂未采集留空）
   - schema 变更用 `PRAGMA user_version` 管理：版本不匹配直接 drop 重建（开发期本地测试数据可弃；接入生产前需改为正式迁移）
 - **结论**：三表主键均为应用层 UUIDv7；characters.novel_id 外键（1:N），worldviews.novel_id 唯一外键（1:1）。`foreign_key_check` 与单测均验证约束生效。
