@@ -4,6 +4,7 @@
 
 ## 已完成
 
+- 2026-09-17 [feat] 新增 SQLite 持久化（Bun 内置 bun:sqlite，`data/novel.db`，路径可用 `NOVEL_DB_PATH` 覆盖）：characters 表按 characterSchema 平铺字段，角色卡确认后按创作 ID 增量入库（CharacterStore，读写双向 zod 校验）。AC：typecheck/lint/test 通过（29 用例，含重开库持久化/多 ID 隔离/可选字段往返）；端到端真实 LLM 验证库内角色绑定创作 ID 且字段完整
 - 2026-09-17 [fix] 解决 save_field 并行调用时无法依次确认的问题：prompt.ts 引入 SerialLineSource 串行队列（FIFO、提示语轮到时才写），同时修复 TTY 模式下 readline.question 回调槽被并发覆盖导致的确认挂起；字段摘要/角色卡/大纲确认视图拼入确认提示原子出现，反馈提示带字段标签。AC：隔离测试（时间戳验证 B 提示仅在 A 应答后出现、应答按序映射）+ 端到端真实 LLM 验证（《九州残脉》，逐字段成对确认、修订回路走通、自然退出）
 - 2026-09-17 [feat] 大纲增加用户确认循环：save_outline 升级最终确认门，展示剧情梗概/主题/每幕名称与概述，用户确认无修改才落盘；有修改意见按反馈调整后重新确认（循环）。outline Agent 去掉 stopTool 改 isDone 模式（hasToolCall 无法表达「提交被拒需继续修订」），maxSteps 提至 12。AC：typecheck/lint/test 通过（25 用例）；端到端真实 LLM 验证含完整「拒绝→按反馈修订→再确认」回路（《逆脉》，第一幕按要求从铺垫改为冲突切入后落盘）
 - 2026-09-17 [feat] submit_character 升级为最终确认门：必填字段齐全后组装整卡展示给用户确认，确认无补充才赋值 submitted 结束循环，有反馈则带反馈继续处理并重新提交；角色卡汇总打印移入 character-agent，编排层改单行确认输出。AC：typecheck/lint/test 通过（25 用例）；自适应驱动端到端真实 LLM 验证成功（《卷动九州》，整卡确认环节走通，进程自然退出）

@@ -2,6 +2,12 @@
 
 记录「为什么」而非「做了什么」：决策背景、备选方案、权衡依据与最终结论。
 
+## 2026-09-17 角色持久化采用 Bun 内置 bun:sqlite，characters 表按 schema 平铺
+
+- **背景**：角色卡确认后需要持久化并绑定创作 ID，为后续「按 ID 恢复继续创作」打基础。
+- **备选方案**：better-sqlite3（需原生编译依赖，Bun 环境无必要）；JSON 文件追加（无结构化查询，多角色/多 ID 管理弱）；先做 NovelStateStore 整体 SQLite 化（超出本次范围）。
+- **结论**：`bun:sqlite`（零依赖、同步 API）。`characters` 表列与 characterSchema 平铺字段一一对应（嵌套的 basicInfo/core 拆为列），`novel_id` 加索引；读写双向过 zod 校验保证库内数据完整性。角色在每张卡确认后立即增量入库（崩溃时已完成的角色不丢失）；内核/背景/创作目的/结局方向为固定属性，只增不改。NovelState 整体（status/params/outline）的 SQLite 化为后续接入点。
+
 ## 2026-09-17 终端交互串行化（并发确认排队 + 提示语轮到时才写）
 
 - **背景**：deepseek 等模型会在 ReAct 单步内并行调用多个 `save_field`，每个 execute 都要用户确认。管道模式靠 FIFO 勉强保持顺序但提示语全部提前打印；TTY 模式下 node:readline 的 `question()` 只有一个回调槽，后调覆盖前调，前一个确认永久挂起。

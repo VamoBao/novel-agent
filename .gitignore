@@ -45,3 +45,7 @@ files/*
 # 产出目录
 output/*
 !output/.gitkeep
+
+# 数据目录（SQLite 库文件）
+data/*
+!data/.gitkeep

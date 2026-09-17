@@ -7,6 +7,7 @@
 - 运行时：Bun 1.4（`bun.lock` 锁定依赖，`bun install` 安装）
 - 语言：TypeScript 6（`tsconfig.json` 开启 `strict`、`noUncheckedIndexedAccess`、`noImplicitOverride` 等严格选项）
 - LLM 接入：Vercel AI SDK 7（`ai`）+ 官方 `@ai-sdk/deepseek` provider，工具参数 schema 用 zod 4
+- 数据库：SQLite（Bun 内置 `bun:sqlite`，库文件 `data/novel.db`，路径可用 `NOVEL_DB_PATH` 覆盖）
 - 静态检查：ESLint 10 + typescript-eslint 8（`eslint.config.js` 扁平配置）
 - 测试：Bun 内置测试运行器（`bun:test`，测试文件命名为 `*.test.ts`）
 
@@ -30,7 +31,7 @@
 - `src/providers/`：LLM 接入层（`deepseek.ts`：Key 读 `DEEPSEEK_API_KEY`，模型读 `DEEPSEEK_MODEL_NAME`，默认 `deepseek-flash`）
 - `src/agents/react.ts`：通用 ReAct Agent 运行器（终态工具模式 + 未完成自动续跑）
 - `src/tools/`：提供给 LLM 使用的通用工具（`ask-user.ts` 工厂函数，按 Agent 标签生成），经 `tools/index.ts` 汇总导出；workflow 私有终态工具在对应 agent 文件内定义
-- `src/state/`：小说创作状态（`NovelStateStore` 接口 + 内存实现 + UUID 生成，DB 接入点）
+- `src/state/`：小说创作状态与持久化（`NovelStateStore` 接口 + 内存实现 + UUID 生成；`db.ts`/`character-store.ts` 将角色按创作 ID 落 SQLite）
 - `src/output/`：产物落盘（大纲按创作 ID 保存为 `output/<id>.json`）
 - `src/workflows/`：工作流编排（`create-novel.ts` 主流程 + `agents/` 下 worldview / character / outline 三个 subAgent）
 - `docs/`：Agent 工作流指导文档

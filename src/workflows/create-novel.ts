@@ -16,6 +16,7 @@ import {
 import type { NovelParams, NovelState, NovelStateStore } from "../state/types";
 import { generateNovelId } from "../state/id";
 import { memoryNovelStateStore } from "../state/memory-store";
+import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
 import { saveOutline } from "../output/outline-writer";
 import { collectWorldview } from "./agents/worldview-agent";
 import { createCharacter } from "./agents/character-agent";
@@ -41,6 +42,8 @@ export interface CreateNovelOptions {
   /** 已有的创作 ID（用于未来续作/恢复场景）；缺省时生成新 ID */
   id?: string;
   store?: NovelStateStore;
+  /** 角色持久化 store；缺省用默认 SQLite store（data/novel.db） */
+  characterStore?: CharacterStore;
 }
 
 /**
@@ -51,6 +54,7 @@ export interface CreateNovelOptions {
  */
 export async function createNovel(options: CreateNovelOptions = {}): Promise<NovelState> {
   const store = options.store ?? memoryNovelStateStore;
+  const characterStore = options.characterStore ?? getDefaultCharacterStore();
   const id = options.id ?? generateNovelId();
 
   console.log("📖 novel-agent —— 小说创作向导");
@@ -118,8 +122,10 @@ export async function createNovel(options: CreateNovelOptions = {}): Promise<Nov
     console.log("\n🧙 角色 Agent 启动（逐字段确认角色卡）…");
     const character = await createCharacter(description, characters);
     characters.push(character);
+    // 角色确认后立即按创作 ID 入库（增量持久化）
+    characterStore.addCharacter(id, character);
     console.log(
-      `\n✅ 角色已确认：${character.basicInfo.name}（${character.core.narrativeRole}）`,
+      `\n✅ 角色已确认并入库：${character.basicInfo.name}（${character.core.narrativeRole}）`,
     );
   }
 

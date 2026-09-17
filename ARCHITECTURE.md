@@ -21,9 +21,11 @@ src/
 │   ├── ask-user.ts       # 提供给 LLM 的通用工具：向用户提问并等待回答
 │   └── index.ts          # 工具注册表（汇总导出）
 ├── state/
-│   ├── types.ts          # NovelState / NovelParams / NovelStateStore 接口
-│   ├── id.ts             # generateNovelId（UUID，state 入库主键）
-│   └── memory-store.ts   # 内存实现（数据库接入前的过渡，接口不变替换实现即可）
+│   ├── types.ts            # NovelState / NovelParams / NovelStateStore 接口
+│   ├── id.ts               # generateNovelId（UUID，state 入库主键）
+│   ├── memory-store.ts     # NovelState 内存实现（数据库接入前的过渡，接口不变替换实现即可）
+│   ├── db.ts               # SQLite 打开与建表（bun:sqlite；characters 表按 schema 平铺）
+│   └── character-store.ts  # 角色按创作 ID 持久化（add/list，读写双向 zod 校验）
 ├── output/
 │   └── outline-writer.ts # 大纲落盘：output/<id>.json（id 做文件名安全校验）
 └── workflows/
@@ -52,7 +54,7 @@ src/
 3. **类型**：静态热门类型菜单单选 + 自定义输入
 4. **受众**：LLM（generateObject）按类型推断候选 → 用户多选 + 自由补充
 5. **世界观**：独立 ReAct Agent（`worldview-agent`）——ask_user 工具多轮追问 → submit_worldview 终态提交（schema 校验）
-6. **角色**：独立 ReAct Agent（`character-agent`）——字段协议驱动（13 个扁平字段映射到角色卡 schema）：`ask_user` 征集文本 → `save_field` 逐字段「概括总结 → 用户确认 → 保存」（确认与反馈在工具 execute 内代码强制）→ 必填字段（姓名、内核三维、背景、创作目的、结局方向）齐全后 `submit_character` 组装整卡并**展示给用户做最终确认**（用户确认无补充才结束；有反馈则处理后重新提交），组装由代码完成并过 schema 校验（杜绝模型漂移）；外层循环支持多角色，约束至少一名主角；内核/背景/创作目的/结局方向为生成后固定不变的属性
+6. **角色**：独立 ReAct Agent（`character-agent`）——字段协议驱动（13 个扁平字段映射到角色卡 schema）：`ask_user` 征集文本 → `save_field` 逐字段「概括总结 → 用户确认 → 保存」（确认与反馈在工具 execute 内代码强制）→ 必填字段（姓名、内核三维、背景、创作目的、结局方向）齐全后 `submit_character` 组装整卡并**展示给用户做最终确认**（用户确认无补充才结束；有反馈则处理后重新提交），组装由代码完成并过 schema 校验（杜绝模型漂移）；每张角色卡确认后立即按创作 ID 写入 SQLite（增量持久化，`character-store`）；外层循环支持多角色，约束至少一名主角；内核/背景/创作目的/结局方向为生成后固定不变的属性
 7. **核心冲突**：自由文本 → generateObject 归一化（由来/影响/理想解决）
 8. **大纲**：ReAct Agent（`outline-agent`）基于全部参数生成大纲 → `save_outline` 内展示「剧情梗概、主题、每幕名称与概述」请用户确认——确认无修改才完成；有修改意见则按反馈调整后重新提交确认（循环），完成后按 ID 落盘 `output/<id>.json`（`outline-writer`）
 9. 全程通过 `NovelStateStore` 更新 state（initializing → gathering → outlined）
@@ -72,5 +74,6 @@ src/
 - 环境变量（Bun 自动加载 `.env`，参考 `.env.example`）：
   - `DEEPSEEK_API_KEY`：必填，DeepSeek API Key
   - `DEEPSEEK_MODEL_NAME`：可选，默认 `deepseek-flash`
-- state 当前为内存态（进程重启即失）；数据库接入时实现 `NovelStateStore` 接口替换 `memoryNovelStateStore` 即可，工作流代码零改动
+  - `NOVEL_DB_PATH`：可选，SQLite 路径，默认 `data/novel.db`
+- SQLite：Bun 内置 `bun:sqlite`，`characters` 表列与 characterSchema 平铺字段一一对应，`novel_id` 索引绑定创作 ID；角色确认后只增不改（内核等固定属性）；NovelState 整体（status/params/outline）当前仍为内存态，SQLite 化为后续接入点
 - deepseek-flash 对主角归一化存在改写漂移，已通过「强约束 prompt + 用户确认门」缓解（见 DECISIONS）
