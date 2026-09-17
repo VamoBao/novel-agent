@@ -46,9 +46,9 @@
 
 1. 先读本文件了解项目结构与约定，再读取状态文档 `ARCHITECTURE.md` 与 `PROGRESS.md`（本项目暂无模块划分，状态文档放项目根目录；不存在则视为新建模块，在任务过程中按需创建）
 2. 按任务类型读取对应指引：
-   - 新需求开发：`docs/feature-check-guide.md`
-   - 修复 Bug / 处理报错：`docs/bug-fix-guide.md`
-   - 执行提交前读取 `docs/git-commit-guide.md`（需求完成后 Agent 自动执行原子提交时同样遵循）
+   - 新需求开发：[`docs/feature-check-guide.md`](docs/feature-check-guide.md)
+   - 修复 Bug / 处理报错：[`docs/bug-fix-guide.md`](docs/bug-fix-guide.md)
+   - 执行提交前读取 [`docs/git-commit-guide.md`](docs/git-commit-guide.md)（需求完成后 Agent 自动执行原子提交时同样遵循）
 3. 完成后按指引要求同步更新状态文档（见下方约定）
 
 ## 状态文档约定
