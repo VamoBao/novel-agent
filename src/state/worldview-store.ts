@@ -1,9 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { worldviewSchema, type Worldview } from "../schemas";
 import { DEFAULT_DB_PATH, getDefaultDatabase, openDatabase } from "./db";
+import { generateUuidV7 } from "./id";
 
-/** 数据库中的世界观记录：世界观 + 库表元信息 */
+/** 数据库中的世界观记录：世界观 + 库表元信息（id 为 UUIDv7） */
 export interface StoredWorldview {
+  id: string;
   novelId: string;
   createdAt: string;
   updatedAt: string;
@@ -12,6 +14,7 @@ export interface StoredWorldview {
 
 /** worldviews 表行结构（列与 worldviewSchema 对应，taboos 存 JSON 文本） */
 interface WorldviewRow {
+  id: string;
   novel_id: string;
   geography: string;
   fantasy_attributes: string | null;
@@ -23,9 +26,9 @@ interface WorldviewRow {
 
 const UPSERT_SQL = `
   INSERT INTO worldviews (
-    novel_id, geography, fantasy_attributes, real_world_mapping,
+    id, novel_id, geography, fantasy_attributes, real_world_mapping,
     taboos, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(novel_id) DO UPDATE SET
     geography = excluded.geography,
     fantasy_attributes = excluded.fantasy_attributes,
@@ -35,7 +38,7 @@ const UPSERT_SQL = `
 `;
 
 const SELECT_SQL = `
-  SELECT novel_id, geography, fantasy_attributes, real_world_mapping,
+  SELECT id, novel_id, geography, fantasy_attributes, real_world_mapping,
          taboos, created_at, updated_at
   FROM worldviews WHERE novel_id = ?;
 `;
@@ -71,6 +74,7 @@ export class WorldviewStore {
     this.db
       .prepare(UPSERT_SQL)
       .run(
+        generateUuidV7(),
         novelId,
         validated.background.geography,
         validated.background.fantasyAttributes ?? null,
@@ -87,6 +91,7 @@ export class WorldviewStore {
     const row = this.db.prepare(SELECT_SQL).get(novelId) as WorldviewRow | null;
     if (!row) return undefined;
     return {
+      id: row.id,
       novelId: row.novel_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

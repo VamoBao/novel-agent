@@ -1,10 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { characterSchema, type Character } from "../schemas";
 import { DEFAULT_DB_PATH, getDefaultDatabase, openDatabase } from "./db";
+import { generateUuidV7 } from "./id";
 
-/** 数据库中的角色记录：角色卡 + 库表元信息 */
+/** 数据库中的角色记录：角色卡 + 库表元信息（id 为 UUIDv7） */
 export interface StoredCharacter {
-  rowId: number;
+  id: string;
   novelId: string;
   createdAt: string;
   character: Character;
@@ -12,7 +13,7 @@ export interface StoredCharacter {
 
 /** characters 表行结构（列名与 characterSchema 平铺字段对应） */
 interface CharacterRow {
-  id: number;
+  id: string;
   novel_id: string;
   name: string;
   gender: string | null;
@@ -32,17 +33,17 @@ interface CharacterRow {
 
 const INSERT_SQL = `
   INSERT INTO characters (
-    novel_id, name, gender, appearance, desire, fear, narrative_role,
+    id, novel_id, name, gender, appearance, desire, fear, narrative_role,
     background, personality, character_goal, creation_purpose,
     trajectory, ending_direction, relationships, created_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 `;
 
 const SELECT_SQL = `
   SELECT id, novel_id, name, gender, appearance, desire, fear, narrative_role,
          background, personality, character_goal, creation_purpose,
          trajectory, ending_direction, relationships, created_at
-  FROM characters WHERE novel_id = ? ORDER BY id ASC;
+  FROM characters WHERE novel_id = ? ORDER BY created_at ASC, id ASC;
 `;
 
 function rowToCharacter(row: CharacterRow): Character {
@@ -83,10 +84,12 @@ export class CharacterStore {
   /** 写入角色（先过 schema 校验），返回带库表元信息的记录 */
   addCharacter(novelId: string, character: Character): StoredCharacter {
     const validated = characterSchema.parse(character);
+    const id = generateUuidV7();
     const createdAt = new Date().toISOString();
-    const result = this.db
+    this.db
       .prepare(INSERT_SQL)
       .run(
+        id,
         novelId,
         validated.basicInfo.name,
         validated.basicInfo.gender ?? null,
@@ -104,7 +107,7 @@ export class CharacterStore {
         createdAt,
       );
     return {
-      rowId: Number(result.lastInsertRowid),
+      id,
       novelId,
       createdAt,
       character: validated,
@@ -115,7 +118,7 @@ export class CharacterStore {
   listCharacters(novelId: string): StoredCharacter[] {
     const rows = this.db.prepare(SELECT_SQL).all(novelId) as CharacterRow[];
     return rows.map((row) => ({
-      rowId: row.id,
+      id: row.id,
       novelId: row.novel_id,
       createdAt: row.created_at,
       character: rowToCharacter(row),

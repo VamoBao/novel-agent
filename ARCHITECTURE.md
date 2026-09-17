@@ -22,9 +22,10 @@ src/
 │   └── index.ts          # 工具注册表（汇总导出）
 ├── state/
 │   ├── types.ts            # NovelState / NovelParams / NovelStateStore 接口
-│   ├── id.ts               # generateNovelId（UUID，state 入库主键）
+│   ├── id.ts               # generateUuidV7（自实现 UUIDv7）+ generateNovelId
 │   ├── memory-store.ts     # NovelState 内存实现（数据库接入前的过渡，接口不变替换实现即可）
-│   ├── db.ts               # SQLite 打开与建表（bun:sqlite；characters / worldviews 表）
+│   ├── db.ts               # SQLite 打开与建表（novels / characters / worldviews，外键开启）
+│   ├── novel-store.ts      # 小说信息持久化（create/get/update，name 大纲确认后回填）
 │   ├── character-store.ts  # 角色按创作 ID 持久化（add/list，读写双向 zod 校验）
 │   └── worldview-store.ts  # 世界观按创作 ID 持久化（upsert/get，taboos 存 JSON）
 ├── output/
@@ -50,7 +51,7 @@ src/
 
 ## 主工作流：createNovel（src/workflows/create-novel.ts）
 
-1. **生成 ID**：调用任何 Agent 之前 `generateNovelId()` 产出 UUID，作为 state 存库唯一标识
+1. **生成 ID**：调用任何 Agent 之前 `generateNovelId()` 产出 UUIDv7，并立即写入 `novels` 表（name/description 大纲确认后回填，author 暂未采集）；角色/世界观表经 novel_id 外键关联本表
 2. **初始化判断**：`store.get(id)` 无记录 → 新小说，`store.create` 落初始 state（status: initializing）
 3. **类型**：静态热门类型菜单单选 + 自定义输入
 4. **受众**：LLM（generateObject）按类型推断候选 → 用户多选 + 自由补充
@@ -76,5 +77,5 @@ src/
   - `DEEPSEEK_API_KEY`：必填，DeepSeek API Key
   - `DEEPSEEK_MODEL_NAME`：可选，默认 `deepseek-flash`
   - `NOVEL_DB_PATH`：可选，SQLite 路径，默认 `data/novel.db`
-- SQLite：Bun 内置 `bun:sqlite`，各 store 共享默认连接（懒加载单例）。`characters` 表列与 characterSchema 平铺一一对应（1:N，自增 id + `novel_id` 索引），角色确认后只增不改；`worldviews` 表与 worldviewSchema 对应（1:1，`novel_id` 即主键，upsert 覆盖更新，`taboos` 数组存 JSON 文本）；NovelState 整体（status/params/outline）当前仍为内存态，SQLite 化为后续接入点
+- SQLite：Bun 内置 `bun:sqlite`，各 store 共享默认连接（懒加载单例），`PRAGMA foreign_keys=ON` 按连接开启。三张表主键均为应用层生成的 **UUIDv7**（时间有序，索引友好）：`novels`（小说信息，1 的根）；`characters` 与 worldviewSchema 对应（1:N，自增序 + `novel_id` 外键索引），角色确认后只增不改；`worldviews`（1:1，`novel_id` 唯一外键，upsert 覆盖更新，`taboos` 数组存 JSON 文本）。schema 变更用 `PRAGMA user_version` 版本号管理：不匹配即重建（开发期数据可弃，接入生产需改为正式迁移）。NovelState 整体（status/params/outline）当前仍为内存态，SQLite 化为后续接入点
 - deepseek-flash 对主角归一化存在改写漂移，已通过「强约束 prompt + 用户确认门」缓解（见 DECISIONS）

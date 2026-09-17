@@ -18,6 +18,7 @@ import { generateNovelId } from "../state/id";
 import { memoryNovelStateStore } from "../state/memory-store";
 import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
 import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
+import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
 import { saveOutline } from "../output/outline-writer";
 import { collectWorldview } from "./agents/worldview-agent";
 import { createCharacter } from "./agents/character-agent";
@@ -47,6 +48,8 @@ export interface CreateNovelOptions {
   characterStore?: CharacterStore;
   /** 世界观持久化 store；缺省用默认 SQLite store（data/novel.db） */
   worldviewStore?: WorldviewStore;
+  /** 小说信息持久化 store；缺省用默认 SQLite store（data/novel.db） */
+  novelStore?: NovelStore;
 }
 
 /**
@@ -59,6 +62,7 @@ export async function createNovel(options: CreateNovelOptions = {}): Promise<Nov
   const store = options.store ?? memoryNovelStateStore;
   const characterStore = options.characterStore ?? getDefaultCharacterStore();
   const worldviewStore = options.worldviewStore ?? getDefaultWorldviewStore();
+  const novelStore = options.novelStore ?? getDefaultNovelStore();
   const id = options.id ?? generateNovelId();
 
   console.log("📖 novel-agent —— 小说创作向导");
@@ -73,7 +77,12 @@ export async function createNovel(options: CreateNovelOptions = {}): Promise<Nov
 
   const createdAt = new Date().toISOString();
   await store.create({ id, status: "initializing", createdAt, updatedAt: createdAt });
-  console.log("✅ 新小说已初始化（state 尚为内存态，数据库接入后持久化）\n");
+  // novels 行必须先于角色/世界观入库（二者 novel_id 外键关联本表）；
+  // name 与 description 在大纲确认后回填
+  if (!novelStore.getNovel(id)) {
+    novelStore.createNovel({ id });
+  }
+  console.log("✅ 新小说已初始化（state 尚为内存态，novels 已入库，数据库接入后 state 整体持久化）\n");
 
   // 1. 类型
   const genre = await askSelect("【1/5】选择小说类型", GENRES, { allowCustom: true });
@@ -163,6 +172,8 @@ export async function createNovel(options: CreateNovelOptions = {}): Promise<Nov
   console.log(`\n🗂 大纲已保存：${savedPath}`);
 
   const finalState = await store.update(id, { status: "outlined", outline });
+  // 大纲确认后回填小说信息：name = 标题，description = 剧情梗概
+  novelStore.updateNovel(id, { name: outline.title, description: outline.logline });
   console.log(`\n✅ 小说《${outline.title}》初始化完成！创作 ID：${id}`);
   return finalState;
 }

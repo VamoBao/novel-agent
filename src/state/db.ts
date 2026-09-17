@@ -5,18 +5,44 @@ import { dirname } from "node:path";
 /** 数据库文件路径（相对项目根；可用环境变量 NOVEL_DB_PATH 覆盖，测试用） */
 export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
+/** schema 版本：结构变更时递增；不匹配时开发期直接重建（本地测试数据可弃） */
+const SCHEMA_VERSION = 2;
+
 /**
  * 打开（必要时创建）数据库并完成建表。
- * 表结构随功能演进在此追加；characters 表字段与 characterSchema 一一对应（平铺）。
+ * 三张表主键均为应用层生成的 UUIDv7（时间有序，索引友好）：
+ * - novels：小说信息（characters / worldviews 经 novel_id 外键关联）
+ * - characters：角色卡，1:N（novel_id 索引）
+ * - worldviews：世界观，1:1（novel_id 唯一），taboos 数组存 JSON 文本
  */
 export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
   mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path, { create: true });
   db.exec("PRAGMA journal_mode = WAL;");
+  // SQLite 外键约束默认关闭，必须按连接显式开启
+  db.exec("PRAGMA foreign_keys = ON;");
+
+  const versionRow = db.query("PRAGMA user_version").get() as { user_version: number };
+  if (versionRow.user_version !== SCHEMA_VERSION) {
+    db.exec("DROP TABLE IF EXISTS characters;");
+    db.exec("DROP TABLE IF EXISTS worldviews;");
+    db.exec("DROP TABLE IF EXISTS novels;");
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS novels (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      author TEXT,
+      description TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
   db.exec(`
     CREATE TABLE IF NOT EXISTS characters (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      novel_id TEXT NOT NULL,
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL REFERENCES novels(id),
       name TEXT NOT NULL,
       gender TEXT,
       appearance TEXT,
@@ -36,10 +62,10 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_characters_novel_id ON characters(novel_id);",
   );
-  // 世界观与小说 1:1：novel_id 直接作主键；taboos 为字符串数组，存 JSON 文本
   db.exec(`
     CREATE TABLE IF NOT EXISTS worldviews (
-      novel_id TEXT PRIMARY KEY,
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL UNIQUE REFERENCES novels(id),
       geography TEXT NOT NULL,
       fantasy_attributes TEXT,
       real_world_mapping TEXT,
@@ -48,6 +74,7 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       updated_at TEXT NOT NULL
     );
   `);
+  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
   return db;
 }
 

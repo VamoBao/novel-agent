@@ -8,10 +8,10 @@ function makeState(id: string): NovelState {
 }
 
 describe("generateNovelId", () => {
-  test("生成 UUID v4 格式的唯一 ID", () => {
+  test("生成 UUIDv7 格式的唯一 ID", () => {
     const a = generateNovelId();
     const b = generateNovelId();
-    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(a).not.toBe(b);
   });
 });
