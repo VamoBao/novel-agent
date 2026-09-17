@@ -2,8 +2,7 @@ import { tool } from "ai";
 import { runReactAgent } from "../../agents/react";
 import { outlineSchema, type Outline } from "../../schemas";
 import type { NovelParams } from "../../state/types";
-
-const SAVE_TOOL = "save_outline";
+import { askConfirm, askRequired } from "../../cli/prompt";
 
 const SYSTEM_PROMPT = `你是一名资深小说编辑与故事结构师。你的任务：基于给定的创作参数（类型、受众、世界观、角色、核心冲突）创作一本小说的大纲。
 
@@ -14,20 +13,41 @@ const SYSTEM_PROMPT = `你是一名资深小说编辑与故事结构师。你的
 4. 结构至少三幕（可更多），每一幕给出梗概与关键情节点；
 5. 标题要契合类型与调性，logline 用一句话讲清「谁+想要什么+障碍+代价」。
 
-完成后调用 save_outline 工具保存大纲（参数即最终大纲，必须严格符合 schema）。`;
+完成后调用 save_outline 工具保存大纲（参数即完整大纲，必须严格符合 schema）。save_outline 会把大纲的剧情梗概、主题、每一幕的名称与概述展示给用户确认：用户确认后保存完成；用户提出修改意见时，根据反馈调整大纲后重新调用 save_outline，直到用户确认为止。`;
+
+/** 确认视图：剧情梗概、主题、每幕名称与概述（详细情节点在保存后完整展示） */
+function printOutlineForConfirm(o: Outline): void {
+  console.log(`\n📖 大纲草稿：《${o.title}》`);
+  console.log(`  剧情梗概：${o.logline}`);
+  if (o.theme) console.log(`  主题：${o.theme}`);
+  for (const act of o.acts) {
+    console.log(`  ▶ ${act.name}：${act.summary}`);
+  }
+}
 
 /**
- * 大纲 Agent（ReAct）：基于初始化收集的创作参数生成小说大纲。
+ * 大纲 Agent（ReAct）：基于初始化收集的创作参数生成小说大纲，
+ * 经用户「确认 / 修改意见 → 调整 → 再确认」循环后才完成。
  */
 export async function createOutline(params: NovelParams): Promise<Outline> {
   let saved: Outline | undefined;
 
   const saveOutline = tool({
-    description: "大纲完成后调用此工具保存。参数即最终大纲，必须严格符合 schema。",
+    description:
+      "大纲完成后调用此工具保存。会把大纲的剧情梗概、主题、每幕名称与概述展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整大纲后重新调用。",
     inputSchema: outlineSchema,
     execute: async (outline) => {
-      saved = outline;
-      return "大纲已保存";
+      printOutlineForConfirm(outline);
+      if (await askConfirm("以上大纲是否确认？", true)) {
+        saved = outline;
+        return { ok: true as const };
+      }
+      const feedback = await askRequired("请说明大纲需要调整的地方> ");
+      return {
+        ok: false as const,
+        feedback,
+        note: "用户要求调整，请根据反馈修改大纲后重新调用 save_outline",
+      };
     },
   });
 
@@ -35,9 +55,11 @@ export async function createOutline(params: NovelParams): Promise<Outline> {
     system: SYSTEM_PROMPT,
     prompt: `创作参数如下（JSON）：\n${JSON.stringify(params, null, 2)}`,
     tools: { save_outline: saveOutline },
-    stopTool: SAVE_TOOL,
-    maxSteps: 8,
+    // 不设 stopTool：save_outline 可能被用户否决（需继续修订），
+    // hasToolCall 会在工具被调用时无条件停止，无法表达「提交被拒需继续」
+    maxSteps: 12,
     isDone: () => saved !== undefined,
+    continuationHint: "请立即调用 save_outline 工具保存大纲（参数为完整大纲），不要只输出文本。",
   });
 
   if (!saved) {

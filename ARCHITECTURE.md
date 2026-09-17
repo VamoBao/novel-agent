@@ -52,14 +52,16 @@ src/
 5. **世界观**：独立 ReAct Agent（`worldview-agent`）——ask_user 工具多轮追问 → submit_worldview 终态提交（schema 校验）
 6. **角色**：独立 ReAct Agent（`character-agent`）——字段协议驱动（13 个扁平字段映射到角色卡 schema）：`ask_user` 征集文本 → `save_field` 逐字段「概括总结 → 用户确认 → 保存」（确认与反馈在工具 execute 内代码强制）→ 必填字段（姓名、内核三维、背景、创作目的、结局方向）齐全后 `submit_character` 组装整卡并**展示给用户做最终确认**（用户确认无补充才结束；有反馈则处理后重新提交），组装由代码完成并过 schema 校验（杜绝模型漂移）；外层循环支持多角色，约束至少一名主角；内核/背景/创作目的/结局方向为生成后固定不变的属性
 7. **核心冲突**：自由文本 → generateObject 归一化（由来/影响/理想解决）
-8. **大纲**：ReAct Agent（`outline-agent`）基于全部参数生成 ≥3 幕结构大纲 → save_outline 保存 → 按 ID 落盘 `output/<id>.json`（`outline-writer`）
+8. **大纲**：ReAct Agent（`outline-agent`）基于全部参数生成大纲 → `save_outline` 内展示「剧情梗概、主题、每幕名称与概述」请用户确认——确认无修改才完成；有修改意见则按反馈调整后重新提交确认（循环），完成后按 ID 落盘 `output/<id>.json`（`outline-writer`）
 9. 全程通过 `NovelStateStore` 更新 state（initializing → gathering → outlined）
 
 ## ReAct 终态工具模式（src/agents/react.ts）
 
 - `runReactAgent` 封装 `generateText({ tools, stopWhen })`
 - 调用方定义携带 zod schema 的「终态工具」（submit_worldview / save_outline），execute 闭包记录结果
-- `stopWhen: [hasToolCall(终态工具), stepCountIs(maxSteps)]` 双保险停止
+- 两种停止策略，按终态工具是否可能「被用户否决」选择：
+  - 提交不会被否决的 Agent（worldview）：`stopWhen: [hasToolCall(终态工具), stepCountIs(maxSteps)]`
+  - 终态工具内含用户最终确认、可能被拒需继续修订的 Agent（character / outline）：不设 stopTool，靠 `isDone` 判定 + maxSteps 兜底（hasToolCall 在工具被调用时无条件停止，无法表达「提交被拒需继续」）
 - 续跑机制：传入 `isDone` 后，循环自然结束但终态未达成时（弱模型偶发「宣告调用工具却只输出文本」），自动注入提醒消息并携带完整对话历史续跑（默认 1 次）
 - 优点：结果天然过 schema 校验；无需解析 toolResults 结构
 
