@@ -78,22 +78,23 @@ export function assembleCharacter(
   });
 }
 
-/** 打印完整角色卡（submit 最终确认时展示） */
-function printCharacterCard(c: Character): void {
-  console.log(`\n📝 角色卡汇总：`);
-  console.log(
+/** 格式化完整角色卡（拼入 submit 最终确认提示，随提问原子出现） */
+function formatCharacterCard(c: Character): string {
+  const lines = [
+    `📝 角色卡汇总：`,
     `  👤 ${c.basicInfo.name}（${c.core.narrativeRole}${c.basicInfo.gender ? `，${c.basicInfo.gender}` : ""}）`,
-  );
-  if (c.basicInfo.appearance) console.log(`     外貌：${c.basicInfo.appearance}`);
-  console.log(`     渴望：${c.core.desire}`);
-  console.log(`     恐惧：${c.core.fear}`);
-  console.log(`     背景：${c.background}`);
-  if (c.personality) console.log(`     性格：${c.personality}`);
-  if (c.characterGoal) console.log(`     角色目的：${c.characterGoal}`);
-  console.log(`     创作目的：${c.creationPurpose}`);
-  if (c.trajectory) console.log(`     轨迹：${c.trajectory}`);
-  console.log(`     结局方向：${c.endingDirection}`);
-  if (c.relationships) console.log(`     关系：${c.relationships}`);
+  ];
+  if (c.basicInfo.appearance) lines.push(`     外貌：${c.basicInfo.appearance}`);
+  lines.push(`     渴望：${c.core.desire}`);
+  lines.push(`     恐惧：${c.core.fear}`);
+  lines.push(`     背景：${c.background}`);
+  if (c.personality) lines.push(`     性格：${c.personality}`);
+  if (c.characterGoal) lines.push(`     角色目的：${c.characterGoal}`);
+  lines.push(`     创作目的：${c.creationPurpose}`);
+  if (c.trajectory) lines.push(`     轨迹：${c.trajectory}`);
+  lines.push(`     结局方向：${c.endingDirection}`);
+  if (c.relationships) lines.push(`     关系：${c.relationships}`);
+  return lines.join("\n");
 }
 
 const SYSTEM_PROMPT = `你是一名专业的小说角色策划。你的任务：通过与用户多轮对话，为一名新角色完成结构化角色卡。
@@ -155,8 +156,10 @@ export async function createCharacter(
         .describe("基于用户输入概括总结的内容，将原样保存到该字段"),
     }),
     execute: async ({ field, summary }) => {
-      console.log(`\n📋 【${FIELD_SPECS[field].label}】${summary}`);
-      if (await askConfirm("确认保存该字段？", true)) {
+      const label = FIELD_SPECS[field].label;
+      // 摘要拼入确认提示：并发调用 save_field 时提示语按队列顺序逐个出现，
+      // 摘要与提问原子绑定，用户始终知道自己在确认哪个字段
+      if (await askConfirm(`\n📋 【${label}】${summary}\n确认保存该字段？`, true)) {
         record[field] = summary;
         return {
           ok: true as const,
@@ -164,7 +167,9 @@ export async function createCharacter(
           missingRequired: missingRequiredFields(record),
         };
       }
-      const feedback = await askOptional("请说明需要调整的地方（直接回车表示放弃本次保存）> ");
+      const feedback = await askOptional(
+        `请说明【${label}】需要调整的地方（直接回车表示放弃本次保存）> `,
+      );
       if (feedback.length === 0) {
         return { ok: false as const, field, note: "用户放弃本次保存" };
       }
@@ -182,8 +187,7 @@ export async function createCharacter(
         return { ok: false as const, missing, note: "请继续用 ask_user 补全上述字段" };
       }
       const assembled = assembleCharacter(record);
-      printCharacterCard(assembled);
-      if (await askConfirm("以上角色卡是否确认完成？", true)) {
+      if (await askConfirm(`\n${formatCharacterCard(assembled)}\n以上角色卡是否确认完成？`, true)) {
         submitted = assembled;
         return { ok: true as const };
       }

@@ -10,6 +10,8 @@ src/
 ├── cli/
 │   └── prompt.ts         # 交互输入原语（askLine/askSelect/askMultiSelect/askConfirm）
 │                         #   TTY → node:readline；管道/文件 → 自维护行缓冲（见 DECISIONS）
+│                         #   并发读取自动串行化：FIFO 排队，提示语轮到时才写入，
+│                         #   兼容 ReAct Agent 一步内并行调用多个需用户确认的工具
 ├── schemas/              # zod schema 层：worldview / character / conflict / outline / audience
 ├── providers/
 │   └── deepseek.ts       # LLM 接入层：DeepSeek provider 实例与 model 导出

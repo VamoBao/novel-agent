@@ -15,14 +15,14 @@ const SYSTEM_PROMPT = `你是一名资深小说编辑与故事结构师。你的
 
 完成后调用 save_outline 工具保存大纲（参数即完整大纲，必须严格符合 schema）。save_outline 会把大纲的剧情梗概、主题、每一幕的名称与概述展示给用户确认：用户确认后保存完成；用户提出修改意见时，根据反馈调整大纲后重新调用 save_outline，直到用户确认为止。`;
 
-/** 确认视图：剧情梗概、主题、每幕名称与概述（详细情节点在保存后完整展示） */
-function printOutlineForConfirm(o: Outline): void {
-  console.log(`\n📖 大纲草稿：《${o.title}》`);
-  console.log(`  剧情梗概：${o.logline}`);
-  if (o.theme) console.log(`  主题：${o.theme}`);
+/** 确认视图：剧情梗概、主题、每幕名称与概述（拼入确认提示原子出现；详细情节点在保存后完整展示） */
+function formatOutlineForConfirm(o: Outline): string {
+  const lines = [`📖 大纲草稿：《${o.title}》`, `  剧情梗概：${o.logline}`];
+  if (o.theme) lines.push(`  主题：${o.theme}`);
   for (const act of o.acts) {
-    console.log(`  ▶ ${act.name}：${act.summary}`);
+    lines.push(`  ▶ ${act.name}：${act.summary}`);
   }
+  return lines.join("\n");
 }
 
 /**
@@ -37,8 +37,7 @@ export async function createOutline(params: NovelParams): Promise<Outline> {
       "大纲完成后调用此工具保存。会把大纲的剧情梗概、主题、每幕名称与概述展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整大纲后重新调用。",
     inputSchema: outlineSchema,
     execute: async (outline) => {
-      printOutlineForConfirm(outline);
-      if (await askConfirm("以上大纲是否确认？", true)) {
+      if (await askConfirm(`\n${formatOutlineForConfirm(outline)}\n以上大纲是否确认？`, true)) {
         saved = outline;
         return { ok: true as const };
       }

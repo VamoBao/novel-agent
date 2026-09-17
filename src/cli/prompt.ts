@@ -14,34 +14,84 @@ interface LineSource {
   close(): void;
 }
 
+interface QueueItem {
+  prompt: string;
+  resolve: (line: string | null) => void;
+}
+
+/**
+ * 串行行读取基类：并发读取（如 ReAct Agent 一步内并行调用多个工具、
+ * 每个工具都等用户确认）时按 FIFO 排队，且提示语在轮到自己时才写入，
+ * 保证用户在终端「依次确认」，同时只存在一个未完成的提问。
+ */
+abstract class SerialLineSource {
+  private readonly queue: QueueItem[] = [];
+  private active = false;
+
+  readLine(prompt: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      this.queue.push({ prompt, resolve });
+      this.pump();
+    });
+  }
+
+  protected pump(): void {
+    if (this.active) return;
+    const next = this.queue.shift();
+    if (!next) return;
+    this.active = true;
+    this.readOne(next.prompt)
+      .catch(() => null)
+      .then((line) => {
+        this.active = false;
+        next.resolve(line);
+        this.pump();
+      });
+  }
+
+  /** 读取一行；提示语必须在此方法内写入（而非 readLine 入队时） */
+  protected abstract readOne(prompt: string): Promise<string | null>;
+
+  /** 流关闭时把队列中等待的读取全部以 null 收尾（resolve 幂等，安全） */
+  protected abortAll(): void {
+    while (this.queue.length > 0) {
+      this.queue.shift()?.resolve(null);
+    }
+  }
+}
+
 /**
  * TTY 交互模式：node:readline 提供行编辑、回显与 Ctrl+D 支持。
+ * readline 的 question 同时只允许一个未完成回调（后调覆盖前调），
+ * 串行化后天然规避该限制。
  */
-class TtyLineSource implements LineSource {
+class TtyLineSource extends SerialLineSource implements LineSource {
   private readonly rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
   private closed = false;
-  private pendingResolve: ((answer: string | null) => void) | null = null;
+  private pending: ((line: string | null) => void) | null = null;
 
   constructor() {
+    super();
     this.rl.on("close", () => {
       this.closed = true;
-      this.pendingResolve?.(null);
-      this.pendingResolve = null;
+      this.pending?.(null);
+      this.pending = null;
+      this.abortAll();
     });
   }
 
-  readLine(prompt: string): Promise<string | null> {
+  protected readOne(prompt: string): Promise<string | null> {
     return new Promise((resolve) => {
       if (this.closed) {
         resolve(null);
         return;
       }
-      this.pendingResolve = resolve;
+      this.pending = resolve;
       this.rl.question(prompt, (answer) => {
-        this.pendingResolve = null;
+        this.pending = null;
         resolve(answer.trim());
       });
     });
@@ -55,15 +105,16 @@ class TtyLineSource implements LineSource {
 /**
  * 管道/文件输入模式（脚本喂入、自动化验证）。
  * Bun 的 node:readline 在管道下会在两次 question 之间丢弃缓冲并关闭，
- * 因此这里自行按行缓冲 stdin，保证多段提问能顺序消费全部输入。
+ * 因此这里自行按行缓冲 stdin。
  */
-class PipedLineSource implements LineSource {
+class PipedLineSource extends SerialLineSource implements LineSource {
   private readonly lines: string[] = [];
-  private readonly waiters: Array<(line: string | null) => void> = [];
   private partial = "";
   private eof = false;
+  private notify: (() => void) | null = null;
 
   constructor(private readonly stream: NodeJS.ReadableStream) {
+    super();
     stream.setEncoding("utf8");
     stream.on("data", (chunk: string) => this.onData(chunk));
     stream.on("end", () => this.onEof());
@@ -89,23 +140,24 @@ class PipedLineSource implements LineSource {
   }
 
   private wake(): void {
-    while (this.waiters.length > 0 && (this.lines.length > 0 || this.eof)) {
-      const waiter = this.waiters.shift();
-      if (!waiter) break;
-      const line = this.lines.length > 0 ? this.lines.shift() : null;
-      waiter(line ?? null);
-    }
+    const n = this.notify;
+    this.notify = null;
+    n?.();
   }
 
-  readLine(prompt: string): Promise<string | null> {
+  protected async readOne(prompt: string): Promise<string | null> {
     process.stdout.write(prompt);
-    if (this.lines.length > 0 || this.eof) {
-      const line = this.lines.length > 0 ? this.lines.shift() : null;
-      return Promise.resolve(line ?? null);
+    for (;;) {
+      if (this.lines.length > 0) {
+        return this.lines.shift() ?? null;
+      }
+      if (this.eof) {
+        return null;
+      }
+      await new Promise<void>((resolve) => {
+        this.notify = resolve;
+      });
     }
-    return new Promise((resolve) => {
-      this.waiters.push(resolve);
-    });
   }
 
   close(): void {
@@ -113,6 +165,7 @@ class PipedLineSource implements LineSource {
     // 必须销毁流：打开的 stdin 数据监听会挂住事件循环，导致工作流完成后进程无法退出
     //（NodeJS.ReadableStream 类型上无 destroy，运行时存在）
     (this.stream as { destroy?: () => void }).destroy?.();
+    this.abortAll();
   }
 }
 
@@ -195,7 +248,7 @@ export async function askMultiSelect(
   }
 }
 
-/** 是/否确认；直接回车取默认值 */
+/** 是/否确认；直接回车取默认值。展示类内容请直接拼进 prompt，确保与提问原子出现 */
 export async function askConfirm(prompt: string, defaultValue = true): Promise<boolean> {
   const hint = defaultValue ? "Y/n" : "y/N";
   for (;;) {
