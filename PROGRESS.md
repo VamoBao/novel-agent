@@ -4,6 +4,7 @@
 
 ## 已完成
 
+- 2026-09-17 [feat] 世界观按 schema 入库：新增 `worldviews` 表（与 characters 分表，1:1，novel_id 主键，taboos 存 JSON 文本），WorldviewStore upsert/get + 读写双向 zod 校验；各 store 共享懒加载数据库连接；世界观确认后即入库。AC：typecheck/lint/test 通过（34 用例：往返/upsert 覆盖与 created_at 保留/可选字段/分表隔离）；端到端真实 LLM 验证（《地脉长歌》世界观绑定创作 ID，taboos 4 条 JSON 往返正确）
 - 2026-09-17 [feat] 新增 SQLite 持久化（Bun 内置 bun:sqlite，`data/novel.db`，路径可用 `NOVEL_DB_PATH` 覆盖）：characters 表按 characterSchema 平铺字段，角色卡确认后按创作 ID 增量入库（CharacterStore，读写双向 zod 校验）。AC：typecheck/lint/test 通过（29 用例，含重开库持久化/多 ID 隔离/可选字段往返）；端到端真实 LLM 验证库内角色绑定创作 ID 且字段完整
 - 2026-09-17 [fix] 解决 save_field 并行调用时无法依次确认的问题：prompt.ts 引入 SerialLineSource 串行队列（FIFO、提示语轮到时才写），同时修复 TTY 模式下 readline.question 回调槽被并发覆盖导致的确认挂起；字段摘要/角色卡/大纲确认视图拼入确认提示原子出现，反馈提示带字段标签。AC：隔离测试（时间戳验证 B 提示仅在 A 应答后出现、应答按序映射）+ 端到端真实 LLM 验证（《九州残脉》，逐字段成对确认、修订回路走通、自然退出）
 - 2026-09-17 [feat] 大纲增加用户确认循环：save_outline 升级最终确认门，展示剧情梗概/主题/每幕名称与概述，用户确认无修改才落盘；有修改意见按反馈调整后重新确认（循环）。outline Agent 去掉 stopTool 改 isDone 模式（hasToolCall 无法表达「提交被拒需继续修订」），maxSteps 提至 12。AC：typecheck/lint/test 通过（25 用例）；端到端真实 LLM 验证含完整「拒绝→按反馈修订→再确认」回路（《逆脉》，第一幕按要求从铺垫改为冲突切入后落盘）

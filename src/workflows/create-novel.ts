@@ -17,6 +17,7 @@ import type { NovelParams, NovelState, NovelStateStore } from "../state/types";
 import { generateNovelId } from "../state/id";
 import { memoryNovelStateStore } from "../state/memory-store";
 import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
+import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
 import { saveOutline } from "../output/outline-writer";
 import { collectWorldview } from "./agents/worldview-agent";
 import { createCharacter } from "./agents/character-agent";
@@ -44,6 +45,8 @@ export interface CreateNovelOptions {
   store?: NovelStateStore;
   /** 角色持久化 store；缺省用默认 SQLite store（data/novel.db） */
   characterStore?: CharacterStore;
+  /** 世界观持久化 store；缺省用默认 SQLite store（data/novel.db） */
+  worldviewStore?: WorldviewStore;
 }
 
 /**
@@ -55,6 +58,7 @@ export interface CreateNovelOptions {
 export async function createNovel(options: CreateNovelOptions = {}): Promise<NovelState> {
   const store = options.store ?? memoryNovelStateStore;
   const characterStore = options.characterStore ?? getDefaultCharacterStore();
+  const worldviewStore = options.worldviewStore ?? getDefaultWorldviewStore();
   const id = options.id ?? generateNovelId();
 
   console.log("📖 novel-agent —— 小说创作向导");
@@ -98,6 +102,9 @@ export async function createNovel(options: CreateNovelOptions = {}): Promise<Nov
   console.log("\n🌍 世界观 Agent 启动，将与你多轮确认世界观…");
   const worldview = await collectWorldview(initialWorldview);
   printWorldview(worldview);
+  // 世界观确认后按创作 ID 入库（upsert）
+  worldviewStore.saveWorldview(id, worldview);
+  console.log("🌍 世界观已入库");
 
   // 4. 角色设定（ReAct Agent 逐字段确认，至少一名主角）
   console.log("\n【4/5】角色设定");

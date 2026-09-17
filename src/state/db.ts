@@ -36,5 +36,25 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_characters_novel_id ON characters(novel_id);",
   );
+  // 世界观与小说 1:1：novel_id 直接作主键；taboos 为字符串数组，存 JSON 文本
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS worldviews (
+      novel_id TEXT PRIMARY KEY,
+      geography TEXT NOT NULL,
+      fantasy_attributes TEXT,
+      real_world_mapping TEXT,
+      taboos TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
   return db;
+}
+
+let defaultDb: Database | undefined;
+
+/** 默认全局数据库连接（懒加载：避免模块导入即建库文件；各 store 共享） */
+export function getDefaultDatabase(): Database {
+  defaultDb ??= openDatabase();
+  return defaultDb;
 }

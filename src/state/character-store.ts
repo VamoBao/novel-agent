@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { characterSchema, type Character } from "../schemas";
-import { DEFAULT_DB_PATH, openDatabase } from "./db";
+import { DEFAULT_DB_PATH, getDefaultDatabase, openDatabase } from "./db";
 
 /** 数据库中的角色记录：角色卡 + 库表元信息 */
 export interface StoredCharacter {
@@ -73,7 +73,8 @@ function rowToCharacter(row: CharacterRow): Character {
  * 内核/背景/创作目的/结局方向为固定属性，角色确认后只增不改。
  */
 export class CharacterStore {
-  private constructor(private readonly db: Database) {}
+  /** 共享数据库连接构造（与其他 store 同库不同表） */
+  constructor(private readonly db: Database) {}
 
   static open(path: string = DEFAULT_DB_PATH): CharacterStore {
     return new CharacterStore(openDatabase(path));
@@ -128,8 +129,8 @@ export class CharacterStore {
 
 let defaultStore: CharacterStore | undefined;
 
-/** 默认全局 store（懒加载：避免模块导入即建库文件） */
+/** 默认全局 store（懒加载，与其他 store 共享默认数据库连接） */
 export function getDefaultCharacterStore(): CharacterStore {
-  defaultStore ??= CharacterStore.open();
+  defaultStore ??= new CharacterStore(getDefaultDatabase());
   return defaultStore;
 }

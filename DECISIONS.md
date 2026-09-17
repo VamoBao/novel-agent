@@ -2,6 +2,15 @@
 
 记录「为什么」而非「做了什么」：决策背景、备选方案、权衡依据与最终结论。
 
+## 2026-09-17 worldviews 表 1:1 主键 + taboos JSON 列 + store 共享连接
+
+- **背景**：世界观也要按 schema 入库并与角色分表、按创作 ID 绑定。
+- **设计要点**：
+  - 世界观与小说是 1:1（一本小说一个世界观），`novel_id` 直接作主键；与角色的 1:N（自增 id + novel_id 索引）区分
+  - `taboos` 为字符串数组，SQLite 无数组类型，存 JSON 文本（读写经 schema 校验保证结构正确）
+  - 保存语义为 upsert（覆盖更新、created_at 保留）——世界观可能经用户确认后修订重存
+  - 两个 store 共享 `getDefaultDatabase()` 懒加载单例连接（同库不同表），避免多连接；测试用 `static open(path)` 独立建库隔离
+
 ## 2026-09-17 角色持久化采用 Bun 内置 bun:sqlite，characters 表按 schema 平铺
 
 - **背景**：角色卡确认后需要持久化并绑定创作 ID，为后续「按 ID 恢复继续创作」打基础。
