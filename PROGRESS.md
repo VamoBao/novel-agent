@@ -4,6 +4,7 @@
 
 ## 已完成
 
+- 2026-09-17 [feat] submit_character 升级为最终确认门：必填字段齐全后组装整卡展示给用户确认，确认无补充才赋值 submitted 结束循环，有反馈则带反馈继续处理并重新提交；角色卡汇总打印移入 character-agent，编排层改单行确认输出。AC：typecheck/lint/test 通过（25 用例）；自适应驱动端到端真实 LLM 验证成功（《卷动九州》，整卡确认环节走通，进程自然退出）
 - 2026-09-16 [feat] 角色卡结构重设计（基本信息/内核三维/背景/性格/角色目的/创作目的/轨迹/结局方向/关系，其中内核、背景、创作目的、结局方向为固定必填）；角色创建改为 ReAct Agent 循环：save_field 逐字段「概括→用户确认→保存」+ submit_character 代码组装过 schema（杜绝模型改写漂移）；ask-user 改工厂函数支持 Agent 标签；ReAct 运行器新增续跑机制（弱模型只宣告不调用工具时自动提醒续跑）；修复 PipedLineSource 未销毁 stdin 导致完成后进程挂住的问题。AC：typecheck/lint/test 通过（25 用例）；自适应驱动端到端真实 LLM 验证成功（《灵脉破晓》，角色卡要素完整流入大纲）
 - 2026-09-15 [feat] 大纲生成后按创作 ID 保存到 `output/<id>.json`（outline-writer，含 id 文件名安全校验；output/ 内容被 gitignore，保留 .gitkeep）。AC：typecheck/lint/test 通过（19 用例）；端到端真实 LLM 验证落盘成功（5 幕 26 情节点，JSON 过 schema 校验）
 - 2026-09-15 [feat] 完成小说创作工作流编排：createNovel 主流程（UUID 生成 → state 初始化 → 类型/受众/世界观/主角/核心冲突收集 → 大纲生成）；世界观 ReAct Agent（ask_user 多轮追问 + submit_worldview 终态提交）；大纲 ReAct Agent（save_outline）；通用 ReAct 运行器；CLI 双模式交互输入。AC：typecheck/lint/test 通过（15 用例）；两次端到端真实 LLM 验证全流程走通（《回声之蚀》《拾光书坊》）

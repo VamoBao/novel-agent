@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { runReactAgent } from "../../agents/react";
 import { createAskUserTool } from "../../tools";
-import { askConfirm, askOptional } from "../../cli/prompt";
+import { askConfirm, askOptional, askRequired } from "../../cli/prompt";
 import { characterSchema, type Character } from "../../schemas";
 
 /**
@@ -78,6 +78,24 @@ export function assembleCharacter(
   });
 }
 
+/** 打印完整角色卡（submit 最终确认时展示） */
+function printCharacterCard(c: Character): void {
+  console.log(`\n📝 角色卡汇总：`);
+  console.log(
+    `  👤 ${c.basicInfo.name}（${c.core.narrativeRole}${c.basicInfo.gender ? `，${c.basicInfo.gender}` : ""}）`,
+  );
+  if (c.basicInfo.appearance) console.log(`     外貌：${c.basicInfo.appearance}`);
+  console.log(`     渴望：${c.core.desire}`);
+  console.log(`     恐惧：${c.core.fear}`);
+  console.log(`     背景：${c.background}`);
+  if (c.personality) console.log(`     性格：${c.personality}`);
+  if (c.characterGoal) console.log(`     角色目的：${c.characterGoal}`);
+  console.log(`     创作目的：${c.creationPurpose}`);
+  if (c.trajectory) console.log(`     轨迹：${c.trajectory}`);
+  console.log(`     结局方向：${c.endingDirection}`);
+  if (c.relationships) console.log(`     关系：${c.relationships}`);
+}
+
 const SYSTEM_PROMPT = `你是一名专业的小说角色策划。你的任务：通过与用户多轮对话，为一名新角色完成结构化角色卡。
 
 角色卡字段（field 名 → 说明，标★为必填）：
@@ -100,7 +118,7 @@ const SYSTEM_PROMPT = `你是一名专业的小说角色策划。你的任务：
 2. 已有信息的字段：用一两句话概括总结（严禁改写姓名/身份等用户明确给出的信息，不得虚构）后调用 save_field 保存；
 3. 缺失的必填字段：用 ask_user 向用户征集文本，一次只问一个字段，问题要具体；
 4. save_field 会把总结展示给用户确认：用户给出调整意见时，按反馈修正后重新保存该字段；用户放弃则跳过（仅可选字段可跳过）；
-5. 所有必填字段均确认保存后，调用 submit_character 提交；提交会返回缺少的字段，继续补全即可；
+5. 所有必填字段均确认保存后，调用 submit_character 提交——工具会把完整角色卡展示给用户做最终确认：用户确认后角色创建结束；用户提出补充或调整意见时，用 ask_user / save_field 处理该反馈后再次调用 submit_character；
 6. 可选字段：用户提及即可保存；用户未提及且非关键时可留空，不要反复纠缠。
 
 原则：
@@ -156,15 +174,25 @@ export async function createCharacter(
 
   const submitCharacter = tool({
     description:
-      "所有必填字段（姓名、核心渴望、核心恐惧、叙事定位、背景、创作目的、结局方向）均确认保存后调用，结束本角色的创建。",
+      "所有必填字段（姓名、核心渴望、核心恐惧、叙事定位、背景、创作目的、结局方向）均确认保存后调用。会把完整角色卡展示给用户做最终确认：用户确认完成后角色创建结束；用户提出补充或调整意见时，需用 ask_user / save_field 处理后再次调用。",
     inputSchema: z.object({}),
     execute: async () => {
       const missing = missingRequiredFields(record);
       if (missing.length > 0) {
         return { ok: false as const, missing, note: "请继续用 ask_user 补全上述字段" };
       }
-      submitted = assembleCharacter(record);
-      return { ok: true as const };
+      const assembled = assembleCharacter(record);
+      printCharacterCard(assembled);
+      if (await askConfirm("以上角色卡是否确认完成？", true)) {
+        submitted = assembled;
+        return { ok: true as const };
+      }
+      const feedback = await askRequired("请说明需要补充或调整的内容> ");
+      return {
+        ok: false as const,
+        feedback,
+        note: "用户要求调整，请处理该反馈后重新提交",
+      };
     },
   });
 

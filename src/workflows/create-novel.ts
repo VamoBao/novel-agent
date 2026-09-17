@@ -118,7 +118,9 @@ export async function createNovel(options: CreateNovelOptions = {}): Promise<Nov
     console.log("\n🧙 角色 Agent 启动（逐字段确认角色卡）…");
     const character = await createCharacter(description, characters);
     characters.push(character);
-    printCharacter(character);
+    console.log(
+      `\n✅ 角色已确认：${character.basicInfo.name}（${character.core.narrativeRole}）`,
+    );
   }
 
   // 5. 核心冲突（自由文本 → schema 归一化）
@@ -162,23 +164,6 @@ function printWorldview(wv: Worldview): void {
     console.log(`  现实映射：${wv.background.realWorldMapping}`);
   }
   console.log(`  禁忌：${wv.taboos.join("；")}`);
-}
-
-function printCharacter(c: Character): void {
-  console.log(`\n✅ 角色卡已确认：`);
-  console.log(
-    `  👤 ${c.basicInfo.name}（${c.core.narrativeRole}${c.basicInfo.gender ? `，${c.basicInfo.gender}` : ""}）`,
-  );
-  if (c.basicInfo.appearance) console.log(`     外貌：${c.basicInfo.appearance}`);
-  console.log(`     渴望：${c.core.desire}`);
-  console.log(`     恐惧：${c.core.fear}`);
-  console.log(`     背景：${c.background}`);
-  if (c.personality) console.log(`     性格：${c.personality}`);
-  if (c.characterGoal) console.log(`     角色目的：${c.characterGoal}`);
-  console.log(`     创作目的：${c.creationPurpose}`);
-  if (c.trajectory) console.log(`     轨迹：${c.trajectory}`);
-  console.log(`     结局方向：${c.endingDirection}`);
-  if (c.relationships) console.log(`     关系：${c.relationships}`);
 }
 
 function printConflict(c: CoreConflict): void {
