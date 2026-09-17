@@ -77,10 +77,18 @@ export async function createNovel(options: CreateNovelOptions = {}): Promise<Nov
 
   const createdAt = new Date().toISOString();
   await store.create({ id, status: "initializing", createdAt, updatedAt: createdAt });
+
+  // 小说命名（可选）：未想好可跳过，后续以大纲标题命名
+  console.log("\n📝 小说命名（可选）");
+  const novelNameInput = await askOptional(
+    "请输入小说名称（未想好直接回车跳过，后续将以大纲标题命名）> ",
+  );
+  const novelName = novelNameInput.length > 0 ? novelNameInput : undefined;
+
   // novels 行必须先于角色/世界观入库（二者 novel_id 外键关联本表）；
-  // name 与 description 在大纲确认后回填
+  // description 在大纲确认后回填
   if (!novelStore.getNovel(id)) {
-    novelStore.createNovel({ id });
+    novelStore.createNovel({ id, name: novelName });
   }
   console.log("✅ 新小说已初始化（state 尚为内存态，novels 已入库，数据库接入后 state 整体持久化）\n");
 
@@ -164,7 +172,7 @@ export async function createNovel(options: CreateNovelOptions = {}): Promise<Nov
 
   // 大纲（ReAct Agent）
   console.log("\n🛠 大纲 Agent 启动…");
-  const outline = await createOutline(params);
+  const outline = await createOutline(params, novelName);
   printOutline(outline);
 
   // 大纲按创作 ID 落盘到 output/
@@ -172,9 +180,13 @@ export async function createNovel(options: CreateNovelOptions = {}): Promise<Nov
   console.log(`\n🗂 大纲已保存：${savedPath}`);
 
   const finalState = await store.update(id, { status: "outlined", outline });
-  // 大纲确认后回填小说信息：name = 标题，description = 剧情梗概
-  novelStore.updateNovel(id, { name: outline.title, description: outline.logline });
-  console.log(`\n✅ 小说《${outline.title}》初始化完成！创作 ID：${id}`);
+  // 大纲确认后回填：description = 剧情梗概；name 仅在用户未命名时以大纲标题回填
+  novelStore.updateNovel(id, {
+    ...(novelName ? {} : { name: outline.title }),
+    description: outline.logline,
+  });
+  const finalName = novelName ?? outline.title;
+  console.log(`\n✅ 小说《${finalName}》初始化完成！创作 ID：${id}`);
   return finalState;
 }
 

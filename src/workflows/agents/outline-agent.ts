@@ -28,8 +28,12 @@ function formatOutlineForConfirm(o: Outline): string {
 /**
  * 大纲 Agent（ReAct）：基于初始化收集的创作参数生成小说大纲，
  * 经用户「确认 / 修改意见 → 调整 → 再确认」循环后才完成。
+ * novelTitle 为用户已命名的书名时，大纲标题必须沿用该书名。
  */
-export async function createOutline(params: NovelParams): Promise<Outline> {
+export async function createOutline(
+  params: NovelParams,
+  novelTitle?: string,
+): Promise<Outline> {
   let saved: Outline | undefined;
 
   const saveOutline = tool({
@@ -52,7 +56,12 @@ export async function createOutline(params: NovelParams): Promise<Outline> {
 
   const result = await runReactAgent({
     system: SYSTEM_PROMPT,
-    prompt: `创作参数如下（JSON）：\n${JSON.stringify(params, null, 2)}`,
+    prompt: [
+      `创作参数如下（JSON）：\n${JSON.stringify(params, null, 2)}`,
+      ...(novelTitle
+        ? [`小说已由用户命名为《${novelTitle}》，大纲的 title 字段必须使用该名称。`]
+        : []),
+    ].join("\n\n"),
     tools: { save_outline: saveOutline },
     // 不设 stopTool：save_outline 可能被用户否决（需继续修订），
     // hasToolCall 会在工具被调用时无条件停止，无法表达「提交被拒需继续」
