@@ -4,6 +4,7 @@
 
 ## 已完成
 
+- 2026-09-18 [feat] 大纲生成前询问幕数（askInt 新原语：范围校验 + 回车默认值），默认 5 幕（3-20）；幕数经 outlineSchemaForActs（refine）在 save_outline 入参层强校验，恰好 N 幕，模型给错被 schema 拒绝重试，不依赖模型自觉。AC：typecheck/lint/test 通过（46 用例）；端到端真实 LLM 验证指定 4 幕 → 大纲恰好 4 幕（夺卷/亡命/锁脉/共济）
 - 2026-09-17 [feat] 创建流程新增可选命名步骤：ID 生成后、大纲前询问小说名称（回车跳过）；已命名时 novels.name 即用户名且大纲 title 强制沿用，未命名维持原行为（大纲确认后以标题回填）。AC：typecheck/lint/test 通过（43 用例）；端到端真实 LLM 验证用户命名路径（novels.name=灵脉遗孤 未被覆盖，大纲标题沿用书名）
 - 2026-09-17 [refactor] UUIDv7 生成切换为 Bun 原生 `Bun.randomUUIDv7()`（同毫秒内单调递增，优于自实现的纯随机段），保留 generateUuidV7 函数壳作唯一出口；测试改为时间戳区间断言 + 200 轮连续单调断言。AC：typecheck/lint/test 通过（43 用例）
 - 2026-09-17 [feat] 新增 novels 表（id/name/author/description）：全部表主键改为 UUIDv7（时间有序，node randomUUID 仅 v4）；characters/worldviews 的 novel_id 外键关联 novels.id（PRAGMA foreign_keys=ON，novels 行先于二者入库，name/description 大纲确认后回填）；schema 用 PRAGMA user_version 版本管理（不匹配重建，开发期）。AC：typecheck/lint/test 通过（43 用例：v7 格式/时间戳嵌入/外键约束/novels CRUD）；端到端真实 LLM 验证三表外键精确匹配、foreign_key_check 零违规（《灵脉无主》）

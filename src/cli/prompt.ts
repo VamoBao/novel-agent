@@ -259,3 +259,19 @@ export async function askConfirm(prompt: string, defaultValue = true): Promise<b
     console.log("请输入 y 或 n。");
   }
 }
+
+/** 整数输入：范围校验；直接回车取默认值；EOF 抛 UserAbortedError */
+export async function askInt(
+  prompt: string,
+  opts: { min: number; max: number; default: number },
+): Promise<number> {
+  const hint = `${opts.min}-${opts.max}，直接回车默认 ${opts.default}`;
+  for (;;) {
+    const raw = await askLine(`${prompt}（${hint}）> `);
+    if (raw === null) throw new UserAbortedError();
+    if (raw.length === 0) return opts.default;
+    const n = Number(raw);
+    if (Number.isInteger(n) && n >= opts.min && n <= opts.max) return n;
+    console.log(`无效数字，请输入 ${opts.min}-${opts.max} 之间的整数。`);
+  }
+}

@@ -10,10 +10,25 @@ const SYSTEM_PROMPT = `你是一名资深小说编辑与故事结构师。你的
 1. 大纲必须围绕核心冲突组织：冲突的「由来」对应开端与铺垫，「对角色的影响」推动中段发展，「理想的解决结果」指向结局；
 2. 严格遵守世界观设定，尤其不得违背 taboos（禁忌）中的任何条目；
 3. 每个角色严格遵循其角色卡：叙事定位决定戏份权重，行为贴合其内核（渴望/恐惧）、性格与背景；尊重每个角色的创作目的与结局方向，主角需有清晰的成长弧光；
-4. 结构至少三幕（可更多），每一幕给出梗概与关键情节点；
+4. 分幕结构严格按照用户指定的幕数设计，每一幕给出梗概与关键情节点；
 5. 标题要契合类型与调性，logline 用一句话讲清「谁+想要什么+障碍+代价」。
 
-完成后调用 save_outline 工具保存大纲（参数即完整大纲，必须严格符合 schema）。save_outline 会把大纲的剧情梗概、主题、每一幕的名称与概述展示给用户确认：用户确认后保存完成；用户提出修改意见时，根据反馈调整大纲后重新调用 save_outline，直到用户确认为止。`;
+完成后调用 save_outline 工具保存大纲（参数即完整大纲，必须严格符合 schema，且幕数必须与要求完全一致）。save_outline 会把大纲的剧情梗概、主题、每一幕的名称与概述展示给用户确认：用户确认后保存完成；用户提出修改意见时，根据反馈调整大纲后重新调用 save_outline，直到用户确认为止。`;
+
+/** 幕数强校验 schema：save_outline 入参必须恰好为 actCount 幕（SDK 先校验再执行，模型给错即拒绝重试） */
+export function outlineSchemaForActs(actCount: number) {
+  return outlineSchema.refine(
+    (o) => o.acts.length === actCount,
+    `大纲必须恰好为 ${actCount} 幕`,
+  );
+}
+
+export interface CreateOutlineOptions {
+  /** 用户已命名的书名；指定时大纲 title 必须沿用 */
+  novelTitle?: string;
+  /** 大纲幕数（用户指定，默认 5） */
+  actCount: number;
+}
 
 /** 确认视图：剧情梗概、主题、每幕名称与概述（拼入确认提示原子出现；详细情节点在保存后完整展示） */
 function formatOutlineForConfirm(o: Outline): string {
@@ -28,18 +43,18 @@ function formatOutlineForConfirm(o: Outline): string {
 /**
  * 大纲 Agent（ReAct）：基于初始化收集的创作参数生成小说大纲，
  * 经用户「确认 / 修改意见 → 调整 → 再确认」循环后才完成。
- * novelTitle 为用户已命名的书名时，大纲标题必须沿用该书名。
  */
 export async function createOutline(
   params: NovelParams,
-  novelTitle?: string,
+  options: CreateOutlineOptions,
 ): Promise<Outline> {
+  const { novelTitle, actCount } = options;
   let saved: Outline | undefined;
 
   const saveOutline = tool({
     description:
       "大纲完成后调用此工具保存。会把大纲的剧情梗概、主题、每幕名称与概述展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整大纲后重新调用。",
-    inputSchema: outlineSchema,
+    inputSchema: outlineSchemaForActs(actCount),
     execute: async (outline) => {
       if (await askConfirm(`\n${formatOutlineForConfirm(outline)}\n以上大纲是否确认？`, true)) {
         saved = outline;
@@ -58,6 +73,7 @@ export async function createOutline(
     system: SYSTEM_PROMPT,
     prompt: [
       `创作参数如下（JSON）：\n${JSON.stringify(params, null, 2)}`,
+      `大纲结构要求：恰好 ${actCount} 幕。`,
       ...(novelTitle
         ? [`小说已由用户命名为《${novelTitle}》，大纲的 title 字段必须使用该名称。`]
         : []),

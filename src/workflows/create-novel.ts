@@ -1,6 +1,7 @@
 import { generateObject } from "ai";
 import { model } from "../providers/deepseek";
 import {
+  askInt,
   askMultiSelect,
   askOptional,
   askRequired,
@@ -170,9 +171,12 @@ export async function createNovel(options: CreateNovelOptions = {}): Promise<Nov
   const params: NovelParams = { genre, audience, worldview, characters, coreConflict: conflict };
   await store.update(id, { status: "gathering", params });
 
+  // 大纲结构：幕数（默认 5）
+  const actCount = await askInt("请输入大纲幕数", { min: 3, max: 20, default: 5 });
+
   // 大纲（ReAct Agent）
   console.log("\n🛠 大纲 Agent 启动…");
-  const outline = await createOutline(params, novelName);
+  const outline = await createOutline(params, { novelTitle: novelName, actCount });
   printOutline(outline);
 
   // 大纲按创作 ID 落盘到 output/

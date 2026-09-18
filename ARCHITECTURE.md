@@ -59,7 +59,7 @@ src/
 6. **世界观**：独立 ReAct Agent（`worldview-agent`）——ask_user 工具多轮追问 → submit_worldview 终态提交（schema 校验），确认后按创作 ID upsert 入库（`worldview-store`）
 7. **角色**：独立 ReAct Agent（`character-agent`）——字段协议驱动（13 个扁平字段映射到角色卡 schema）：`ask_user` 征集文本 → `save_field` 逐字段「概括总结 → 用户确认 → 保存」（确认与反馈在工具 execute 内代码强制）→ 必填字段（姓名、内核三维、背景、创作目的、结局方向）齐全后 `submit_character` 组装整卡并**展示给用户做最终确认**（用户确认无补充才结束；有反馈则处理后重新提交），组装由代码完成并过 schema 校验（杜绝模型漂移）；每张角色卡确认后立即按创作 ID 写入 SQLite（增量持久化，`character-store`）；外层循环支持多角色，约束至少一名主角；内核/背景/创作目的/结局方向为生成后固定不变的属性
 8. **核心冲突**：自由文本 → generateObject 归一化（由来/影响/理想解决）
-9. **大纲**：ReAct Agent（`outline-agent`）基于全部参数生成大纲（用户已命名时 title 沿用书名）→ `save_outline` 内展示「剧情梗概、主题、每幕名称与概述」请用户确认——确认无修改才完成；有修改意见则按反馈调整后重新提交确认（循环），完成后按 ID 落盘 `output/<id>.json`（`outline-writer`）
+9. **大纲**：先询问幕数（askInt，3-20，直接回车默认 5）→ ReAct Agent（`outline-agent`）基于全部参数生成大纲（用户已命名时 title 沿用书名；幕数经 `outlineSchemaForActs` refine 强校验恰好 N 幕，模型给错幕数会被 schema 拒绝重试）→ `save_outline` 内展示「剧情梗概、主题、每幕名称与概述」请用户确认——确认无修改才完成；有修改意见则按反馈调整后重新提交确认（循环），完成后按 ID 落盘 `output/<id>.json`（`outline-writer`）
 9. 全程通过 `NovelStateStore` 更新 state（initializing → gathering → outlined）
 
 ## ReAct 终态工具模式（src/agents/react.ts）
