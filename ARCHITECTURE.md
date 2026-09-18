@@ -1,6 +1,6 @@
 # 模块架构（项目根目录级）
 
-> 本项目暂无多模块划分，架构文档维护在根目录。引入 `src/` 子模块划分后，各模块可另建自己的架构文档。
+> 项目级架构蓝图维护在根目录；`src/workflows/` 已建立模块文档（见 `src/workflows/ARCHITECTURE.md` 与 `src/workflows/PROGRESS.md`），其余子目录仍以本文件为准。
 
 ## 分层结构
 
@@ -32,7 +32,8 @@ src/
 ├── output/
 │   └── outline-writer.ts # 大纲落盘：output/<id>.json（id 做文件名安全校验）
 └── workflows/
-    ├── create-novel.ts   # 主编排：初始化 → 参数收集 → 大纲生成
+    ├── index.ts         # 模块出口（createNovel / collectWorldview / createOutline）
+    ├── create-novel.ts  # 主编排：初始化 → 参数收集 → 大纲生成
     └── agents/
         ├── worldview-agent.ts   # 世界观 ReAct Agent（多轮追问 + 终态提交）
         ├── character-agent.ts   # 角色 ReAct Agent（逐字段「概括→确认→保存」+ 终态组装校验）
@@ -47,7 +48,7 @@ src/
 - `state/`：依赖 `schemas/`（类型）
 - `tools/`：依赖 `cli/`（ask-user 需要读用户输入）
 - `agents/`：依赖 `providers/`（模型实例）
-- `workflows/`：依赖 `agents/ + tools/ + state/ + schemas/ + cli/ + providers/`，业务编排所在层
+- `workflows/`：依赖 `agents/ + tools/ + state/ + schemas/ + output/ + cli/ + providers/`，业务编排所在层（模块内部职责与数据流详见 `src/workflows/ARCHITECTURE.md`）
 - 任何下层不得反向依赖上层；`src/index.ts` 仅依赖 `workflows/ + cli/`
 
 ## 主工作流：createNovel（src/workflows/create-novel.ts）

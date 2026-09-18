@@ -4,6 +4,8 @@
 
 ## 已完成
 
+- 2026-09-18 [docs] 建立 workflows 模块状态文档（src/workflows/ARCHITECTURE.md + PROGRESS.md，历史自根文档按模块视角回填）；顺带修正根架构文档两处失真：依赖边界补 `output/`、目录树补 `workflows/index.ts`。AC：模块文档经源码逐文件核对（含 import 关系验证），typecheck/lint/test 通过（55 用例）
+
 - 2026-09-18 [feat] 新增 outlines 表：树形大纲（卷/部/幕/章，`parent_id` 自引用外键）按小说 ID 持久化，同节点多版本行并存（`version` + `is_current_version`），部分唯一表达式索引 `(novel_id, COALESCE(parent_id,''), sort) WHERE is_current_version=1` 实现「同父级当前版本 sort 唯一」（根节点 NULL 经 COALESCE 归一判重，跨小说隔离）；`OutlineStore` 增/查/列（currentOnly）/改（盖章 updated_at），读写双向 zod 校验，唯一索引违规转译可读错误；SCHEMA_VERSION 2→3。AC：typecheck/lint/test 通过（55 用例：默认值/UUIDv7/外键拒绝/唯一索引/多版本共存与切换/根节点跨书隔离/排序/重开库持久化）。create-novel 工作流接入与 document_id 正文关联为后续需求
 - 2026-09-18 [feat] 大纲生成前询问幕数（askInt 新原语：范围校验 + 回车默认值），默认 5 幕（3-20）；幕数经 outlineSchemaForActs（refine）在 save_outline 入参层强校验，恰好 N 幕，模型给错被 schema 拒绝重试，不依赖模型自觉。AC：typecheck/lint/test 通过（46 用例）；端到端真实 LLM 验证指定 4 幕 → 大纲恰好 4 幕（夺卷/亡命/锁脉/共济）
 - 2026-09-17 [feat] 创建流程新增可选命名步骤：ID 生成后、大纲前询问小说名称（回车跳过）；已命名时 novels.name 即用户名且大纲 title 强制沿用，未命名维持原行为（大纲确认后以标题回填）。AC：typecheck/lint/test 通过（43 用例）；端到端真实 LLM 验证用户命名路径（novels.name=灵脉遗孤 未被覆盖，大纲标题沿用书名）
