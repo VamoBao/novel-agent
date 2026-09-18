@@ -4,6 +4,8 @@
 
 ## 已完成
 
+- 2026-09-18 [chore] 新增 `docker-compose.yaml`：sqlite-web 网页查库界面（coleifer/sqlite-web，宿主 8081 → 容器 8080，挂载 `./data` 打开 `novel.db`），仅本地查看用、非应用运行时依赖；修正自 excel-parse 模板拷来的失真注释（路径对齐本项目 `data/novel.db`）。AC：`docker compose config` 解析通过；typecheck/lint/test 通过（59 用例，未改动代码）
+
 - 2026-09-18 [feat] 大纲两级结构对齐 outlines 表并接入工作流：outlineNodeType 瘦身为部/幕/章（去卷，SCHEMA_VERSION 3→4 重建）；outlineSchema 重构为「部→幕」嵌套（部含概述，每部至少 1 幕）；`outlineSchemaFor(actCount, partCount)` refine 强校验恰好 M 部共 N 幕；OutlineStore 新增 `saveOutlineTree`（部根节点/幕子节点，sort 按父级 1 起，整树事务，中途失败回滚、重复保存拒绝）；createNovel 先问幕数（3-20 默认 5）再问部数（1~幕数 默认 1），确认后入库+落盘（output JSON 结构变两级，旧文件不兼容）。AC：typecheck/lint/test 通过（59 用例：两级映射/事务回滚/重复拒绝/结构校验）；真实 LLM 定向冒烟（仙侠参数，要求 2 部 5 幕 → 恰好 2 部共 5 幕，模型自分配 3+2，管道确认 y 一次通过）
 
 - 2026-09-18 [docs] 建立 workflows 模块状态文档（src/workflows/ARCHITECTURE.md + PROGRESS.md，历史自根文档按模块视角回填）；顺带修正根架构文档两处失真：依赖边界补 `output/`、目录树补 `workflows/index.ts`。AC：模块文档经源码逐文件核对（含 import 关系验证），typecheck/lint/test 通过（55 用例）

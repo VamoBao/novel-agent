@@ -35,6 +35,7 @@
 - `src/output/`：产物落盘（大纲按创作 ID 保存为 `output/<id>.json`）
 - `src/workflows/`：工作流编排（`create-novel.ts` 主流程 + `agents/` 下 worldview / character / outline 三个 subAgent）
 - `docs/`：Agent 工作流指导文档
+- `docker-compose.yaml`：本地辅助——sqlite-web 网页查看 `data/novel.db`（宿主 8081 端口，非应用运行时依赖）
 - `eslint.config.js`、`tsconfig.json`：静态检查与编译配置
 
 依赖方向：`workflows/ → agents/ + tools/ + state/ + schemas/ + output/ + cli/ + providers/`，下层不得反向依赖上层（详见根目录 `ARCHITECTURE.md`）。

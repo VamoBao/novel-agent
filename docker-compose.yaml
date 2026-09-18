@@ -1,0 +1,14 @@
+services:
+  # SQLite 是嵌入式数据库（应用经 bun:sqlite 直接读写 data/novel.db，无服务进程）。
+  # 这里跑一个轻量 Web 管理界面，用于查看 novels / characters / worldviews / outlines 表；数据库文件持久化在 ./data/。
+  sqlite-web:
+    image: coleifer/sqlite-web:latest
+    container_name: novel-sqlite-web
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      # 容器内 /data/novel.db → 宿主机 ./data/novel.db（应用若用 NOVEL_DB_PATH 改库路径，挂载需同步调整）
+      SQLITE_DATABASE: novel.db
+    restart: unless-stopped
