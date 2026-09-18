@@ -214,4 +214,89 @@ describe("OutlineStore", () => {
     s2.close();
     await rm(dir, { recursive: true, force: true });
   });
+
+  test("saveOutlineTree 两级映射：部为根节点、幕为子节点，sort 按各自父级从 1 递增", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-tree-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "aaaaaaaa-bbbb-7ccc-8ddd-000000000001";
+    const store = setup(dbPath, novelId);
+
+    const nodes = store.saveOutlineTree(novelId, [
+      { name: "第一部·风起", acts: [{ name: "第一幕" }, { name: "第二幕" }] },
+      { name: "第二部·云涌", acts: [{ name: "第三幕" }, { name: "第四幕" }, { name: "第五幕" }] },
+    ]);
+    expect(nodes).toHaveLength(7);
+    // 全部为 version=1 / 当前版本 / planned
+    expect(
+      nodes.every(
+        (n) => n.node.version === 1 && n.node.isCurrentVersion && n.node.status === "planned",
+      ),
+    ).toBe(true);
+
+    const roots = nodes.filter((n) => n.node.parentId === null);
+    expect(roots.map((n) => [n.node.type, n.node.name, n.node.sort])).toEqual([
+      ["part", "第一部·风起", 1],
+      ["part", "第二部·云涌", 2],
+    ]);
+
+    const part1 = roots[0]?.id;
+    const part2 = roots[1]?.id;
+    const acts = nodes.filter((n) => n.node.type === "act");
+    expect(acts.filter((a) => a.node.parentId === part1).map((a) => [a.node.name, a.node.sort]))
+      .toEqual([["第一幕", 1], ["第二幕", 2]]);
+    expect(acts.filter((a) => a.node.parentId === part2).map((a) => [a.node.name, a.node.sort]))
+      .toEqual([["第三幕", 1], ["第四幕", 2], ["第五幕", 3]]);
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("saveOutlineTree 空树与空幕部被拒绝", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-tree-empty-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "aaaaaaaa-bbbb-7ccc-8ddd-000000000002";
+    const store = setup(dbPath, novelId);
+
+    expect(() => store.saveOutlineTree(novelId, [])).toThrow("空");
+    expect(() =>
+      store.saveOutlineTree(novelId, [{ name: "孤部", acts: [] }]),
+    ).toThrow("至少一幕");
+    expect(store.listOutlineNodes(novelId)).toHaveLength(0);
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("saveOutlineTree 中途失败整树回滚（事务原子性）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-tree-tx-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "aaaaaaaa-bbbb-7ccc-8ddd-000000000003";
+    const store = setup(dbPath, novelId);
+
+    // 第二部名称为空触发 zod 拒绝；第一部已插入的行必须整体回滚
+    expect(() =>
+      store.saveOutlineTree(novelId, [
+        { name: "第一部", acts: [{ name: "第一幕" }] },
+        { name: "", acts: [{ name: "第二幕" }] },
+      ]),
+    ).toThrow();
+    expect(store.listOutlineNodes(novelId)).toHaveLength(0);
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("saveOutlineTree 重复保存被唯一索引拒绝且原树保持完整", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-tree-dup-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "aaaaaaaa-bbbb-7ccc-8ddd-000000000004";
+    const store = setup(dbPath, novelId);
+
+    store.saveOutlineTree(novelId, [{ name: "第一部", acts: [{ name: "第一幕" }] }]);
+    expect(() =>
+      store.saveOutlineTree(novelId, [{ name: "另一部", acts: [{ name: "另一幕" }] }]),
+    ).toThrow("sort");
+    const remaining = store.listOutlineNodes(novelId);
+    expect(remaining).toHaveLength(2);
+    expect(remaining.map((n) => n.node.name)).toEqual(["第一部", "第一幕"]);
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
 });

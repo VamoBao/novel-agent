@@ -13,17 +13,17 @@ src/workflows/
     ├── worldview-agent.ts    # collectWorldview：多轮追问补全世界观（终态工具 submit_worldview）
     ├── character-agent.ts    # createCharacter：字段协议逐字段确认角色卡（save_field / submit_character）
     │                         #   另导出 FIELD_NAMES / FIELD_SPECS / missingRequiredFields / assembleCharacter 纯函数
-    ├── outline-agent.ts      # createOutline：生成大纲并过用户确认门（save_outline）
-    │                         #   另导出 outlineSchemaForActs（幕数 refine 强校验）
+    ├── outline-agent.ts      # createOutline：生成「部→幕」两级大纲并过用户确认门（save_outline）
+    │                         #   另导出 outlineSchemaFor（恰好 M 部共 N 幕 refine 强校验）
     ├── character-agent.test.ts  # 字段协议纯函数单测（规格完整性 / 缺失列表 / 组装校验）
-    └── outline-agent.test.ts    # 幕数校验单测（通过 / 拒绝含提示 / 底座三幕约束）
+    └── outline-agent.test.ts    # 结构校验单测（恰好 M 部共 N 幕：通过 / 拒绝含提示 / 底座每部至少一幕）
 ```
 
 > 命名辨析：本目录 `agents/` 是业务 subAgent；兄弟层 `src/agents/react.ts` 是跨模块复用的通用 ReAct 运行器（底层设施），二者不是同一层。
 
 ## 依赖边界
 
-- `create-novel.ts` → `ai`（generateObject）、`providers/`（model）、`cli/`（askSelect/askMultiSelect/askOptional/askRequired/askInt）、`schemas/`、`state/`（types / id / memory-store / novel-store / character-store / worldview-store）、`output/`（outline-writer）、本模块 `agents/`
+- `create-novel.ts` → `ai`（generateObject）、`providers/`（model）、`cli/`（askSelect/askMultiSelect/askOptional/askRequired/askInt）、`schemas/`、`state/`（types / id / memory-store / novel-store / character-store / worldview-store / outline-store）、`output/`（outline-writer）、本模块 `agents/`
 - `agents/*.ts` → `ai`（tool）、`zod`、`src/agents/`（runReactAgent）、`tools/`（ask-user 工厂）、`cli/`（askConfirm/askOptional/askRequired）、`schemas/`、`state/types`（仅 outline-agent 需要 NovelParams 类型）
 - 下层不得反向依赖本模块；`createCharacter` 目前仅供模块内编排使用，未入 `index.ts` 出口
 - `CreateNovelOptions` 支持注入 `store / characterStore / worldviewStore / novelStore`，缺省用内存 state store + 各默认 SQLite store（测试与未来换实现不改编排代码）
@@ -39,11 +39,11 @@ src/workflows/
 7. **【4/5】角色**：`for(;;)` 循环（至少一名叙事定位含「主角」的角色）→ `createCharacter` → `characterStore.addCharacter` 每卡确认后立即增量入库
 8. **【5/5】核心冲突**：自由文本 → `generateObject`（coreConflictSchema）归一化
 9. **state 落 params**：status → gathering
-10. **幕数**：`askInt`（3-20，回车默认 5）
-11. **大纲**：`createOutline(params, { novelTitle, actCount })` → `printOutline` 完整展示 → `saveOutline` 落盘 `output/<id>.json`
+10. **幕数与部数**：`askInt` 幕数（3-20，回车默认 5）→ `askInt` 部数（1~幕数，回车默认 1）
+11. **大纲**：`createOutline(params, { novelTitle, actCount, partCount })` → `printOutline` 两级完整展示 → `saveOutlineTree` 整树事务入库（部根节点 / 幕子节点，version=1/当前/planned）→ `saveOutline` 落盘 `output/<id>.json`
 12. **收尾**：status → outlined；`novelStore.updateNovel` 回填（未命名时 name = outline.title；description = outline.logline）
 
-入库时机小结：novels 初始化即建（先于其余表）｜worldviews 确认后 upsert｜characters 每卡确认后增量｜大纲当前仅落 `output/<id>.json`（`outlines` 表待接入）｜NovelState 仍为内存态。
+入库时机小结：novels 初始化即建（先于其余表）｜worldviews 确认后 upsert｜characters 每卡确认后增量｜outlines 大纲确认后整树事务入库（saveOutlineTree）＋大纲 JSON 落盘 output｜NovelState 仍为内存态。
 
 ## subAgent 协作协议（三 Agent 共性）
 
@@ -57,4 +57,4 @@ src/workflows/
 
 ## 测试
 
-模块内单测聚焦**可脱离 LLM 的纯函数**：字段协议（`FIELD_SPECS` 完整性、`missingRequiredFields`、`assembleCharacter` 过 schema）与幕数校验（`outlineSchemaForActs`）。Agent 循环本身依赖真实 LLM 与用户交互，走端到端验证（记录见 PROGRESS）。
+模块内单测聚焦**可脱离 LLM 的纯函数**：字段协议（`FIELD_SPECS` 完整性、`missingRequiredFields`、`assembleCharacter` 过 schema）与大纲结构校验（`outlineSchemaFor` 恰好 M 部共 N 幕）。Agent 循环本身依赖真实 LLM 与用户交互，走端到端验证（记录见 PROGRESS）。

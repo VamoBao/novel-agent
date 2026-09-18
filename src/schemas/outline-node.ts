@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** 大纲节点类型：卷（volume）/ 部（part）/ 幕（act）/ 章（chapter），树形层级 */
-export const outlineNodeTypeSchema = z.enum(["volume", "part", "act", "chapter"]);
+/** 大纲节点类型：部（part）/ 幕（act）/ 章（chapter），树形层级；章为写作期节点，大纲阶段不创建 */
+export const outlineNodeTypeSchema = z.enum(["part", "act", "chapter"]);
 export type OutlineNodeType = z.infer<typeof outlineNodeTypeSchema>;
 
 /** 大纲节点状态：计划中 → 写作中 → 写作完成；已废弃用于留存历史版本 */

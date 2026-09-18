@@ -28,7 +28,7 @@ src/
 │   ├── novel-store.ts      # 小说信息持久化（create/get/update，name 大纲确认后回填）
 │   ├── character-store.ts  # 角色按创作 ID 持久化（add/list，读写双向 zod 校验）
 │   ├── worldview-store.ts  # 世界观按创作 ID 持久化（upsert/get，taboos 存 JSON）
-│   └── outline-store.ts    # 大纲树按创作 ID 持久化（add/get/list/update，读写双向 zod 校验）
+│   └── outline-store.ts    # 大纲树按创作 ID 持久化（add/get/list/update + saveOutlineTree 整树事务，读写双向 zod 校验）
 ├── output/
 │   └── outline-writer.ts # 大纲落盘：output/<id>.json（id 做文件名安全校验）
 └── workflows/
@@ -37,7 +37,7 @@ src/
     └── agents/
         ├── worldview-agent.ts   # 世界观 ReAct Agent（多轮追问 + 终态提交）
         ├── character-agent.ts   # 角色 ReAct Agent（逐字段「概括→确认→保存」+ 终态组装校验）
-        └── outline-agent.ts     # 大纲 ReAct Agent（结构化保存）
+        └── outline-agent.ts     # 大纲 ReAct Agent（部→幕两级结构，用户确认门 + 幕/部数强校验）
 ```
 
 ## 依赖边界
@@ -61,7 +61,7 @@ src/
 6. **世界观**：独立 ReAct Agent（`worldview-agent`）——ask_user 工具多轮追问 → submit_worldview 终态提交（schema 校验），确认后按创作 ID upsert 入库（`worldview-store`）
 7. **角色**：独立 ReAct Agent（`character-agent`）——字段协议驱动（13 个扁平字段映射到角色卡 schema）：`ask_user` 征集文本 → `save_field` 逐字段「概括总结 → 用户确认 → 保存」（确认与反馈在工具 execute 内代码强制）→ 必填字段（姓名、内核三维、背景、创作目的、结局方向）齐全后 `submit_character` 组装整卡并**展示给用户做最终确认**（用户确认无补充才结束；有反馈则处理后重新提交），组装由代码完成并过 schema 校验（杜绝模型漂移）；每张角色卡确认后立即按创作 ID 写入 SQLite（增量持久化，`character-store`）；外层循环支持多角色，约束至少一名主角；内核/背景/创作目的/结局方向为生成后固定不变的属性
 8. **核心冲突**：自由文本 → generateObject 归一化（由来/影响/理想解决）
-9. **大纲**：先询问幕数（askInt，3-20，直接回车默认 5）→ ReAct Agent（`outline-agent`）基于全部参数生成大纲（用户已命名时 title 沿用书名；幕数经 `outlineSchemaForActs` refine 强校验恰好 N 幕，模型给错幕数会被 schema 拒绝重试）→ `save_outline` 内展示「剧情梗概、主题、每幕名称与概述」请用户确认——确认无修改才完成；有修改意见则按反馈调整后重新提交确认（循环），完成后按 ID 落盘 `output/<id>.json`（`outline-writer`）
+9. **大纲**：先询问幕数（askInt，3-20，直接回车默认 5）再询问部数（1~幕数，默认 1）→ ReAct Agent（`outline-agent`）基于全部参数生成「部 → 幕」两级大纲（用户已命名时 title 沿用书名；结构经 `outlineSchemaFor(actCount, partCount)` refine 强校验恰好 M 部共 N 幕、每部至少一幕，各部幕数由模型按剧情节奏分配）→ `save_outline` 内展示「剧情梗概、主题、每部概述与每幕名称概述」请用户确认——确认无修改才完成，有修改意见按反馈调整后重新提交确认（循环）；确认后 `saveOutlineTree` 两级入库（部为根节点、幕为子节点，整树事务）并按 ID 落盘 `output/<id>.json`（`outline-writer`）
 9. 全程通过 `NovelStateStore` 更新 state（initializing → gathering → outlined）
 
 ## ReAct 终态工具模式（src/agents/react.ts）
@@ -80,5 +80,5 @@ src/
   - `DEEPSEEK_API_KEY`：必填，DeepSeek API Key
   - `DEEPSEEK_MODEL_NAME`：可选，默认 `deepseek-flash`
   - `NOVEL_DB_PATH`：可选，SQLite 路径，默认 `data/novel.db`
-- SQLite：Bun 内置 `bun:sqlite`，各 store 共享默认连接（懒加载单例），`PRAGMA foreign_keys=ON` 按连接开启。四张表主键均为应用层生成的 **UUIDv7**（时间有序，索引友好）：`novels`（小说信息，1 的根）；`characters` 与 worldviewSchema 对应（1:N，自增序 + `novel_id` 外键索引），角色确认后只增不改；`worldviews`（1:1，`novel_id` 唯一外键，upsert 覆盖更新，`taboos` 数组存 JSON 文本）；`outlines`（大纲树，`parent_id` 自引用外键 + `novel_id` 外键索引，`type` CHECK 卷/部/幕/章、`status` CHECK 计划中/写作中/写作完成/已废弃，同节点多版本行并存 `version`+`is_current_version`，部分唯一表达式索引 `(novel_id, COALESCE(parent_id,''), sort) WHERE is_current_version=1` 保证同父级下当前版本 sort 唯一——根节点 parent 为 NULL，SQLite 唯一索引视 NULL 互异故 COALESCE 归一；当前版本切换由调用方先降级旧版再提升新版，`document_id` 暂为可空裸列待 documents 表落地后补外键）。schema 变更用 `PRAGMA user_version` 版本号管理（当前 3）：不匹配即重建（开发期数据可弃，接入生产需改为正式迁移）。NovelState 整体（status/params/outline）当前仍为内存态，SQLite 化为后续接入点
+- SQLite：Bun 内置 `bun:sqlite`，各 store 共享默认连接（懒加载单例），`PRAGMA foreign_keys=ON` 按连接开启。四张表主键均为应用层生成的 **UUIDv7**（时间有序，索引友好）：`novels`（小说信息，1 的根）；`characters` 与 worldviewSchema 对应（1:N，自增序 + `novel_id` 外键索引），角色确认后只增不改；`worldviews`（1:1，`novel_id` 唯一外键，upsert 覆盖更新，`taboos` 数组存 JSON 文本）；`outlines`（大纲树，`parent_id` 自引用外键 + `novel_id` 外键索引，`type` CHECK 部/幕/章——章为写作期预留，大纲阶段只建部/幕两级；`status` CHECK 计划中/写作中/写作完成/已废弃，同节点多版本行并存 `version`+`is_current_version`，部分唯一表达式索引 `(novel_id, COALESCE(parent_id,''), sort) WHERE is_current_version=1` 保证同父级下当前版本 sort 唯一——根节点 parent 为 NULL，SQLite 唯一索引视 NULL 互异故 COALESCE 归一；大纲确认后经 `saveOutlineTree` 整树事务入库，重复保存被唯一索引拒绝；当前版本切换由调用方先降级旧版再提升新版，`document_id` 暂为可空裸列待 documents 表落地后补外键）。schema 变更用 `PRAGMA user_version` 版本号管理（当前 4）：不匹配即重建（开发期数据可弃，接入生产需改为正式迁移）。NovelState 整体（status/params/outline）当前仍为内存态，SQLite 化为后续接入点
 - deepseek-flash 对主角归一化存在改写漂移，已通过「强约束 prompt + 用户确认门」缓解（见 DECISIONS）

@@ -14,10 +14,16 @@ afterAll(async () => {
 const outline: Outline = outlineSchema.parse({
   title: "测试之书",
   logline: "一名测试员验证落盘流程。",
-  acts: [
-    { name: "第一幕", summary: "开端", keyPlotPoints: ["点1"] },
-    { name: "第二幕", summary: "对抗", keyPlotPoints: ["点2"] },
-    { name: "第三幕", summary: "结局", keyPlotPoints: ["点3"] },
+  parts: [
+    {
+      name: "第一部",
+      summary: "第一部概述",
+      acts: [
+        { name: "第一幕", summary: "开端", keyPlotPoints: ["点1"] },
+        { name: "第二幕", summary: "对抗", keyPlotPoints: ["点2"] },
+      ],
+    },
+    { name: "第二部", summary: "第二部概述", acts: [{ name: "第三幕", summary: "结局", keyPlotPoints: ["点3"] }] },
   ],
 });
 
@@ -45,7 +51,8 @@ describe("saveOutline", () => {
     const raw = await Bun.file(path).text();
     const parsed = outlineSchema.parse(JSON.parse(raw));
     expect(parsed.title).toBe("测试之书");
-    expect(parsed.acts).toHaveLength(3);
+    expect(parsed.parts).toHaveLength(2);
+    expect(parsed.parts[0]?.acts).toHaveLength(2);
   });
 
   test("目录不存在时自动创建", async () => {

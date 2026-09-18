@@ -4,6 +4,7 @@
 
 ## 已完成
 
+- 2026-09-18 [feat] 大纲接入 outlines 表：类型枚举瘦身为部/幕/章（去卷，章为写作期预留）；`outlineSchema` 重构为「部→幕」两级（部含名称+概述，幕含名称/梗概/情节点），`outlineSchemaFor(actCount, partCount)` 强校验恰好 M 部共 N 幕、每部至少一幕；编排层先问幕数（3-20，默认 5）再问部数（1~幕数，默认 1），各部幕数由模型按剧情节奏分配；确认后 `saveOutlineTree` 整树事务入库 + `output/<id>.json` 落盘（结构变为两级，旧 JSON 不兼容）。AC：typecheck/lint/test 通过（59 用例）；真实 LLM 定向冒烟（createOutline，2 部 5 幕 → 恰好 2 部共 5 幕，模型自分配 3+2，确认循环正常）
 - 2026-09-18 [docs] 建立本模块 ARCHITECTURE / PROGRESS 文档；顺带修正根架构文档两处失真：依赖边界补 `output/`（create-novel 实际导入 outline-writer）、目录树补 `workflows/index.ts`
 - 2026-09-18 [feat] 大纲生成前询问幕数：`askInt`（3-20，回车默认 5）在编排层收集，经 `outlineSchemaForActs`（refine）在 `save_outline` 入参层强校验恰好 N 幕，模型给错被 schema 拒绝重试。AC：typecheck/lint/test 通过；端到端验证指定 4 幕 → 恰好 4 幕
 - 2026-09-17 [feat] 创建流程新增可选命名步骤：命名在 ID 生成后、大纲前询问（回车跳过）；novels 行初始化即建并携带书名；已命名时大纲 title 强制沿用，未命名时大纲确认后以标题回填 name、以 logline 回填 description
@@ -21,6 +22,7 @@
 
 ## 待办与后续接入点
 
-- `outlines` 表（2026-09-18 已建表与 `OutlineStore`，见 state 模块）接入 createNovel：大纲确认后写入库内大纲树；当前大纲仅落 `output/<id>.json`
+- ~~`outlines` 表接入 createNovel~~（2026-09-18 完成：大纲确认后 `saveOutlineTree` 两级入库）
+- 大纲修订的多版本流：重新生成大纲时降级旧树、提升新版本（当前重复保存整树会被唯一索引拒绝）
 - NovelState 整体 SQLite 化：state 仍为内存态（`memoryNovelStateStore`），`store` 已参数化可直接替换实现
-- 未来写作工作流：`document_id` 关联正文（documents 表落地后补外键）
+- 未来写作工作流：章（chapter）节点生成与 `document_id` 关联正文（documents 表落地后补外键）

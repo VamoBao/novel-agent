@@ -101,22 +101,29 @@ describe("outlineSchema", () => {
     keyPlotPoints: ["情节点1"],
   });
 
-  test("三幕结构通过", () => {
+  test("部→幕两级结构通过", () => {
     const outline = outlineSchema.parse({
       title: "星轨之下",
       logline: "一名失忆的领航员必须找回记忆，才能阻止殖民地坠落。",
       theme: "记忆与身份",
-      acts: [act("第一幕·开端"), act("第二幕·对抗"), act("第三幕·结局")],
+      parts: [
+        { name: "上部·失序", summary: "失序阶段的宏观概述", acts: [act("第一幕·开端"), act("第二幕·对抗")] },
+        { name: "下部·归位", summary: "归位阶段的宏观概述", acts: [act("第三幕·结局")] },
+      ],
     });
-    expect(outline.acts).toHaveLength(3);
+    expect(outline.parts).toHaveLength(2);
+    expect(outline.parts[0]?.acts).toHaveLength(2);
   });
 
-  test("少于三幕被拒绝", () => {
+  test("零部与空幕部均被拒绝", () => {
+    expect(() =>
+      outlineSchema.parse({ title: "星轨之下", logline: "一句话", parts: [] }),
+    ).toThrow();
     expect(() =>
       outlineSchema.parse({
         title: "星轨之下",
         logline: "一句话",
-        acts: [act("第一幕"), act("第二幕")],
+        parts: [{ name: "上部", summary: "概述", acts: [] }],
       }),
     ).toThrow();
   });

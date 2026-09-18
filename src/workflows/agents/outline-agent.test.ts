@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { outlineSchemaForActs } from "./outline-agent";
+import { outlineSchemaFor } from "./outline-agent";
 import { outlineSchema, type Outline } from "../../schemas";
 
 const act = (name: string) => ({
@@ -8,26 +8,44 @@ const act = (name: string) => ({
   keyPlotPoints: ["情节点1"],
 });
 
-const fourActOutline: Outline = outlineSchema.parse({
+const fourActTwoPartOutline: Outline = outlineSchema.parse({
   title: "四幕之书",
-  logline: "一名测试员验证幕数约束。",
-  acts: [act("第一幕"), act("第二幕"), act("第三幕"), act("第四幕")],
+  logline: "一名测试员验证部幕两级约束。",
+  parts: [
+    { name: "第一部·风起", summary: "风起的宏观概述", acts: [act("第一幕"), act("第二幕")] },
+    { name: "第二部·云涌", summary: "云涌的宏观概述", acts: [act("第三幕"), act("第四幕")] },
+  ],
 });
 
-describe("outlineSchemaForActs", () => {
-  test("幕数与要求一致时通过", () => {
-    expect(outlineSchemaForActs(4).parse(fourActOutline).acts).toHaveLength(4);
-    expect(outlineSchemaForActs(5).parse({ ...fourActOutline, acts: [...fourActOutline.acts, act("第五幕")] }).acts).toHaveLength(5);
+describe("outlineSchemaFor", () => {
+  test("部数与幕数均符合要求时通过", () => {
+    const parsed = outlineSchemaFor(4, 2).parse(fourActTwoPartOutline);
+    expect(parsed.parts).toHaveLength(2);
+    expect(parsed.parts[0]?.acts).toHaveLength(2);
+
+    const onePart = outlineSchema.parse({
+      ...fourActTwoPartOutline,
+      parts: [
+        { name: "全一册", summary: "概述", acts: [...fourActTwoPartOutline.parts.flatMap((p) => p.acts), act("第五幕")] },
+      ],
+    });
+    expect(outlineSchemaFor(5, 1).parse(onePart).parts[0]?.acts).toHaveLength(5);
   });
 
-  test("幕数不符时拒绝且提示信息含期望幕数", () => {
-    expect(() => outlineSchemaForActs(5).parse(fourActOutline)).toThrow("大纲必须恰好为 5 幕");
-    expect(() => outlineSchemaForActs(3).parse(fourActOutline)).toThrow("大纲必须恰好为 3 幕");
+  test("幕数或部数不符时拒绝且提示含期望数量", () => {
+    expect(() => outlineSchemaFor(5, 2).parse(fourActTwoPartOutline)).toThrow("5 幕");
+    expect(() => outlineSchemaFor(3, 2).parse(fourActTwoPartOutline)).toThrow("3 幕");
+    expect(() => outlineSchemaFor(4, 1).parse(fourActTwoPartOutline)).toThrow("1 部");
   });
 
-  test("底座 schema 的最少三幕约束仍然生效", () => {
-    expect(() =>
-      outlineSchemaForActs(3).parse({ ...fourActOutline, acts: [act("第一幕"), act("第二幕")] }),
-    ).toThrow();
+  test("底座 schema 的每部至少一幕约束仍然生效", () => {
+    const broken = {
+      ...fourActTwoPartOutline,
+      parts: [
+        { name: "第一部", summary: "概述", acts: [act("第一幕")] },
+        { name: "第二部", summary: "概述", acts: [] },
+      ],
+    };
+    expect(() => outlineSchemaFor(1, 2).parse(broken)).toThrow();
   });
 });

@@ -6,7 +6,7 @@ import { dirname } from "node:path";
 export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；不匹配时开发期直接重建（本地测试数据可弃） */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 /**
  * 打开（必要时创建）数据库并完成建表。
@@ -14,7 +14,7 @@ const SCHEMA_VERSION = 3;
  * - novels：小说信息（其余业务表经 novel_id 外键关联）
  * - characters：角色卡，1:N（novel_id 索引）
  * - worldviews：世界观，1:1（novel_id 唯一），taboos 数组存 JSON 文本
- * - outlines：大纲树（卷/部/幕/章），parent_id 自引用外键，多版本行并存
+ * - outlines：大纲树（部/幕两级入库，章为写作期预留），parent_id 自引用外键，多版本行并存
  */
 export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
   mkdirSync(dirname(path), { recursive: true });
@@ -81,7 +81,7 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       id TEXT PRIMARY KEY,
       novel_id TEXT NOT NULL REFERENCES novels(id),
       parent_id TEXT REFERENCES outlines(id),
-      type TEXT NOT NULL CHECK (type IN ('volume', 'part', 'act', 'chapter')),
+      type TEXT NOT NULL CHECK (type IN ('part', 'act', 'chapter')),
       name TEXT NOT NULL,
       sort INTEGER NOT NULL CHECK (sort >= 1),
       version INTEGER NOT NULL CHECK (version >= 1),

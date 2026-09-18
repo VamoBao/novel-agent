@@ -32,6 +32,12 @@ export interface OutlineNodeInput {
   documentId?: string | null;
 }
 
+/** 大纲树入库输入：部（根节点）→ 幕（子节点）两级；章为写作期节点，此处不建 */
+export interface OutlineTreeInput {
+  name: string;
+  acts: ReadonlyArray<{ name: string }>;
+}
+
 /** outlines 表行结构（列名蛇形，is_current_version 存 0/1） */
 interface OutlineRow {
   id: string;
@@ -102,7 +108,7 @@ function rowToStored(row: OutlineRow): StoredOutlineNode {
 }
 
 /**
- * 大纲树持久化：按创作 ID 绑定存储卷/部/幕/章节点。
+ * 大纲树持久化：按创作 ID 绑定存储部/幕/章节点。
  * 同一节点可有多个版本行并存；当前版本切换由调用方先降级旧版本再提升新版本，
  * 唯一索引保证同父级下各当前版本 sort 不重复。
  */
@@ -193,6 +199,43 @@ export class OutlineStore {
       next,
     );
     return this.getOutlineNodeOrThrow(id);
+  }
+
+  /**
+   * 整棵大纲树入库（事务原子）：部为根节点（sort 从 1 递增）、幕为其子节点
+   * （sort 按所属部从 1 递增），全部为 version=1 / 当前版本 / planned。
+   * 任一节点失败整树回滚，不留半棵树。
+   */
+  saveOutlineTree(novelId: string, parts: readonly OutlineTreeInput[]): StoredOutlineNode[] {
+    if (parts.length === 0) {
+      throw new Error("大纲树为空，拒绝入库");
+    }
+    if (parts.some((p) => p.acts.length === 0)) {
+      throw new Error("大纲树每部至少一幕，拒绝入库");
+    }
+    const saveTree = this.db.transaction((tree: readonly OutlineTreeInput[]) => {
+      const created: StoredOutlineNode[] = [];
+      tree.forEach((part, partIndex) => {
+        const partNode = this.addOutlineNode(novelId, {
+          type: "part",
+          name: part.name,
+          sort: partIndex + 1,
+        });
+        created.push(partNode);
+        part.acts.forEach((act, actIndex) => {
+          created.push(
+            this.addOutlineNode(novelId, {
+              type: "act",
+              name: act.name,
+              sort: actIndex + 1,
+              parentId: partNode.id,
+            }),
+          );
+        });
+      });
+      return created;
+    });
+    return saveTree(parts);
   }
 
   close(): void {

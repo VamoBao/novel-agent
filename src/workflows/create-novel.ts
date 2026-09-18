@@ -12,6 +12,7 @@ import {
   coreConflictSchema,
   type Character,
   type CoreConflict,
+  type Outline,
   type Worldview,
 } from "../schemas";
 import type { NovelParams, NovelState, NovelStateStore } from "../state/types";
@@ -20,6 +21,7 @@ import { memoryNovelStateStore } from "../state/memory-store";
 import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
 import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
 import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
+import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
 import { saveOutline } from "../output/outline-writer";
 import { collectWorldview } from "./agents/worldview-agent";
 import { createCharacter } from "./agents/character-agent";
@@ -51,6 +53,8 @@ export interface CreateNovelOptions {
   worldviewStore?: WorldviewStore;
   /** 小说信息持久化 store；缺省用默认 SQLite store（data/novel.db） */
   novelStore?: NovelStore;
+  /** 大纲树持久化 store；缺省用默认 SQLite store（data/novel.db） */
+  outlineStore?: OutlineStore;
 }
 
 /**
@@ -64,6 +68,7 @@ export async function createNovel(options: CreateNovelOptions = {}): Promise<Nov
   const characterStore = options.characterStore ?? getDefaultCharacterStore();
   const worldviewStore = options.worldviewStore ?? getDefaultWorldviewStore();
   const novelStore = options.novelStore ?? getDefaultNovelStore();
+  const outlineStore = options.outlineStore ?? getDefaultOutlineStore();
   const id = options.id ?? generateNovelId();
 
   console.log("📖 novel-agent —— 小说创作向导");
@@ -171,17 +176,22 @@ export async function createNovel(options: CreateNovelOptions = {}): Promise<Nov
   const params: NovelParams = { genre, audience, worldview, characters, coreConflict: conflict };
   await store.update(id, { status: "gathering", params });
 
-  // 大纲结构：幕数（默认 5）
-  const actCount = await askInt("请输入大纲幕数", { min: 3, max: 20, default: 5 });
+  // 大纲结构：幕数（默认 5）→ 部数（默认 1，上限为幕数）
+  const actCount = await askInt("请输入整本剧情拆分的幕数", { min: 3, max: 20, default: 5 });
+  const partCount = await askInt(`这 ${actCount} 幕拆分为几部`, { min: 1, max: actCount, default: 1 });
 
-  // 大纲（ReAct Agent）
+  // 大纲（ReAct Agent，部 → 幕两级结构）
   console.log("\n🛠 大纲 Agent 启动…");
-  const outline = await createOutline(params, { novelTitle: novelName, actCount });
+  const outline = await createOutline(params, { novelTitle: novelName, actCount, partCount });
   printOutline(outline);
 
-  // 大纲按创作 ID 落盘到 output/
+  // 确认后入库（outlines 表两级树）并落盘 output/<id>.json
+  const treeNodes = outlineStore.saveOutlineTree(id, outline.parts);
+  const partTotal = treeNodes.filter((n) => n.node.type === "part").length;
+  const actTotal = treeNodes.filter((n) => n.node.type === "act").length;
+  console.log(`🗂 大纲树已入库：${partTotal} 部 / ${actTotal} 幕`);
   const savedPath = await saveOutline(id, outline);
-  console.log(`\n🗂 大纲已保存：${savedPath}`);
+  console.log(`🗂 大纲已落盘：${savedPath}`);
 
   const finalState = await store.update(id, { status: "outlined", outline });
   // 大纲确认后回填：description = 剧情梗概；name 仅在用户未命名时以大纲标题回填
@@ -213,12 +223,15 @@ function printConflict(c: CoreConflict): void {
   console.log(`  理想解决：${c.idealResolution}`);
 }
 
-function printOutline(o: { title: string; logline: string; theme?: string; acts: Array<{ name: string; summary: string; keyPlotPoints: string[] }> }): void {
+function printOutline(o: Outline): void {
   console.log("\n✅ 大纲已生成：");
   console.log(`  《${o.title}》——${o.logline}`);
   if (o.theme) console.log(`  主题：${o.theme}`);
-  for (const act of o.acts) {
-    console.log(`  ▶ ${act.name}：${act.summary}`);
-    act.keyPlotPoints.forEach((p, i) => console.log(`    ${i + 1}) ${p}`));
-  }
+  o.parts.forEach((part) => {
+    console.log(`  ▶ ${part.name}：${part.summary}`);
+    part.acts.forEach((act) => {
+      console.log(`    ▶ ${act.name}：${act.summary}`);
+      act.keyPlotPoints.forEach((p, i) => console.log(`      ${i + 1}) ${p}`));
+    });
+  });
 }
