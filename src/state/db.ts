@@ -6,14 +6,15 @@ import { dirname } from "node:path";
 export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；不匹配时开发期直接重建（本地测试数据可弃） */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 /**
  * 打开（必要时创建）数据库并完成建表。
- * 三张表主键均为应用层生成的 UUIDv7（时间有序，索引友好）：
- * - novels：小说信息（characters / worldviews 经 novel_id 外键关联）
+ * 四张表主键均为应用层生成的 UUIDv7（时间有序，索引友好）：
+ * - novels：小说信息（其余业务表经 novel_id 外键关联）
  * - characters：角色卡，1:N（novel_id 索引）
  * - worldviews：世界观，1:1（novel_id 唯一），taboos 数组存 JSON 文本
+ * - outlines：大纲树（卷/部/幕/章），parent_id 自引用外键，多版本行并存
  */
 export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
   mkdirSync(dirname(path), { recursive: true });
@@ -24,6 +25,7 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
 
   const versionRow = db.query("PRAGMA user_version").get() as { user_version: number };
   if (versionRow.user_version !== SCHEMA_VERSION) {
+    db.exec("DROP TABLE IF EXISTS outlines;");
     db.exec("DROP TABLE IF EXISTS characters;");
     db.exec("DROP TABLE IF EXISTS worldviews;");
     db.exec("DROP TABLE IF EXISTS novels;");
@@ -73,6 +75,35 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS outlines (
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL REFERENCES novels(id),
+      parent_id TEXT REFERENCES outlines(id),
+      type TEXT NOT NULL CHECK (type IN ('volume', 'part', 'act', 'chapter')),
+      name TEXT NOT NULL,
+      sort INTEGER NOT NULL CHECK (sort >= 1),
+      version INTEGER NOT NULL CHECK (version >= 1),
+      is_current_version INTEGER NOT NULL CHECK (is_current_version IN (0, 1)),
+      status TEXT NOT NULL CHECK (status IN ('deprecated', 'planned', 'writing', 'completed')),
+      document_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_outlines_novel_id ON outlines(novel_id);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_outlines_parent_id ON outlines(parent_id);",
+  );
+  // sort 唯一性仅约束「同小说 + 同父级 + 当前版本」：根节点 parent_id 为 NULL，
+  // SQLite 唯一索引视 NULL 互异，故用 COALESCE 归一后再判重；历史版本行不受限
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_outlines_current_sort
+    ON outlines(novel_id, COALESCE(parent_id, ''), sort)
+    WHERE is_current_version = 1;
   `);
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
   return db;

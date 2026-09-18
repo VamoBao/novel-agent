@@ -2,6 +2,17 @@
 
 记录「为什么」而非「做了什么」：决策背景、备选方案、权衡依据与结论。
 
+## 2026-09-18 outlines 表：树形多版本大纲 + 仅当前版本的 sort 唯一索引
+
+- **背景**：大纲需要从 `output/<id>.json` 单文件演进为库内树形结构（卷/部/幕/章，parent 自引用），并支持同节点多版本（version + is_current_version）与写作生命周期（status + document_id 关联后续正文）。本次仅建表与 Store，不接入 create-novel 工作流（用户确认拆分为后续需求）。
+- **设计要点**：
+  - 「同一父级下 sort 不重复」约束范围经用户确认为**仅当前版本内唯一**：多版本行并存时旧版本与新版本同 sort 合法，故用部分唯一索引 `WHERE is_current_version = 1`，而非全表唯一（全表唯一会迫使同节点各版本错开 sort，排序语义失效）
+  - 根节点 `parent_id` 为 NULL，SQLite 唯一索引视 NULL 互异导致根层级判重失效；采用表达式索引 `COALESCE(parent_id, '')` 归一，并把 `novel_id` 纳入索引实现跨小说隔离
+  - 当前版本切换不做隐式降级：Store 保持无状态，调用方先降级旧版本再提升新版本，唯一索引兜底并发/漏降级冲突（测试覆盖「未降级直接提升被拒」路径）
+  - type/status 用英文枚举值（volume/part/act/chapter、planned/writing/completed/deprecated）+ CHECK 约束，与代码库英文标识符约定一致；本次未加大纲节点内容字段（用户确认暂不加，后续按需随 schema 升版扩展）
+  - `document_id` 暂为可空裸列：documents 表尚不存在，先不加外键，正文功能落地时补约束
+- **结论**：outlines 成为第 4 张表（UUIDv7 主键 + `novel_id` 外键），SCHEMA_VERSION 2→3（开发期不匹配重建）；`OutlineStore` 提供 add/get/list(currentOnly)/update，读写双向 zod 校验，唯一索引违规转译为可读错误。
+
 ## 2026-09-17 novels 表 + 全表 UUIDv7 主键 + 外键关联
 
 - **背景**：需要 novels 表保存小说信息（id/name/author/description），角色与世界观经 novel_id 外键关联；ID 从 uuidv4（node randomUUID）切换为 uuidv7。

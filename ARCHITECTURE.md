@@ -24,10 +24,11 @@ src/
 │   ├── types.ts            # NovelState / NovelParams / NovelStateStore 接口
 │   ├── id.ts               # generateUuidV7（封装 Bun.randomUUIDv7，同毫秒单调递增）+ generateNovelId
 │   ├── memory-store.ts     # NovelState 内存实现（数据库接入前的过渡，接口不变替换实现即可）
-│   ├── db.ts               # SQLite 打开与建表（novels / characters / worldviews，外键开启）
+│   ├── db.ts               # SQLite 打开与建表（novels / characters / worldviews / outlines，外键开启）
 │   ├── novel-store.ts      # 小说信息持久化（create/get/update，name 大纲确认后回填）
 │   ├── character-store.ts  # 角色按创作 ID 持久化（add/list，读写双向 zod 校验）
-│   └── worldview-store.ts  # 世界观按创作 ID 持久化（upsert/get，taboos 存 JSON）
+│   ├── worldview-store.ts  # 世界观按创作 ID 持久化（upsert/get，taboos 存 JSON）
+│   └── outline-store.ts    # 大纲树按创作 ID 持久化（add/get/list/update，读写双向 zod 校验）
 ├── output/
 │   └── outline-writer.ts # 大纲落盘：output/<id>.json（id 做文件名安全校验）
 └── workflows/
@@ -78,5 +79,5 @@ src/
   - `DEEPSEEK_API_KEY`：必填，DeepSeek API Key
   - `DEEPSEEK_MODEL_NAME`：可选，默认 `deepseek-flash`
   - `NOVEL_DB_PATH`：可选，SQLite 路径，默认 `data/novel.db`
-- SQLite：Bun 内置 `bun:sqlite`，各 store 共享默认连接（懒加载单例），`PRAGMA foreign_keys=ON` 按连接开启。三张表主键均为应用层生成的 **UUIDv7**（时间有序，索引友好）：`novels`（小说信息，1 的根）；`characters` 与 worldviewSchema 对应（1:N，自增序 + `novel_id` 外键索引），角色确认后只增不改；`worldviews`（1:1，`novel_id` 唯一外键，upsert 覆盖更新，`taboos` 数组存 JSON 文本）。schema 变更用 `PRAGMA user_version` 版本号管理：不匹配即重建（开发期数据可弃，接入生产需改为正式迁移）。NovelState 整体（status/params/outline）当前仍为内存态，SQLite 化为后续接入点
+- SQLite：Bun 内置 `bun:sqlite`，各 store 共享默认连接（懒加载单例），`PRAGMA foreign_keys=ON` 按连接开启。四张表主键均为应用层生成的 **UUIDv7**（时间有序，索引友好）：`novels`（小说信息，1 的根）；`characters` 与 worldviewSchema 对应（1:N，自增序 + `novel_id` 外键索引），角色确认后只增不改；`worldviews`（1:1，`novel_id` 唯一外键，upsert 覆盖更新，`taboos` 数组存 JSON 文本）；`outlines`（大纲树，`parent_id` 自引用外键 + `novel_id` 外键索引，`type` CHECK 卷/部/幕/章、`status` CHECK 计划中/写作中/写作完成/已废弃，同节点多版本行并存 `version`+`is_current_version`，部分唯一表达式索引 `(novel_id, COALESCE(parent_id,''), sort) WHERE is_current_version=1` 保证同父级下当前版本 sort 唯一——根节点 parent 为 NULL，SQLite 唯一索引视 NULL 互异故 COALESCE 归一；当前版本切换由调用方先降级旧版再提升新版，`document_id` 暂为可空裸列待 documents 表落地后补外键）。schema 变更用 `PRAGMA user_version` 版本号管理（当前 3）：不匹配即重建（开发期数据可弃，接入生产需改为正式迁移）。NovelState 整体（status/params/outline）当前仍为内存态，SQLite 化为后续接入点
 - deepseek-flash 对主角归一化存在改写漂移，已通过「强约束 prompt + 用户确认门」缓解（见 DECISIONS）
