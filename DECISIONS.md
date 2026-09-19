@@ -2,6 +2,22 @@
 
 记录「为什么」而非「做了什么」：决策背景、备选方案、权衡依据与结论。
 
+## 2026-09-19 Monorepo 改造 + Electron 客户端：agent 独立 Bun 进程 + UiChannel 交互抽象 + stdio JSON 协议
+
+- **背景**：为 agent 添加 Electron 桌面客户端并将仓库升级为 monorepo。设计规格见 `docs/superpowers/specs/2026-09-19-monorepo-electron-client-design.md`（经头脑风暴与用户逐节审查）。
+- **备选方案**（运行形态）：
+  1. **agent 独立 Bun 进程**（选定）：Electron 只做 UI 壳，main spawn `bun run headless.ts`，stdio JSON 行协议通信
+  2. agent 嵌入 Electron 主进程（Node 运行时）：须剥离 `bun:sqlite` / `Bun.randomUUIDv7` / `bun:test` 全部 Bun 专属依赖，交互层全重做，丧失 Bun 优势
+  3. 核心抽包双入口（agent-core 入 packages，CLI 与 Electron 双壳）：同样要 Node 化核心，双入口长期双倍维护
+  4. Docker：与桌面应用错配（用户须装 Docker Desktop、管道变 TCP、数据卷挂载）；一键启动用 spawn 即达成
+- **设计要点**：
+  - **agent 放 `apps/` 而非 `packages/`**：agent 是「有独立入口、独立运行时、可单独执行」的产品单元；`packages/shared` 只放双端复用的纯 zod 层（领域 schema + 视图 + 协议消息），schema 迁出 agent 是为了 client 渲染与协议引用同源，避免反向依赖
+  - **UiChannel 接口收敛全部交互**：workflows/tools/agents 不再直接 import `cli/prompt` 或 console 输出（ESLint no-restricted-imports + no-console 边界规则强制）。两处语义特意的接口设计——①EOF 分层：`askLine` 通道关闭返回 null（ask_user 工具借它让模型优雅收尾），其余提问抛 `UserAbortedError` 中止全流程；②确认视图与提问**原子绑定**：字段摘要/角色卡/大纲草稿作为 `askConfirm` 的 view 载荷随请求下发（延续 2026-09-17 并发确认串行化的「摘要拼入提示」约定），而非 present + ask 两步（会错位）
+  - **协议按 id 关联 + 无效应答重问**：request/response 用自增 id，类型不符/越界/空 required 以新 id 重发（对齐 CLI 校验循环）；并发 request 由 client 排队呈现（SerialLineSource 的 UI 等价）；协议消息不合法 fail-fast（开发期暴露协议 bug）
+  - **v1 无优雅取消**：一会话一进程，中断 = main 终止子进程（state 增量落库无需善后）；「重启 agent」即从头开始
+  - 测试净收获：FakeChannel（脚本化应答）+ mock `ai` 模块的 createNovel 全流程集成测试，纯本地跑通完整创作流（此前端到端必须真实 LLM）
+- **结论**：Bun workspaces 三区结构（apps/agent + packages/shared + apps/client）落地；Electron main spawn agent 经 zod 复验转发 IPC；无头冒烟（截图）+ 协议驱动器真实 LLM 端到端验证通过。打包分发（electron-builder + agent 编译进 extraResources）为 v2。
+
 ## 2026-09-18 大纲两级结构（部→幕）对齐 outlines 表并接入工作流
 
 - **背景**：outlines 表已落地但大纲仍只落 `output/<id>.json`；用户指定类型瘦身为部/幕/章并要求大纲生成对齐表模型——先问幕数（默认 5）再问部数（默认 1），生成两级大纲，确认后入库+落盘。

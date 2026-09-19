@@ -1,0 +1,23 @@
+{
+  "name": "@novel/agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "headless": "bun run src/headless.ts",
+    "test": "bun test",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/deepseek": "^3.0.44",
+    "@novel/shared": "workspace:*",
+    "ai": "^7.0.99",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^24.0.0"
+  }
+}

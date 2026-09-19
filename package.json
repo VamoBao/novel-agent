@@ -1,26 +1,25 @@
 {
   "name": "novel-agent",
   "version": "1.0.0",
-  "module": "src/index.ts",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run apps/agent/src/index.ts",
+    "dev:client": "bun run --cwd apps/client dev",
+    "headless": "bun run apps/agent/src/headless.ts",
+    "test": "bun test apps/agent packages/shared",
+    "lint": "eslint .",
+    "typecheck": "tsc -p apps/agent/tsconfig.json && tsc -p packages/shared/tsconfig.json && tsc -p apps/client/tsconfig.json"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/bun": "latest",
     "eslint": "^10.10.0",
     "globals": "^17.12.0",
     "typescript": "6",
     "typescript-eslint": "^8.70.0"
-  },
-  "private": true,
-  "scripts": {
-    "dev": "bun run src/index.ts",
-    "test": "bun test",
-    "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
-  },
-  "type": "module",
-  "dependencies": {
-    "@ai-sdk/deepseek": "^3.0.44",
-    "ai": "^7.0.99",
-    "zod": "^4.6.5"
   }
 }

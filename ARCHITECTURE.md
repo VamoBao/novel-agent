@@ -1,18 +1,22 @@
 # 模块架构（项目根目录级）
 
-> 项目级架构蓝图维护在根目录；`src/workflows/` 已建立模块文档（见 `src/workflows/ARCHITECTURE.md` 与 `src/workflows/PROGRESS.md`），其余子目录仍以本文件为准。
+> Bun workspaces monorepo（`apps/*` 应用 + `packages/*` 共享包）的项目级架构蓝图，维护在根目录；`apps/agent/src/workflows/` 已建立模块文档（见该目录的 `ARCHITECTURE.md` 与 `PROGRESS.md`），其余子目录仍以本文件为准。
 
 ## 分层结构
 
 ```text
-src/
+apps/agent/src/
 ├── index.ts              # CLI 入口：API Key 检查、运行 createNovel、错误处理与优雅退出
+├── headless.ts           # 协议模式入口：stdio JSON 行协议（hello 握手 / 消息分发 / EOF·SIGTERM 收尾）
 ├── cli/
-│   └── prompt.ts         # 交互输入原语（askLine/askSelect/askMultiSelect/askConfirm）
+│   └── prompt.ts         # 终端输入原语（askLine/askSelect/askMultiSelect/askConfirm/askInt）
 │                         #   TTY → node:readline；管道/文件 → 自维护行缓冲（见 DECISIONS）
 │                         #   并发读取自动串行化：FIFO 排队，提示语轮到时才写入，
 │                         #   兼容 ReAct Agent 一步内并行调用多个需用户确认的工具
-├── schemas/              # zod schema 层：worldview / character / conflict / outline / audience
+├── ui/                   # 交互通道层：UiChannel 接口（channel.ts）+ UserAbortedError（aborted.ts）
+│                         #   + CliChannel 终端实现（视图文本渲染）/ ProtocolChannel（stdio JSON
+│                         #   协议实现）/ FakeChannel 测试替身；
+│                         #   业务层（workflows/agents/tools）交互与输出的唯一出口
 ├── providers/
 │   └── deepseek.ts       # LLM 接入层：DeepSeek provider 实例与 model 导出
 ├── agents/
@@ -38,18 +42,31 @@ src/
         ├── worldview-agent.ts   # 世界观 ReAct Agent（多轮追问 + 终态提交）
         ├── character-agent.ts   # 角色 ReAct Agent（逐字段「概括→确认→保存」+ 终态组装校验）
         └── outline-agent.ts     # 大纲 ReAct Agent（部→幕两级结构，用户确认门 + 幕/部数强校验）
+
+packages/shared/src/     # @novel/shared：领域 zod schema 层（worldview / character / conflict /
+                         #   outline / audience / outline-node）——原 src/schemas/ 迁出，
+                         #   agent 与客户端共同引用，纯 zod 零运行时依赖
+
+apps/client/             # @novel/client：Electron 客户端（electron-vite 三段式 + React）
+├── electron/
+│   ├── main.ts          # 主进程：窗口 + AgentProcess（spawn bun headless、消息 zod 复验、
+│   │                    #   IPC 转发、hello 版本校验、退出回收）
+│   └── preload.ts       # contextBridge 最小 API（start / respond / onMessage / onExit）
+├── src/                 # renderer（React）：App 状态机 + StageBar / ViewCard / QuestionCard
+└── electron.vite.config.ts
 ```
 
 ## 依赖边界
 
 - `providers/`：最底层，不依赖其他 src 目录
-- `schemas/`：纯类型定义，不依赖其他 src 目录
-- `cli/`：只依赖 node 内置模块
+- `@novel/shared`（packages/shared）：纯 zod schema 包，不依赖任何工作区；apps/agent 各层经 `workspace:*` 依赖引用
+- `cli/`：终端输入原语，依赖 node 内置与 `ui/aborted`（中止异常）
+- `ui/`：交互通道层（UiChannel 接口与实现），依赖 `cli/`（终端原语）与 `@novel/shared`（视图类型）；业务层不得绕过通道直接触碰 `cli/prompt` 或 console 输出（ESLint 边界规则强制）
 - `state/`：依赖 `schemas/`（类型）
 - `tools/`：依赖 `cli/`（ask-user 需要读用户输入）
 - `agents/`：依赖 `providers/`（模型实例）
-- `workflows/`：依赖 `agents/ + tools/ + state/ + schemas/ + output/ + cli/ + providers/`，业务编排所在层（模块内部职责与数据流详见 `src/workflows/ARCHITECTURE.md`）
-- 任何下层不得反向依赖上层；`src/index.ts` 仅依赖 `workflows/ + cli/`
+- `workflows/`：依赖 `agents/ + tools/ + ui/ + state/ + @novel/shared + output/ + cli/ + providers/`，业务编排所在层（模块内部职责与数据流详见 `apps/agent/src/workflows/ARCHITECTURE.md`）
+- 任何下层不得反向依赖上层；`apps/agent/src/index.ts` 仅依赖 `workflows/ + cli/`
 
 ## 主工作流：createNovel（src/workflows/create-novel.ts）
 
@@ -80,5 +97,8 @@ src/
   - `DEEPSEEK_API_KEY`：必填，DeepSeek API Key
   - `DEEPSEEK_MODEL_NAME`：可选，默认 `deepseek-flash`
   - `NOVEL_DB_PATH`：可选，SQLite 路径，默认 `data/novel.db`
+  - `NOVEL_OUTPUT_DIR`：可选，大纲输出目录，默认 `output`；协议模式下由宿主进程传绝对路径，`hello` 消息回显校验
 - SQLite：Bun 内置 `bun:sqlite`，各 store 共享默认连接（懒加载单例），`PRAGMA foreign_keys=ON` 按连接开启。四张表主键均为应用层生成的 **UUIDv7**（时间有序，索引友好）：`novels`（小说信息，1 的根）；`characters` 与 worldviewSchema 对应（1:N，自增序 + `novel_id` 外键索引），角色确认后只增不改；`worldviews`（1:1，`novel_id` 唯一外键，upsert 覆盖更新，`taboos` 数组存 JSON 文本）；`outlines`（大纲树，`parent_id` 自引用外键 + `novel_id` 外键索引，`type` CHECK 部/幕/章——章为写作期预留，大纲阶段只建部/幕两级；`status` CHECK 计划中/写作中/写作完成/已废弃，同节点多版本行并存 `version`+`is_current_version`，部分唯一表达式索引 `(novel_id, COALESCE(parent_id,''), sort) WHERE is_current_version=1` 保证同父级下当前版本 sort 唯一——根节点 parent 为 NULL，SQLite 唯一索引视 NULL 互异故 COALESCE 归一；大纲确认后经 `saveOutlineTree` 整树事务入库，重复保存被唯一索引拒绝；当前版本切换由调用方先降级旧版再提升新版，`document_id` 暂为可空裸列待 documents 表落地后补外键）。schema 变更用 `PRAGMA user_version` 版本号管理（当前 4）：不匹配即重建（开发期数据可弃，接入生产需改为正式迁移）。NovelState 整体（status/params/outline）当前仍为内存态，SQLite 化为后续接入点
+- stdio JSON 协议（协议模式入口 `headless.ts`，Electron 等宿主 spawn）：消息 schema 定义在 `@novel/shared`（protocol.ts）；启动 `hello` 握手回显数据绝对路径与协议版本；提问 request / 应答 response 按自增 id 关联，无效应答（类型不符 / 越界 / 空 required）以新 id 重问（对齐 CLI 校验循环）；并发 request 由 client 按到达顺序排队呈现；stdin EOF / SIGTERM 即会话结束（state 已增量落库，无需善后；EOF 后 line 提问得 null、其余提问抛 UserAbortedError，与 CLI 语义一致）；协议消息不合法 fail-fast（发 error 消息后退出）
+- Electron 客户端（apps/client）：main 进程 spawn `bun run apps/agent/src/headless.ts`（cwd=仓库根；DEEPSEEK_API_KEY 从根 `.env` 解析注入，`NOVEL_DB_PATH` / `NOVEL_OUTPUT_DIR` 传绝对路径）；agent 消息经 zod 复验后 IPC 转发 renderer，hello 时校验协议版本（不匹配拒绝继续）；中断 = 终止子进程（v1 无优雅取消协议）；agent 非零退出 → renderer 错误视图 + 重启按钮（重启即从头开始，state 已增量落库）；WSL2 需 `disableHardwareAcceleration` + `disable-gpu` + `no-sandbox` + `in-process-gpu`（GPU 子进程启动即崩）；诊断钩子 `NOVEL_CLIENT_AUTOSTART=1` / `NOVEL_CLIENT_SCREENSHOT=<path>`（无头冒烟 / 截图存盘退出）
 - deepseek-flash 对主角归一化存在改写漂移，已通过「强约束 prompt + 用户确认门」缓解（见 DECISIONS）
