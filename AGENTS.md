@@ -1,6 +1,6 @@
 # novel-agent
 
-一个基于 Bun + TypeScript 构建的 AI Agent 应用（当前处于初始阶段，入口为 `index.ts`）。
+一个基于 Bun + TypeScript 构建的交互式小说创作 AI Agent 应用（CLI 形态，入口为 `src/index.ts`）：通过类型/受众问答、世界观 / 角色 / 核心冲突的多轮收集确认、两级大纲（部→幕）生成确认，完成小说前期设定，并按 UUIDv7 创作 ID 持久化到 SQLite 与 `output/` 落盘。
 
 ## 技术栈
 
@@ -33,8 +33,10 @@
 - `src/tools/`：提供给 LLM 使用的通用工具（`ask-user.ts` 工厂函数，按 Agent 标签生成），经 `tools/index.ts` 汇总导出；workflow 私有终态工具在对应 agent 文件内定义
 - `src/state/`：小说创作状态与持久化（`NovelStateStore` 接口 + 内存实现 + UUIDv7 生成；`db.ts` 建库建表（novels / characters / worldviews / outlines，外键关联），`novel-store.ts`/`character-store.ts`/`worldview-store.ts`/`outline-store.ts` 按 UUIDv7 创作 ID 落 SQLite）
 - `src/output/`：产物落盘（大纲按创作 ID 保存为 `output/<id>.json`）
-- `src/workflows/`：工作流编排（`create-novel.ts` 主流程 + `agents/` 下 worldview / character / outline 三个 subAgent）
-- `docs/`：Agent 工作流指导文档
+- `src/workflows/`：工作流编排（`create-novel.ts` 主流程 + `agents/` 下 worldview / character / outline 三个 subAgent；本模块已建立模块级状态文档 `src/workflows/ARCHITECTURE.md` 与 `src/workflows/PROGRESS.md`）
+- `docs/`：Agent 工作流指导文档（需求 / 提交 / 修 Bug 三份指引）；`docs/superpowers/specs/` 存放前期设计规格（如 monorepo 与 Electron 客户端设计，状态以文首标注为准）
+- `files/`：本地参考资料（`prompt.md` 原始工作流需求、`role.md` 角色属性设计参考），已 gitignore
+- `.env.example`：环境变量样例（`.env` 已 gitignore，Bun 自动加载）
 - `docker-compose.yaml`：本地辅助——sqlite-web 网页查看 `data/novel.db`（宿主 8081 端口，非应用运行时依赖）
 - `eslint.config.js`、`tsconfig.json`：静态检查与编译配置
 
@@ -46,7 +48,7 @@
 
 每次执行用户需求前，按以下顺序工作：
 
-1. 先读本文件了解项目结构与约定，再读取状态文档 `ARCHITECTURE.md` 与 `PROGRESS.md`（本项目暂无模块划分，状态文档放项目根目录；不存在则视为新建模块，在任务过程中按需创建）
+1. 先读本文件了解项目结构与约定，再读取状态文档：项目级状态文档在仓库根目录（`ARCHITECTURE.md` 与 `PROGRESS.md`）；需求落在已建立模块文档的目录（当前为 `src/workflows/`）时，同时读取该模块目录内的同名文档。缺失则视为新建模块/新层级，在任务过程中按需创建
 2. 按任务类型读取对应指引：
    - 新需求开发：[`docs/feature-check-guide.md`](docs/feature-check-guide.md)
    - 修复 Bug / 处理报错：[`docs/bug-fix-guide.md`](docs/bug-fix-guide.md)
@@ -55,7 +57,7 @@
 
 ## 状态文档约定
 
-每个模块目录内维护三份状态文档（无明确模块划分的项目放项目根目录），由 Agent 在任务过程中按需创建与更新：
+状态文档分两级维护，由 Agent 在任务过程中按需创建与更新：项目级放仓库根目录；结构与职责足够独立、已建立模块文档的模块目录（当前为 `src/workflows/`）内放模块级同名文档：
 
 - `ARCHITECTURE.md`：模块架构蓝图、文件职责与依赖边界
 - `PROGRESS.md`：进度与已知 Bug（时间格式统一为 `YYYY-MM-DD`）

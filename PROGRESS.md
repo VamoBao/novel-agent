@@ -4,6 +4,8 @@
 
 ## 已完成
 
+- 2026-09-19 [docs] 三份工作流指引与入口文档对齐项目现状：AGENTS.md 修正项目阶段与入口描述（「初始阶段 / 入口 index.ts」→ 交互式创作工作流 / `src/index.ts`）、目录清单补登 `docs/superpowers/specs/`、`files/`、`.env.example`、workflows 模块级状态文档，状态文档约定升级为两级（项目级根目录 + 模块级模块目录）；feature-check-guide 状态文档读取层级与 DECISIONS.md 位置对齐两级约定；git-commit-guide scope 改为取实际分层目录名、禁止提交清单对齐 .gitignore（`.env`、`files/`）、示例改用项目真实词汇；bug-fix-guide 复盘记录位置对齐 PROGRESS.md「流程复盘记录」区域。AC：typecheck/lint/test 通过（59 用例）；四份文档无模板占位符/适配说明残留，引用路径全部存在
+
 - 2026-09-18 [chore] 新增 `docker-compose.yaml`：sqlite-web 网页查库界面（coleifer/sqlite-web，宿主 8081 → 容器 8080，挂载 `./data` 打开 `novel.db`），仅本地查看用、非应用运行时依赖；修正自 excel-parse 模板拷来的失真注释（路径对齐本项目 `data/novel.db`）。AC：`docker compose config` 解析通过；typecheck/lint/test 通过（59 用例，未改动代码）
 
 - 2026-09-18 [feat] 大纲两级结构对齐 outlines 表并接入工作流：outlineNodeType 瘦身为部/幕/章（去卷，SCHEMA_VERSION 3→4 重建）；outlineSchema 重构为「部→幕」嵌套（部含概述，每部至少 1 幕）；`outlineSchemaFor(actCount, partCount)` refine 强校验恰好 M 部共 N 幕；OutlineStore 新增 `saveOutlineTree`（部根节点/幕子节点，sort 按父级 1 起，整树事务，中途失败回滚、重复保存拒绝）；createNovel 先问幕数（3-20 默认 5）再问部数（1~幕数 默认 1），确认后入库+落盘（output JSON 结构变两级，旧文件不兼容）。AC：typecheck/lint/test 通过（59 用例：两级映射/事务回滚/重复拒绝/结构校验）；真实 LLM 定向冒烟（仙侠参数，要求 2 部 5 幕 → 恰好 2 部共 5 幕，模型自分配 3+2，管道确认 y 一次通过）
