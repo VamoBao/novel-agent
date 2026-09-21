@@ -42,7 +42,9 @@ export {
   novelListItemSchema,
   characterEntrySchema,
   novelDetailSchema,
+  novelDeletedResultSchema,
   type NovelListItem,
   type CharacterEntry,
   type NovelDetail,
+  type NovelDeletedResult,
 } from "./query";

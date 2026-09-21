@@ -2,12 +2,14 @@ import type { Database } from "bun:sqlite";
 import { DEFAULT_DB_PATH, getDefaultDatabase, openDatabase } from "./db";
 import { generateNovelId } from "./id";
 
-/** novels 表记录：小说基本信息（name 在大纲确认后回填） */
+/** novels 表记录：小说基本信息（name 在大纲确认后回填；pinned / favorite 为书库管理标记） */
 export interface NovelRecord {
   id: string;
   name: string | null;
   author: string | null;
   description: string | null;
+  pinned: boolean;
+  favorite: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -28,13 +30,13 @@ const INSERT_SQL = `
 `;
 
 const SELECT_SQL = `
-  SELECT id, name, author, description, created_at, updated_at
+  SELECT id, name, author, description, pinned, favorite, created_at, updated_at
   FROM novels WHERE id = ?;
 `;
 
 const LIST_SQL = `
-  SELECT id, name, author, description, created_at, updated_at
-  FROM novels ORDER BY created_at DESC, id DESC;
+  SELECT id, name, author, description, pinned, favorite, created_at, updated_at
+  FROM novels ORDER BY pinned DESC, created_at DESC, id DESC;
 `;
 
 /**
@@ -67,10 +69,32 @@ export class NovelStore {
     return row ? rowToNovel(row) : undefined;
   }
 
-  /** 全部小说（新创建的在前），供库查询入口列出 */
+  /** 全部小说（置顶优先，组内按创建时间倒序），供库查询入口列出 */
   listNovels(): NovelRecord[] {
     const rows = this.db.prepare(LIST_SQL).all() as NovelRow[];
     return rows.map(rowToNovel);
+  }
+
+  /** 置顶 / 收藏标记置位（书库管理右键菜单），返回更新后记录 */
+  setNovelPinned(id: string, pinned: boolean): NovelRecord {
+    return this.updateFlag(id, "pinned", pinned);
+  }
+
+  setNovelFavorite(id: string, favorite: boolean): NovelRecord {
+    return this.updateFlag(id, "favorite", favorite);
+  }
+
+  /** 整本删除：单事务级联清掉 outlines（自引用树整删）→ characters → worldviews → novels */
+  deleteNovel(id: string): void {
+    if (!this.getNovel(id)) {
+      throw new Error(`小说不存在，无法删除：${id}`);
+    }
+    this.db.transaction(() => {
+      this.db.prepare("DELETE FROM outlines WHERE novel_id = ?;").run(id);
+      this.db.prepare("DELETE FROM characters WHERE novel_id = ?;").run(id);
+      this.db.prepare("DELETE FROM worldviews WHERE novel_id = ?;").run(id);
+      this.db.prepare("DELETE FROM novels WHERE id = ?;").run(id);
+    })();
   }
 
   /** 部分更新（name/author/description），自动盖章 updated_at */
@@ -104,6 +128,15 @@ export class NovelStore {
     }
     return record;
   }
+
+  /** 置位 pinned / favorite 管理标记（不动 updated_at——非内容变更） */
+  private updateFlag(id: string, column: "pinned" | "favorite", value: boolean): NovelRecord {
+    if (!this.getNovel(id)) {
+      throw new Error(`小说不存在，无法更新：${id}`);
+    }
+    this.db.prepare(`UPDATE novels SET ${column} = ? WHERE id = ?;`).run(value ? 1 : 0, id);
+    return this.getNovelOrThrow(id);
+  }
 }
 
 interface NovelRow {
@@ -111,6 +144,8 @@ interface NovelRow {
   name: string | null;
   author: string | null;
   description: string | null;
+  pinned: number;
+  favorite: number;
   created_at: string;
   updated_at: string;
 }
@@ -121,6 +156,8 @@ function rowToNovel(row: NovelRow): NovelRecord {
     name: row.name,
     author: row.author,
     description: row.description,
+    pinned: row.pinned === 1,
+    favorite: row.favorite === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

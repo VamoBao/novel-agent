@@ -24,6 +24,15 @@ contextBridge.exposeInMainWorld("agent", {
   listNovels: (): Promise<NovelListItem[]> => ipcRenderer.invoke("library:list"),
   getNovelDetail: (novelId: string): Promise<NovelDetail> =>
     ipcRenderer.invoke("library:get", novelId),
+  /** 书库管理（右键菜单）：返回更新后的列表项 / 被删 ID */
+  renameNovel: (novelId: string, name: string): Promise<NovelListItem> =>
+    ipcRenderer.invoke("library:rename", novelId, name),
+  setNovelPinned: (novelId: string, pinned: boolean): Promise<NovelListItem> =>
+    ipcRenderer.invoke("library:setPinned", novelId, pinned),
+  setNovelFavorite: (novelId: string, favorite: boolean): Promise<NovelListItem> =>
+    ipcRenderer.invoke("library:setFavorite", novelId, favorite),
+  deleteNovel: (novelId: string): Promise<{ deleted: string }> =>
+    ipcRenderer.invoke("library:delete", novelId),
   /** 诊断钩子：无头冒烟自动打开创作覆盖层（preload 沙箱关闭，可直接读环境变量） */
   isAutostart: (): boolean => process.env.NOVEL_CLIENT_AUTOSTART === "1",
   /** 诊断钩子：无头冒烟自动选中小说并预览首个可用节点 */

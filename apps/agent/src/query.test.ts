@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
@@ -7,7 +8,14 @@ import { CharacterStore } from "./state/character-store";
 import { openDatabase } from "./state/db";
 import { NovelStore } from "./state/novel-store";
 import { WorldviewStore } from "./state/worldview-store";
-import { buildNovelDetail, buildNovelList } from "./query";
+import {
+  buildNovelDetail,
+  buildNovelList,
+  deleteNovel,
+  renameNovel,
+  setNovelFavorite,
+  setNovelPinned,
+} from "./query";
 
 const tempDirs: string[] = [];
 
@@ -119,6 +127,53 @@ describe("query CLI（buildNovelList / buildNovelDetail）", () => {
     expect(() =>
       buildNovelDetail(db, "dddddddd-0000-7000-8000-00000000dead", outputDir),
     ).toThrow("小说不存在");
+    db.close();
+  });
+});
+
+describe("query CLI 管理命令（rename / pin / favorite / delete）", () => {
+  test("rename trim 校验并回读新名称", async () => {
+    const { db } = await newFixture();
+    const id = "aaaaaaaa-0000-7000-8000-000000000010";
+    new NovelStore(db).createNovel({ id, name: "旧名" });
+    const renamed = renameNovel(db, id, "  新书名  ");
+    expect(renamed.name).toBe("新书名");
+    expect(() => renameNovel(db, id, "   ")).toThrow("不能为空");
+    db.close();
+  });
+
+  test("pin / favorite 后 list 排序与标记生效", async () => {
+    const { db } = await newFixture();
+    const novels = new NovelStore(db);
+    novels.createNovel({ id: "aaaaaaaa-0000-7000-8000-000000000011", name: "甲" });
+    novels.createNovel({ id: "aaaaaaaa-0000-7000-8000-000000000012", name: "乙" });
+    setNovelPinned(db, "aaaaaaaa-0000-7000-8000-000000000011", true);
+    setNovelFavorite(db, "aaaaaaaa-0000-7000-8000-000000000012", true);
+    const list = buildNovelList(db);
+    expect(list[0]?.name).toBe("甲");
+    expect(list[0]?.pinned).toBe(true);
+    expect(list[1]?.favorite).toBe(true);
+    db.close();
+  });
+
+  test("delete 级联删除并清理 output 产物（产物缺失不报错）", async () => {
+    const { db, outputDir } = await newFixture();
+    const id = "aaaaaaaa-0000-7000-8000-000000000013";
+    new NovelStore(db).createNovel({ id, name: "待删" });
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(outputDir, { recursive: true });
+    const artifact = join(outputDir, `${id}.json`);
+    await writeFile(artifact, "{}\n", { flag: "wx" });
+
+    const result = deleteNovel(db, id, outputDir);
+    expect(result.deleted).toBe(id);
+    expect(existsSync(artifact)).toBe(false);
+    expect(new NovelStore(db).listNovels()).toHaveLength(0);
+    // 产物本就不存在时再删一本也不报错
+    new NovelStore(db).createNovel({ id: "aaaaaaaa-0000-7000-8000-000000000014" });
+    expect(deleteNovel(db, "aaaaaaaa-0000-7000-8000-000000000014", outputDir).deleted).toBe(
+      "aaaaaaaa-0000-7000-8000-000000000014",
+    );
     db.close();
   });
 });

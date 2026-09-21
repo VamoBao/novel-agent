@@ -8,8 +8,9 @@
 apps/agent/src/
 ├── index.ts              # CLI 入口：API Key 检查、运行 createNovel、错误处理与优雅退出
 ├── headless.ts           # 协议模式入口：stdio JSON 行协议（hello 握手 / 消息分发 / EOF·SIGTERM 收尾）
-├── query.ts              # 库查询入口：一次性 CLI（list 列小说 / get 取全量资料），
-│                         #   stdout 单行 JSON（契约见 @novel/shared query.ts），只读连接
+├── query.ts              # 库查询与管理入口：一次性 CLI——查询（list / get）+ 管理
+│                         #   （rename / pin / unpin / favorite / unfavorite / delete），
+│                         #   stdout 单行 JSON（契约见 @novel/shared query.ts）
 ├── cli/
 │   └── prompt.ts         # 终端输入原语（askLine/askSelect/askMultiSelect/askConfirm/askInt）
 │                         #   TTY → node:readline；管道/文件 → 自维护行缓冲（见 DECISIONS）
@@ -53,13 +54,15 @@ packages/shared/src/     # @novel/shared：双端共享纯 zod 层——领域 s
 apps/client/             # @novel/client：Electron 客户端（electron-vite 三段式 + React）
 ├── electron/
 │   ├── main.ts          # 主进程：窗口 + AgentProcess（spawn bun headless、消息 zod 复验、
-│   │                    #   IPC 转发、hello 版本校验、退出回收）+ library 查询 IPC
+│   │                    #   IPC 转发、hello 版本校验、退出回收）+ library 查询 / 管理 IPC
 │   │                    #   （spawn 一次性查询 CLI、shared schema 复验、超时兜底）
 │   └── preload.ts       # contextBridge 最小 API（start/stop / respond / onMessage / onExit /
-│                        #   listNovels / getNovelDetail + 诊断钩子读取）
+│                        #   listNovels / getNovelDetail / rename / setPinned / setFavorite /
+│                        #   delete + 诊断钩子读取）
 ├── src/                 # renderer（React）：App 三栏浏览壳（书库 / 结构树 / 预览 + 创作覆盖层）
-│                        #   + CreationFlow 问答流 + NovelListPanel / StructureTreePanel /
-│                        #   PreviewPane / StageBar / ViewCard / QuestionCard
+│                        #   + CreationFlow 问答流 + NovelListPanel（右键菜单管理：重命名 /
+│                        #   置顶 / 收藏 / 删除二次确认）/ StructureTreePanel / PreviewPane /
+│                        #   StageBar / ViewCard / QuestionCard
 └── electron.vite.config.ts
 ```
 
@@ -105,7 +108,7 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
   - `DEEPSEEK_MODEL_NAME`：可选，默认 `deepseek-flash`
   - `NOVEL_DB_PATH`：可选，SQLite 路径，默认 `data/novel.db`
   - `NOVEL_OUTPUT_DIR`：可选，大纲输出目录，默认 `output`；协议模式下由宿主进程传绝对路径，`hello` 消息回显校验
-- SQLite：Bun 内置 `bun:sqlite`，各 store 共享默认连接（懒加载单例），`PRAGMA foreign_keys=ON` 按连接开启。四张表主键均为应用层生成的 **UUIDv7**（时间有序，索引友好）：`novels`（小说信息，1 的根）；`characters` 与 worldviewSchema 对应（1:N，自增序 + `novel_id` 外键索引），角色确认后只增不改；`worldviews`（1:1，`novel_id` 唯一外键，upsert 覆盖更新，`taboos` 数组存 JSON 文本）；`outlines`（大纲树，`parent_id` 自引用外键 + `novel_id` 外键索引，`type` CHECK 部/幕/章——章为写作期预留，大纲阶段只建部/幕两级；`status` CHECK 计划中/写作中/写作完成/已废弃，同节点多版本行并存 `version`+`is_current_version`，部分唯一表达式索引 `(novel_id, COALESCE(parent_id,''), sort) WHERE is_current_version=1` 保证同父级下当前版本 sort 唯一——根节点 parent 为 NULL，SQLite 唯一索引视 NULL 互异故 COALESCE 归一；大纲确认后经 `saveOutlineTree` 整树事务入库，重复保存被唯一索引拒绝；当前版本切换由调用方先降级旧版再提升新版，`document_id` 暂为可空裸列待 documents 表落地后补外键）。schema 变更用 `PRAGMA user_version` 版本号管理（当前 4）：不匹配即重建（开发期数据可弃，接入生产需改为正式迁移）。NovelState 整体（status/params/outline）当前仍为内存态，SQLite 化为后续接入点
+- SQLite：Bun 内置 `bun:sqlite`，各 store 共享默认连接（懒加载单例），`PRAGMA foreign_keys=ON` 按连接开启。四张表主键均为应用层生成的 **UUIDv7**（时间有序，索引友好）：`novels`（小说信息，1 的根，`pinned` / `favorite` 为书库管理标记，置顶优先排序、收藏星标不影响排序）；`characters` 与 worldviewSchema 对应（1:N，自增序 + `novel_id` 外键索引），角色确认后只增不改；`worldviews`（1:1，`novel_id` 唯一外键，upsert 覆盖更新，`taboos` 数组存 JSON 文本）；`outlines`（大纲树，`parent_id` 自引用外键 + `novel_id` 外键索引，`type` CHECK 部/幕/章——章为写作期预留，大纲阶段只建部/幕两级；`status` CHECK 计划中/写作中/写作完成/已废弃，同节点多版本行并存 `version`+`is_current_version`，部分唯一表达式索引 `(novel_id, COALESCE(parent_id,''), sort) WHERE is_current_version=1` 保证同父级下当前版本 sort 唯一——根节点 parent 为 NULL，SQLite 唯一索引视 NULL 互异故 COALESCE 归一；大纲确认后经 `saveOutlineTree` 整树事务入库，重复保存被唯一索引拒绝；当前版本切换由调用方先降级旧版再提升新版，`document_id` 暂为可空裸列待 documents 表落地后补外键）。schema 变更用 `PRAGMA user_version` 版本号管理（当前 5）：**4→5 起 client 书库已投产，仅做保数据的 ALTER 增量迁移**（4→5 为 novels 增列 pinned / favorite），DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底。NovelState 整体（status/params/outline）当前仍为内存态，SQLite 化为后续接入点；整本删除（书库管理）由 `deleteNovel` 单事务级联清四表并由查询入口清理 `output/<id>.json` 产物
 - stdio JSON 协议（协议模式入口 `headless.ts`，Electron 等宿主 spawn）：消息 schema 定义在 `@novel/shared`（protocol.ts）；启动 `hello` 握手回显数据绝对路径与协议版本；提问 request / 应答 response 按自增 id 关联，无效应答（类型不符 / 越界 / 空 required）以新 id 重问（对齐 CLI 校验循环）；并发 request 由 client 按到达顺序排队呈现；stdin EOF / SIGTERM 即会话结束（state 已增量落库，无需善后；EOF 后 line 提问得 null、其余提问抛 UserAbortedError，与 CLI 语义一致）；协议消息不合法 fail-fast（发 error 消息后退出）
-- Electron 客户端（apps/client）：main 进程 spawn `bun run apps/agent/src/headless.ts`（cwd=仓库根；DEEPSEEK_API_KEY 从根 `.env` 解析注入，`NOVEL_DB_PATH` / `NOVEL_OUTPUT_DIR` 传绝对路径）；agent 消息经 zod 复验后 IPC 转发 renderer，hello 时校验协议版本（不匹配拒绝继续）；中断 = 终止子进程（v1 无优雅取消协议）；agent 非零退出 → renderer 错误视图 + 重启按钮（重启即从头开始，state 已增量落库）；书库浏览走一次性查询 CLI——`library:list` / `library:get` IPC spawn `bun run apps/agent/src/query.ts`（stdout JSON 经 shared query schema 复验，8s 超时兜底）；renderer 为三栏浏览壳（左栏书库可汉堡折叠 / 中栏世界观·角色·大纲结构树 / 右栏 ViewCard 预览），创作问答流以覆盖层盖住中+右栏（CreationFlow 挂载即发起会话，run_finished 后关层刷新书库并选中新作；大纲预览读 `output/<id>.json` 产物，表内仅树节点名）；WSL2 需 `disableHardwareAcceleration` + `disable-gpu` + `no-sandbox` + `in-process-gpu`（GPU 子进程启动即崩）；诊断钩子 `NOVEL_CLIENT_AUTOSTART=1`（renderer 自动打开创作覆盖层）/ `NOVEL_CLIENT_SELECT=<novelId>`（自动选中并预览）/ `NOVEL_CLIENT_SCREENSHOT=<path>`（无头冒烟 / 截图存盘退出）
+- Electron 客户端（apps/client）：main 进程 spawn `bun run apps/agent/src/headless.ts`（cwd=仓库根；DEEPSEEK_API_KEY 从根 `.env` 解析注入，`NOVEL_DB_PATH` / `NOVEL_OUTPUT_DIR` 传绝对路径）；agent 消息经 zod 复验后 IPC 转发 renderer，hello 时校验协议版本（不匹配拒绝继续）；中断 = 终止子进程（v1 无优雅取消协议）；agent 非零退出 → renderer 错误视图 + 重启按钮（重启即从头开始，state 已增量落库）；书库浏览与管理走一次性查询 CLI——`library:*` IPC spawn `bun run apps/agent/src/query.ts`（stdout JSON 经 shared query schema 复验，8s 超时兜底；管理命令 rename / pin / unpin / favorite / unfavorite / delete，查询入口统一走 openDatabase 连接以顺带完成 4→5 版本迁移）；renderer 为三栏浏览壳（左栏书库可汉堡折叠 / 中栏世界观·角色·大纲结构树 / 右栏 ViewCard 预览），创作问答流以覆盖层盖住中+右栏（CreationFlow 挂载即发起会话，run_finished 后关层刷新书库并选中新作；大纲预览读 `output/<id>.json` 产物，表内仅树节点名）；WSL2 需 `disableHardwareAcceleration` + `disable-gpu` + `no-sandbox` + `in-process-gpu`（GPU 子进程启动即崩）；诊断钩子 `NOVEL_CLIENT_AUTOSTART=1`（renderer 自动打开创作覆盖层）/ `NOVEL_CLIENT_SELECT=<novelId>`（自动选中并预览）/ `NOVEL_CLIENT_SCREENSHOT=<path>`（无头冒烟 / 截图存盘退出）
 - deepseek-flash 对主角归一化存在改写漂移，已通过「强约束 prompt + 用户确认门」缓解（见 DECISIONS）

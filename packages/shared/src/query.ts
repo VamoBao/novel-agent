@@ -13,6 +13,8 @@ import { worldviewSchema } from "./worldview";
 export const novelListItemSchema = z.object({
   id: z.string().min(1).describe("小说创作 ID（UUIDv7）"),
   name: z.string().nullable().describe("小说名称，未命名为 null"),
+  pinned: z.boolean().describe("置顶（列表排序优先，组内按创建时间倒序）"),
+  favorite: z.boolean().describe("收藏（星标，不影响排序）"),
   createdAt: z.string().describe("创建时间（ISO 8601）"),
   updatedAt: z.string().describe("最近更新时间（ISO 8601）"),
 });
@@ -34,3 +36,9 @@ export const novelDetailSchema = z.object({
     .describe("大纲（读 output/<id>.json 产物），未生成或产物缺失为 null"),
 });
 export type NovelDetail = z.infer<typeof novelDetailSchema>;
+
+/** delete 命令的结果：被删除的小说创作 ID */
+export const novelDeletedResultSchema = z.object({
+  deleted: z.string().min(1).describe("被删除的小说创作 ID"),
+});
+export type NovelDeletedResult = z.infer<typeof novelDeletedResultSchema>;

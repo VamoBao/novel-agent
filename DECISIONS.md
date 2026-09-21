@@ -2,6 +2,19 @@
 
 记录「为什么」而非「做了什么」：决策背景、备选方案、权衡依据与结论。
 
+## 2026-09-21 书库管理：schema 4→5 弃「不匹配即重建」改保数据增量迁移
+
+- **背景**：书库右键管理（重命名 / 置顶 / 收藏 / 删除）需要 novels 表增列 pinned / favorite。既有 schema 版本策略是「user_version 不匹配即 DROP 重建」，前提为「开发期数据可弃」——但三栏浏览 UI 上线后 `data/novel.db` 已承载用户真实书库数据，重建即清空用户书库，不可接受。
+- **备选方案**：
+  1. **ALTER 增量迁移**（选定）：4→5 执行 `ALTER TABLE novels ADD COLUMN pinned/favorite ... DEFAULT 0`，旧数据零回填
+  2. 重建表迁移（CREATE 新表 + INSERT SELECT + 改名）：加列场景下无收益，反而引入外键重挂与窗口期风险
+  3. 维持 DROP 重建：直接丢用户数据，被否决
+- **权衡依据**：加列 + DEFAULT 是 SQLite 最安全的迁移形态（无行级改写）；DROP 重建仅保留给 <4 的开发期旧库与异常版本（>5 的库被旧代码打开）兜底。**连带决策**：查询 CLI 弃 readonly 连接、统一走 `openDatabase()`——否则纯浏览路径无法触发迁移，旧库首次 `list` 即因缺列报 `no such column`；readonly 的原始动机（防查询触发 DROP 重建）已因保数据迁移而消失。
+- **设计要点**：
+  - **删除语义**：`deleteNovel` 单事务级联清 outlines（自引用树一条 DELETE 按 novel_id 整删，语句末无孤儿即过约束）→ characters → worldviews → novels；入口层 best-effort 清理 `output/<id>.json` 产物（缺失不算失败）；UI 项内二次确认（文案明示级联范围）
+  - **置顶 / 收藏语义**：置顶布尔参与排序（`pinned DESC, created_at DESC, id DESC`，组内按创建时间倒序）；收藏仅星标不影响排序——不引入拖拽自定义排序与收藏筛选（YAGNI）；标记置位不动 updated_at（非内容变更）
+- **结论**：SCHEMA_VERSION 5；迁移有单测（v4 库 → openDatabase → 数据保留 + 新列可用 + 版本升 5）；真实库经新代码 list 顺带完成迁移、3 本小说完整保留。
+
 ## 2026-09-21 客户端三栏浏览 UI：书库读数走 agent 一次性查询 CLI
 
 - **背景**：客户端从「单次创作会话」升级为三栏浏览主界面（左栏小说列表 / 中栏世界观·角色·大纲结构树 / 右栏预览），需要读 SQLite 库；Electron 主进程是 Node 运行时，无法直接用 agent 侧 `bun:sqlite` store 层。设计规格 `docs/superpowers/specs/2026-09-21-client-browse-ui-design.md`（布局形态 / 创作共存方式 / 读数架构三项关键决策经用户选择确认）。

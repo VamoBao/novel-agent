@@ -2,7 +2,9 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Database } from "bun:sqlite";
 import { NovelStore } from "./novel-store";
+import { openDatabase } from "./db";
 
 let tempDir: string;
 
@@ -63,6 +65,121 @@ describe("NovelStore", () => {
     const store = NovelStore.open(join(dir, "test.db"));
     expect(store.getNovel("eeeeeeee-0000-7000-8000-0000000000ff")).toBeUndefined();
     store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () => {
+  test("setNovelPinned / setNovelFavorite 置位返回更新后记录，不动 updated_at", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-mgmt-"));
+    const store = NovelStore.open(join(dir, "test.db"));
+    const created = store.createNovel({ name: "测试之书" });
+    const pinned = store.setNovelPinned(created.id, true);
+    const favorited = store.setNovelFavorite(created.id, true);
+    expect(pinned.pinned).toBe(true);
+    expect(pinned.updatedAt).toBe(created.updatedAt);
+    expect(favorited.favorite).toBe(true);
+    expect(() => store.setNovelPinned("eeeeeeee-0000-7000-8000-00000000bad", true)).toThrow(
+      "不存在",
+    );
+    expect(() => store.setNovelFavorite("eeeeeeee-0000-7000-8000-00000000bad", true)).toThrow(
+      "不存在",
+    );
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("listNovels 置顶优先，组内按创建时间倒序", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-order-"));
+    const store = NovelStore.open(join(dir, "test.db"));
+    const older = store.createNovel({ id: "aaaaaaaa-0000-7000-8000-000000000001", name: "旧书" });
+    store.createNovel({ id: "aaaaaaaa-0000-7000-8000-000000000002", name: "新书" });
+    let list = store.listNovels();
+    expect(list.map((n) => n.name)).toEqual(["新书", "旧书"]);
+
+    store.setNovelPinned(older.id, true);
+    list = store.listNovels();
+    expect(list.map((n) => n.name)).toEqual(["旧书", "新书"]);
+    expect(list[0]?.pinned).toBe(true);
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("deleteNovel 单事务级联清空四表关联数据", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-del-"));
+    const db = openDatabase(join(dir, "test.db"));
+    const store = new NovelStore(db);
+    const id = "aaaaaaaa-0000-7000-8000-000000000003";
+    store.createNovel({ id, name: "待删之书" });
+    db
+      .prepare(
+        `INSERT INTO worldviews (id, novel_id, geography, fantasy_attributes,
+         real_world_mapping, taboos, created_at, updated_at)
+         VALUES ('wv-1', ?, '大陆', NULL, NULL, '[]', ?, ?);`,
+      )
+      .run(id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+    db
+      .prepare(
+        `INSERT INTO characters (id, novel_id, name, desire, fear, narrative_role, background,
+         creation_purpose, ending_direction, created_at)
+         VALUES ('ch-1', ?, '甲', '愿', '惧', '主角', '背景', '目的', '结局', ?);`,
+      )
+      .run(id, "2026-01-01T00:00:00Z");
+    db
+      .prepare(
+        `INSERT INTO outlines (id, novel_id, parent_id, type, name, sort, version,
+         is_current_version, status, created_at, updated_at)
+         VALUES ('part-1', ?, NULL, 'part', '第一部', 1, 1, 1, 'planned', ?, ?),
+                ('act-1', ?, 'part-1', 'act', '第一幕', 1, 1, 1, 'planned', ?, ?);`,
+      )
+      .run(id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+
+    store.deleteNovel(id);
+    expect(store.getNovel(id)).toBeUndefined();
+    expect((db.prepare("SELECT COUNT(*) AS c FROM worldviews").get() as { c: number }).c).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) AS c FROM characters").get() as { c: number }).c).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) AS c FROM outlines").get() as { c: number }).c).toBe(0);
+    expect(() => store.deleteNovel(id)).toThrow("不存在");
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("v4 旧库经 openDatabase 迁移：数据保留、新列可用、版本升到 5", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-mig-"));
+    const dbPath = join(dir, "v4.db");
+    // 手工构造 v4 形态的库：旧 novels 结构（无 pinned / favorite）+ 一行真实数据
+    const legacy = new Database(dbPath, { create: true });
+    legacy.exec("PRAGMA foreign_keys = ON;");
+    legacy.exec(`
+      CREATE TABLE novels (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        author TEXT,
+        description TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    legacy
+      .prepare(
+        "INSERT INTO novels (id, name, author, description, created_at, updated_at) VALUES (?, ?, NULL, NULL, ?, ?);",
+      )
+      .run("aaaaaaaa-0000-7000-8000-000000000004", "旧世界之书", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+    legacy.exec("PRAGMA user_version = 4;");
+    legacy.close();
+
+    const db = openDatabase(dbPath);
+    const store = new NovelStore(db);
+    const record = store.getNovel("aaaaaaaa-0000-7000-8000-000000000004");
+    expect(record?.name).toBe("旧世界之书");
+    expect(record?.pinned).toBe(false);
+    expect(record?.favorite).toBe(false);
+    store.setNovelPinned("aaaaaaaa-0000-7000-8000-000000000004", true);
+    expect(store.listNovels()[0]?.pinned).toBe(true);
+    expect(
+      (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
+    ).toBe(5);
+    db.close();
     await rm(dir, { recursive: true, force: true });
   });
 });

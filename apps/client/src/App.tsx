@@ -101,6 +101,44 @@ export function App() {
     void refreshList();
   };
 
+  /** 书库管理操作：失败回显到书库错误区，成功后刷新列表保持选中 */
+  const handleRename = async (id: string, name: string): Promise<void> => {
+    try {
+      await window.agent.renameNovel(id, name);
+      await refreshList();
+    } catch (error) {
+      setLibraryError(errorMessage(error));
+    }
+  };
+
+  const handleSetPinned = async (id: string, pinned: boolean): Promise<void> => {
+    try {
+      await window.agent.setNovelPinned(id, pinned);
+      await refreshList();
+    } catch (error) {
+      setLibraryError(errorMessage(error));
+    }
+  };
+
+  const handleSetFavorite = async (id: string, favorite: boolean): Promise<void> => {
+    try {
+      await window.agent.setNovelFavorite(id, favorite);
+      await refreshList();
+    } catch (error) {
+      setLibraryError(errorMessage(error));
+    }
+  };
+
+  const handleDelete = async (id: string): Promise<void> => {
+    try {
+      await window.agent.deleteNovel(id);
+      if (id === selectedId) setSelectedId(null);
+      await refreshList();
+    } catch (error) {
+      setLibraryError(errorMessage(error));
+    }
+  };
+
   return (
     <div className="app">
       <header className="header">
@@ -127,6 +165,10 @@ export function App() {
             selectedId={selectedId}
             onSelect={setSelectedId}
             onRefresh={() => void refreshList()}
+            onRename={(id, name) => void handleRename(id, name)}
+            onSetPinned={(id, pinned) => void handleSetPinned(id, pinned)}
+            onSetFavorite={(id, favorite) => void handleSetFavorite(id, favorite)}
+            onDelete={(id) => void handleDelete(id)}
           />
         </aside>
         <nav className="tree-pane">

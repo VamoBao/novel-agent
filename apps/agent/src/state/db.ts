@@ -5,13 +5,15 @@ import { dirname } from "node:path";
 /** 数据库文件路径（相对项目根；可用环境变量 NOVEL_DB_PATH 覆盖，测试用） */
 export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
-/** schema 版本：结构变更时递增；不匹配时开发期直接重建（本地测试数据可弃） */
-const SCHEMA_VERSION = 4;
+/** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
+ *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
+const SCHEMA_VERSION = 5;
 
 /**
  * 打开（必要时创建）数据库并完成建表。
  * 四张表主键均为应用层生成的 UUIDv7（时间有序，索引友好）：
- * - novels：小说信息（其余业务表经 novel_id 外键关联）
+ * - novels：小说信息（pinned / favorite 为书库管理标记；name 在大纲确认后回填），
+ *   其余业务表经 novel_id 外键关联
  * - characters：角色卡，1:N（novel_id 索引）
  * - worldviews：世界观，1:1（novel_id 唯一），taboos 数组存 JSON 文本
  * - outlines：大纲树（部/幕两级入库，章为写作期预留），parent_id 自引用外键，多版本行并存
@@ -25,10 +27,18 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
 
   const versionRow = db.query("PRAGMA user_version").get() as { user_version: number };
   if (versionRow.user_version !== SCHEMA_VERSION) {
-    db.exec("DROP TABLE IF EXISTS outlines;");
-    db.exec("DROP TABLE IF EXISTS characters;");
-    db.exec("DROP TABLE IF EXISTS worldviews;");
-    db.exec("DROP TABLE IF EXISTS novels;");
+    if (versionRow.user_version === 4) {
+      // 4→5：novels 增列 pinned / favorite（书库管理），ALTER 保数据；
+      // 新列有 DEFAULT，旧数据无需回填
+      db.exec("ALTER TABLE novels ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;");
+      db.exec("ALTER TABLE novels ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;");
+    } else {
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>5 的库被旧代码打开）：重建兜底
+      db.exec("DROP TABLE IF EXISTS outlines;");
+      db.exec("DROP TABLE IF EXISTS characters;");
+      db.exec("DROP TABLE IF EXISTS worldviews;");
+      db.exec("DROP TABLE IF EXISTS novels;");
+    }
   }
 
   db.exec(`
@@ -37,6 +47,8 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       name TEXT,
       author TEXT,
       description TEXT,
+      pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+      favorite INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0, 1)),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

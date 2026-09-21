@@ -1,40 +1,44 @@
-import { Database } from "bun:sqlite";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import {
+  novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
   outlineSchema,
+  type NovelDeletedResult,
   type NovelDetail,
   type NovelListItem,
   type Outline,
 } from "@novel/shared";
 import { CharacterStore } from "./state/character-store";
-import { DEFAULT_DB_PATH } from "./state/db";
+import { openDatabase } from "./state/db";
 import { NovelStore, type NovelRecord } from "./state/novel-store";
 import { WorldviewStore } from "./state/worldview-store";
 import { OUTPUT_DIR, outlineFilePath } from "./output/outline-writer";
 
 /**
- * 库查询入口（一次性 CLI）：Electron 客户端等宿主经
- * `bun run apps/agent/src/query.ts <list | get <novelId>>` 调用——
+ * 库查询与管理入口（一次性 CLI）：Electron 客户端等宿主经
+ * `bun run apps/agent/src/query.ts <命令> [参数]` 调用——
  * stdout 输出单行 JSON（结构见 @novel/shared query.ts），失败走 stderr 并非零退出。
- * 与 headless.ts 的长驻问答协议相区分：无会话状态、即起即退；
- * 以只读连接打开库，绝不触发 openDatabase 的建表 / 版本重建逻辑。
+ * 与 headless.ts 的长驻问答协议相区分：无会话状态、即起即退。
+ *
+ * 命令一览：
+ * - 查询：`list`（全部小说，置顶优先）/ `get <novelId>`（单本全量资料）
+ * - 管理：`rename <novelId> <name>` / `pin|unpin <novelId>` / `favorite|unfavorite <novelId>`
+ *   / `delete <novelId>`（级联删除关联数据并清理 output 产物）
+ *
+ * 连接统一走 openDatabase：4→5 起有保数据迁移，纯浏览路径也须能完成版本升级
+ * （readonly 连接会在旧库上因缺列报错）。
  */
 
 function toListItem(record: NovelRecord): NovelListItem {
   return novelListItemSchema.parse({
     id: record.id,
     name: record.name,
+    pinned: record.pinned,
+    favorite: record.favorite,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   });
-}
-
-/** 只读连接；库文件不存在（从未创作过）返回 null，由调用方输出空结果 */
-function openReadonly(path: string = DEFAULT_DB_PATH): Database | null {
-  if (!existsSync(path)) return null;
-  return new Database(path, { readonly: true });
 }
 
 /** 大纲产物读取：output/<id>.json 缺失或结构不合法一律视为未生成 */
@@ -53,14 +57,14 @@ function readOutlineArtifact(novelId: string, outputDir: string): Outline | null
   }
 }
 
-/** list 载荷：全部小说（新创建的在前） */
-export function buildNovelList(db: Database): NovelListItem[] {
+/** list 载荷：全部小说（置顶优先，组内按创建时间倒序） */
+export function buildNovelList(db: ReturnType<typeof openDatabase>): NovelListItem[] {
   return new NovelStore(db).listNovels().map(toListItem);
 }
 
 /** get 载荷：单本小说全量资料；小说不存在抛错 */
 export function buildNovelDetail(
-  db: Database,
+  db: ReturnType<typeof openDatabase>,
   novelId: string,
   outputDir: string = OUTPUT_DIR,
 ): NovelDetail {
@@ -80,29 +84,88 @@ export function buildNovelDetail(
   });
 }
 
+/** rename 载荷：更新名称（trim 非空校验），返回更新后列表项 */
+export function renameNovel(db: ReturnType<typeof openDatabase>, novelId: string, name: string): NovelListItem {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) {
+    throw new Error("小说名称不能为空");
+  }
+  return toListItem(new NovelStore(db).updateNovel(novelId, { name: trimmed }));
+}
+
+/** 置顶 / 收藏载荷：置位后返回更新后列表项 */
+export function setNovelPinned(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  pinned: boolean,
+): NovelListItem {
+  return toListItem(new NovelStore(db).setNovelPinned(novelId, pinned));
+}
+
+export function setNovelFavorite(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  favorite: boolean,
+): NovelListItem {
+  return toListItem(new NovelStore(db).setNovelFavorite(novelId, favorite));
+}
+
+/** delete 载荷：级联删除四表关联数据 + best-effort 清理 output 产物 */
+export function deleteNovel(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  outputDir: string = OUTPUT_DIR,
+): NovelDeletedResult {
+  new NovelStore(db).deleteNovel(novelId);
+  try {
+    unlinkSync(outlineFilePath(novelId, outputDir));
+  } catch {
+    // 产物不存在（未生成 / 已删）不算失败
+  }
+  return novelDeletedResultSchema.parse({ deleted: novelId });
+}
+
 function main(argv: string[]): number {
-  const [command, novelId] = argv;
-  if (command === "list") {
-    const db = openReadonly();
-    const payload = db ? buildNovelList(db) : [];
-    db?.close();
-    process.stdout.write(`${JSON.stringify(payload)}\n`);
-    return 0;
-  }
-  if (command === "get" && novelId) {
-    const db = openReadonly();
-    if (!db) {
-      process.stderr.write(`小说不存在：${novelId}（数据库尚未创建）\n`);
-      return 1;
+  const [command, novelId, ...rest] = argv;
+  const db = openDatabase();
+  try {
+    switch (command) {
+      case "list":
+        process.stdout.write(`${JSON.stringify(buildNovelList(db))}\n`);
+        return 0;
+      case "get":
+        if (!novelId) break;
+        process.stdout.write(`${JSON.stringify(buildNovelDetail(db, novelId))}\n`);
+        return 0;
+      case "rename":
+        if (!novelId || rest.length === 0) break;
+        process.stdout.write(`${JSON.stringify(renameNovel(db, novelId, rest.join(" ")))}\n`);
+        return 0;
+      case "pin":
+      case "unpin":
+        if (!novelId) break;
+        process.stdout.write(`${JSON.stringify(setNovelPinned(db, novelId, command === "pin"))}\n`);
+        return 0;
+      case "favorite":
+      case "unfavorite":
+        if (!novelId) break;
+        process.stdout.write(
+          `${JSON.stringify(setNovelFavorite(db, novelId, command === "favorite"))}\n`,
+        );
+        return 0;
+      case "delete":
+        if (!novelId) break;
+        process.stdout.write(`${JSON.stringify(deleteNovel(db, novelId))}\n`);
+        return 0;
+      default:
+        break;
     }
-    try {
-      process.stdout.write(`${JSON.stringify(buildNovelDetail(db, novelId))}\n`);
-    } finally {
-      db.close();
-    }
-    return 0;
+  } finally {
+    db.close();
   }
-  process.stderr.write("用法：bun run apps/agent/src/query.ts <list | get <novelId>>\n");
+  process.stderr.write(
+    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id>>\n",
+  );
   return 1;
 }
 

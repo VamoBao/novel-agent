@@ -11,6 +11,10 @@ declare global {
       onExit: (callback: (code: number) => void) => () => void;
       listNovels: () => Promise<NovelListItem[]>;
       getNovelDetail: (novelId: string) => Promise<NovelDetail>;
+      renameNovel: (novelId: string, name: string) => Promise<NovelListItem>;
+      setNovelPinned: (novelId: string, pinned: boolean) => Promise<NovelListItem>;
+      setNovelFavorite: (novelId: string, favorite: boolean) => Promise<NovelListItem>;
+      deleteNovel: (novelId: string) => Promise<{ deleted: string }>;
       isAutostart: () => boolean;
       autoSelectNovelId: () => string | null;
     };

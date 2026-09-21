@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   agentMessageSchema,
+  novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
   PROTOCOL_VERSION,
@@ -270,6 +271,37 @@ ipcMain.handle("library:get", async (_event, novelId: string): Promise<NovelDeta
   const result = novelDetailSchema.safeParse(await runLibraryQuery(["get", novelId]));
   if (!result.success) {
     throw new Error(`小说详情不合查询 schema：${result.error.issues[0]?.message ?? "未知错误"}`);
+  }
+  return result.data;
+});
+
+/** 书库管理：操作成功返回更新后的列表项（delete 返回被删 ID） */
+function handleItemMutation(args: string[]): Promise<NovelListItem> {
+  return runLibraryQuery(args).then((raw) => {
+    const result = novelListItemSchema.safeParse(raw);
+    if (!result.success) {
+      throw new Error(`管理结果不合查询 schema：${result.error.issues[0]?.message ?? "未知错误"}`);
+    }
+    return result.data;
+  });
+}
+
+ipcMain.handle("library:rename", (_event, novelId: string, name: string) =>
+  handleItemMutation(["rename", novelId, name]),
+);
+
+ipcMain.handle("library:setPinned", (_event, novelId: string, pinned: boolean) =>
+  handleItemMutation([pinned ? "pin" : "unpin", novelId]),
+);
+
+ipcMain.handle("library:setFavorite", (_event, novelId: string, favorite: boolean) =>
+  handleItemMutation([favorite ? "favorite" : "unfavorite", novelId]),
+);
+
+ipcMain.handle("library:delete", async (_event, novelId: string) => {
+  const result = novelDeletedResultSchema.safeParse(await runLibraryQuery(["delete", novelId]));
+  if (!result.success) {
+    throw new Error(`删除结果不合查询 schema：${result.error.issues[0]?.message ?? "未知错误"}`);
   }
   return result.data;
 });

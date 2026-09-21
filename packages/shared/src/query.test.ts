@@ -1,9 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { characterEntrySchema, novelDetailSchema, novelListItemSchema } from "./query";
+import {
+  characterEntrySchema,
+  novelDeletedResultSchema,
+  novelDetailSchema,
+  novelListItemSchema,
+} from "./query";
 
 const validListItem = {
   id: "0199c0de-0000-7000-8000-000000000001",
   name: "灵脉破晓",
+  pinned: false,
+  favorite: false,
   createdAt: "2026-09-20T10:00:00.000Z",
   updatedAt: "2026-09-20T12:00:00.000Z",
 };
@@ -39,9 +46,33 @@ describe("novelListItemSchema", () => {
     expect(item.name).toBeNull();
   });
 
+  test("置顶 / 收藏标记布尔解析", () => {
+    const item = novelListItemSchema.parse({ ...validListItem, pinned: true, favorite: true });
+    expect(item.pinned).toBeTrue();
+    expect(item.favorite).toBeTrue();
+  });
+
+  test("缺少 pinned / favorite 被拒绝", () => {
+    const { pinned: _p, favorite: _f, ...rest } = validListItem;
+    expect(() => novelListItemSchema.parse(rest)).toThrow();
+  });
+
   test("缺少 id 被拒绝", () => {
     const { id: _id, ...rest } = validListItem;
     expect(() => novelListItemSchema.parse(rest)).toThrow();
+  });
+});
+
+describe("novelDeletedResultSchema", () => {
+  test("deleted 结果通过校验", () => {
+    const result = novelDeletedResultSchema.parse({
+      deleted: "0199c0de-0000-7000-8000-000000000009",
+    });
+    expect(result.deleted).toBe("0199c0de-0000-7000-8000-000000000009");
+  });
+
+  test("空 deleted 被拒绝", () => {
+    expect(() => novelDeletedResultSchema.parse({ deleted: "" })).toThrow();
   });
 });
 
