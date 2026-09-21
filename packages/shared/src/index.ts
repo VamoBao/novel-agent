@@ -38,3 +38,11 @@ export {
   type AgentMessage,
   type ClientMessage,
 } from "./protocol";
+export {
+  novelListItemSchema,
+  characterEntrySchema,
+  novelDetailSchema,
+  type NovelListItem,
+  type CharacterEntry,
+  type NovelDetail,
+} from "./query";

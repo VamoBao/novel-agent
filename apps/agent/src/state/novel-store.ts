@@ -32,6 +32,11 @@ const SELECT_SQL = `
   FROM novels WHERE id = ?;
 `;
 
+const LIST_SQL = `
+  SELECT id, name, author, description, created_at, updated_at
+  FROM novels ORDER BY created_at DESC, id DESC;
+`;
+
 /**
  * 小说信息持久化。novels 行必须先于 characters / worldviews 创建
  *（二者 novel_id 外键关联本表）。
@@ -60,6 +65,12 @@ export class NovelStore {
   getNovel(id: string): NovelRecord | undefined {
     const row = this.db.prepare(SELECT_SQL).get(id) as NovelRow | null;
     return row ? rowToNovel(row) : undefined;
+  }
+
+  /** 全部小说（新创建的在前），供库查询入口列出 */
+  listNovels(): NovelRecord[] {
+    const rows = this.db.prepare(LIST_SQL).all() as NovelRow[];
+    return rows.map(rowToNovel);
   }
 
   /** 部分更新（name/author/description），自动盖章 updated_at */

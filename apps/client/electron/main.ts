@@ -2,7 +2,14 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { agentMessageSchema, PROTOCOL_VERSION } from "@novel/shared";
+import {
+  agentMessageSchema,
+  novelDetailSchema,
+  novelListItemSchema,
+  PROTOCOL_VERSION,
+  type NovelDetail,
+  type NovelListItem,
+} from "@novel/shared";
 
 /** 仓库根（dev：app 路径为 apps/client，上两级即根；打包分发形态 v2 再调整） */
 function resolveRepoRoot(): string {
@@ -28,6 +35,61 @@ function loadEnvFile(file: string): Record<string, string> {
   }
 }
 
+/** agent / 查询 CLI 子进程共用环境：数据路径传绝对路径（相对路径会随 spawn cwd 漂移） */
+function childEnv(): NodeJS.ProcessEnv {
+  const repoRoot = resolveRepoRoot();
+  return {
+    ...process.env,
+    ...loadEnvFile(path.join(repoRoot, ".env")),
+    NOVEL_DB_PATH: path.join(repoRoot, "data", "novel.db"),
+    NOVEL_OUTPUT_DIR: path.join(repoRoot, "output"),
+  };
+}
+
+/**
+ * 执行一次性库查询 CLI（apps/agent/src/query.ts）：收集 stdout 单行 JSON 原样返回，
+ * 结构由调用方用 shared schema 复验；超时 / 非零退出（stderr 为错误信息）→ reject。
+ */
+function runLibraryQuery(args: string[], timeoutMs = 8000): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("bun", ["run", "apps/agent/src/query.ts", ...args], {
+      cwd: resolveRepoRoot(),
+      env: childEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error(`库查询超时（${timeoutMs}ms）`));
+    }, timeoutMs);
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(new Error(`库查询进程启动失败：${error.message}`));
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `库查询失败（exit ${code ?? "null"}）`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch {
+        reject(new Error(`库查询输出不是合法 JSON：${stdout.slice(0, 200)}`));
+      }
+    });
+  });
+}
+
 /** agent 子进程宿主：spawn headless 入口、转发协议消息、退出回收 */
 class AgentProcess {
   private child: ChildProcess | null = null;
@@ -42,15 +104,9 @@ class AgentProcess {
     if (this.child) return;
     this.win = win;
     const repoRoot = resolveRepoRoot();
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      ...loadEnvFile(path.join(repoRoot, ".env")),
-      NOVEL_DB_PATH: path.join(repoRoot, "data", "novel.db"),
-      NOVEL_OUTPUT_DIR: path.join(repoRoot, "output"),
-    };
     const child = spawn("bun", ["run", "apps/agent/src/headless.ts"], {
       cwd: repoRoot,
-      env,
+      env: childEnv(),
       stdio: ["pipe", "pipe", "inherit"],
     });
     this.child = child;
@@ -159,12 +215,12 @@ function createWindow(): BrowserWindow {
   });
 
   // 诊断钩子（默认关闭，仅环境变量显式开启；用于无头冒烟与端到端联调）：
-  // NOVEL_CLIENT_AUTOSTART=1：页面加载完成后自动 spawn agent（等价点击「开始创作」）
+  // NOVEL_CLIENT_AUTOSTART=1：页面加载完成后自动打开创作覆盖层（等价点击「新建小说」，
+  //   由 renderer 读同款环境变量触发，agent 的 spawn 始终由 CreationFlow 发起）
   // NOVEL_CLIENT_SCREENSHOT=<path>：加载完成数秒后截图存盘并退出
   const autostart = process.env.NOVEL_CLIENT_AUTOSTART === "1";
   const screenshot = process.env.NOVEL_CLIENT_SCREENSHOT;
   win.webContents.on("did-finish-load", () => {
-    if (autostart) agentProcess.start(win);
     if (screenshot) {
       setTimeout(
         () => {
@@ -195,6 +251,27 @@ ipcMain.handle("agent:start", () => {
 
 ipcMain.handle("agent:respond", (_event, id: number, answer: string | string[] | boolean | number) => {
   agentProcess.respond(id, answer);
+});
+
+// 中断 = 终止 agent 子进程（v1 无优雅取消协议；state 已增量落库）
+ipcMain.handle("agent:stop", () => {
+  agentProcess.kill();
+});
+
+ipcMain.handle("library:list", async (): Promise<NovelListItem[]> => {
+  const result = novelListItemSchema.array().safeParse(await runLibraryQuery(["list"]));
+  if (!result.success) {
+    throw new Error(`小说列表不合查询 schema：${result.error.issues[0]?.message ?? "未知错误"}`);
+  }
+  return result.data;
+});
+
+ipcMain.handle("library:get", async (_event, novelId: string): Promise<NovelDetail> => {
+  const result = novelDetailSchema.safeParse(await runLibraryQuery(["get", novelId]));
+  if (!result.success) {
+    throw new Error(`小说详情不合查询 schema：${result.error.issues[0]?.message ?? "未知错误"}`);
+  }
+  return result.data;
 });
 
 app.whenReady().then(() => {

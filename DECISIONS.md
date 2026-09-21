@@ -2,6 +2,19 @@
 
 记录「为什么」而非「做了什么」：决策背景、备选方案、权衡依据与结论。
 
+## 2026-09-21 客户端三栏浏览 UI：书库读数走 agent 一次性查询 CLI
+
+- **背景**：客户端从「单次创作会话」升级为三栏浏览主界面（左栏小说列表 / 中栏世界观·角色·大纲结构树 / 右栏预览），需要读 SQLite 库；Electron 主进程是 Node 运行时，无法直接用 agent 侧 `bun:sqlite` store 层。设计规格 `docs/superpowers/specs/2026-09-21-client-browse-ui-design.md`（布局形态 / 创作共存方式 / 读数架构三项关键决策经用户选择确认）。
+- **备选方案**（读数架构，用户选定方案 1）：
+  1. **agent 侧一次性查询 CLI**（选定）：main spawn `bun run apps/agent/src/query.ts list|get`，stdout 单行 JSON，shared query schema 双端复验
+  2. Electron 主进程直读 SQLite（node:sqlite / better-sqlite3）：免子进程，但绕过 store 层双向 zod 校验，且引入原生依赖 / 实验性 API 兼容负担
+- **权衡依据**：与既有 headless spawn 模式同构（无新通信范式）；store 层与 shared schema 全复用，双端结构零漂移；查询为低频只读操作，子进程冷启动（百毫秒级）可接受。查询入口以只读连接打开库（先判断库文件存在，readonly 打开），不触发 `openDatabase` 的建表 / 版本重建副作用。
+- **设计要点**：
+  - **大纲预览以 `output/<id>.json` 产物为数据源**：outlines 表只存树节点名（title / logline / summary / keyPlotPoints 在表外），产物与库在确认流程中同步写入、一一对应；产物缺失或不合法一律按「未生成」降级展示，不阻塞世界观 / 角色浏览
+  - **创作流以覆盖层盖住中+右栏**（用户选定，左栏书库保持可见）：问答流整体迁移为 CreationFlow，挂载即发起会话，run_finished 后关层 → 刷新书库 → 自动选中新作；中途关闭 = 终止子进程（新增 `agent:stop` IPC，语义同 v1 中断，state 已增量落库）
+  - **诊断钩子语义修正**：AUTOSTART 从「main 直 spawn agent」改为「renderer 自动打开创作覆盖层」——新架构下 agent 会话必须由 CreationFlow 发起（消息监听与提问应答都在其内），main 裸 spawn 会产生无 UI 的孤儿会话；新增 `NOVEL_CLIENT_SELECT=<novelId>` 支持无头冒烟自动选中并预览
+- **结论**：shared 新增 query 契约（novelListItem / novelDetail / characterEntry），agent 新增 query.ts + `NovelStore.listNovels()`，client 新增 library IPC + 三栏组件（NovelListPanel / StructureTreePanel / PreviewPane）+ CreationFlow 覆盖层。核心冲突（coreConflict）未持久化入库，浏览界面不含该类（与现有表能力对齐）。
+
 ## 2026-09-19 Monorepo 改造 + Electron 客户端：agent 独立 Bun 进程 + UiChannel 交互抽象 + stdio JSON 协议
 
 - **背景**：为 agent 添加 Electron 桌面客户端并将仓库升级为 monorepo。设计规格见 `docs/superpowers/specs/2026-09-19-monorepo-electron-client-design.md`（经头脑风暴与用户逐节审查）。

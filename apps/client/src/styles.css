@@ -33,6 +33,209 @@ body {
   margin: 0;
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.icon-btn {
+  padding: 6px 10px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* 三栏工作区：左栏书库（可折叠为 0 宽）/ 中栏结构树 / 右栏预览；创作覆盖层借
+   grid-row/column 压在其中栏与右栏之上（z-index 高于普通栏） */
+.workspace {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 232px 300px 1fr;
+  grid-auto-rows: 1fr;
+  min-height: 0;
+}
+
+.workspace > * {
+  grid-row: 1;
+  min-height: 0;
+}
+
+.workspace.collapsed {
+  grid-template-columns: 0 300px 1fr;
+}
+
+.sidebar {
+  border-right: 1px solid #e4e7eb;
+  background: #fbfbfc;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tree-pane {
+  border-right: 1px solid #e4e7eb;
+  background: #fff;
+  overflow-y: auto;
+}
+
+.preview-pane {
+  overflow-y: auto;
+  padding: 16px 20px 32px;
+}
+
+.creation-overlay {
+  grid-column: 2 / 4;
+  z-index: 10;
+  background: #f6f7f9;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.creation-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 20px;
+  background: #fff;
+  border-bottom: 1px solid #e4e7eb;
+  position: sticky;
+  top: 0;
+}
+
+.creation-header .close-btn {
+  margin-left: auto;
+}
+
+.row.center {
+  justify-content: center;
+}
+
+/* 左栏书库 / 中栏结构树公共头部 */
+.library,
+.structure {
+  padding: 10px 0 20px;
+}
+
+.library-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 12px 8px;
+  font-size: 13px;
+}
+
+.pane-hint {
+  color: #6a737d;
+  font-size: 13px;
+  padding: 0 12px;
+  line-height: 1.6;
+}
+
+.pane-error {
+  color: #b42318;
+  font-size: 13px;
+  padding: 0 12px;
+  line-height: 1.6;
+}
+
+.pane-error button {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.novel-list,
+.tree-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.novel-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 7px 12px;
+  line-height: 1.3;
+}
+
+.novel-item:hover:not(:disabled) {
+  background: #eef0f3;
+}
+
+.novel-item.active {
+  background: #e8effd;
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.novel-item .novel-name {
+  display: block;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.novel-item .novel-id {
+  display: block;
+  font-size: 11px;
+  color: #9aa1ab;
+}
+
+.tree-node {
+  display: block;
+  width: calc(100% - 8px);
+  margin: 1px 4px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-node:hover:not(.muted) {
+  background: #eef0f3;
+}
+
+.tree-node.active {
+  background: #e8effd;
+  color: #1d4ed8;
+}
+
+.tree-node.muted {
+  color: #9aa1ab;
+  cursor: default;
+}
+
+.tree-group {
+  padding: 10px 12px 3px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6a737d;
+}
+
+/* 右栏预览 */
+.preview-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 14px;
+  font-size: 18px;
+}
+
+.preview-title .preview-id {
+  font-size: 12px;
+  font-weight: 400;
+  color: #9aa1ab;
+}
+
 .stagebar {
   display: flex;
   gap: 6px;

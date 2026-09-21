@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AgentMessage } from "@novel/shared";
+import type { AgentMessage, NovelDetail, NovelListItem } from "@novel/shared";
 
 /**
  * 渲染进程唯一入口：contextBridge 暴露最小 API。
@@ -7,6 +7,7 @@ import type { AgentMessage } from "@novel/shared";
  */
 contextBridge.exposeInMainWorld("agent", {
   start: (): Promise<void> => ipcRenderer.invoke("agent:start"),
+  stop: (): Promise<void> => ipcRenderer.invoke("agent:stop"),
   respond: (id: number, answer: string | string[] | boolean | number): Promise<void> =>
     ipcRenderer.invoke("agent:respond", id, answer),
   onMessage: (callback: (message: AgentMessage) => void): (() => void) => {
@@ -19,4 +20,12 @@ contextBridge.exposeInMainWorld("agent", {
     ipcRenderer.on("agent:exit", listener as never);
     return () => ipcRenderer.removeListener("agent:exit", listener as never);
   },
+  /** 书库只读查询（main 进程 spawn 查询 CLI，结构经 shared schema 复验） */
+  listNovels: (): Promise<NovelListItem[]> => ipcRenderer.invoke("library:list"),
+  getNovelDetail: (novelId: string): Promise<NovelDetail> =>
+    ipcRenderer.invoke("library:get", novelId),
+  /** 诊断钩子：无头冒烟自动打开创作覆盖层（preload 沙箱关闭，可直接读环境变量） */
+  isAutostart: (): boolean => process.env.NOVEL_CLIENT_AUTOSTART === "1",
+  /** 诊断钩子：无头冒烟自动选中小说并预览首个可用节点 */
+  autoSelectNovelId: (): string | null => process.env.NOVEL_CLIENT_SELECT ?? null,
 });
