@@ -182,4 +182,24 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     db.close();
     await rm(dir, { recursive: true, force: true });
   });
+
+  test("并发防锁：busy_timeout 生效，版本匹配的重复打开零写不冲突", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-lock-"));
+    const dbPath = join(dir, "test.db");
+    const setup = openDatabase(dbPath);
+    setup.close();
+
+    // 写锁被另一连接持有时（模拟 agent 进程写库），纯读路径照常工作
+    const holder = new Database(dbPath);
+    holder.exec("BEGIN IMMEDIATE;");
+    const reader = openDatabase(dbPath);
+    expect(
+      (reader.query("PRAGMA busy_timeout").get() as { timeout: number }).timeout,
+    ).toBe(5000);
+    expect(new NovelStore(reader).listNovels()).toEqual([]);
+    reader.close();
+    holder.exec("COMMIT;");
+    holder.close();
+    await rm(dir, { recursive: true, force: true });
+  });
 });

@@ -21,9 +21,17 @@ const SCHEMA_VERSION = 5;
 export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
   mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path, { create: true });
-  db.exec("PRAGMA journal_mode = WAL;");
+  // 跨进程并发（agent 会话写库 / 查询 CLI 打开库）时短锁冲突等待重试，
+  // 而非默认 busy_timeout=0 立即抛 "database is locked"
+  db.exec("PRAGMA busy_timeout = 5000;");
   // SQLite 外键约束默认关闭，必须按连接显式开启
   db.exec("PRAGMA foreign_keys = ON;");
+  // journal_mode 幂等设置：已是 WAL 不再执行设置语句（该语句本身要取库级锁，
+  // 无条件执行会让纯浏览路径与写进程冲突）
+  const modeRow = db.query("PRAGMA journal_mode").get() as { journal_mode: string };
+  if (modeRow.journal_mode.toLowerCase() !== "wal") {
+    db.exec("PRAGMA journal_mode = WAL;");
+  }
 
   const versionRow = db.query("PRAGMA user_version").get() as { user_version: number };
   if (versionRow.user_version !== SCHEMA_VERSION) {
@@ -39,6 +47,9 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       db.exec("DROP TABLE IF EXISTS worldviews;");
       db.exec("DROP TABLE IF EXISTS novels;");
     }
+    // 版本号写入只发生在真正迁移 / 重建时——PRAGMA user_version 赋值是写语句，
+    // 无条件执行会让「版本已匹配」的纯浏览路径也去抢写锁（跨进程并发即 locked）
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
   }
 
   db.exec(`
@@ -117,7 +128,6 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
     ON outlines(novel_id, COALESCE(parent_id, ''), sort)
     WHERE is_current_version = 1;
   `);
-  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
   return db;
 }
 
