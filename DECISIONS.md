@@ -25,6 +25,7 @@
 - **设计要点**：
   - **大纲预览以 `output/<id>.json` 产物为数据源**：outlines 表只存树节点名（title / logline / summary / keyPlotPoints 在表外），产物与库在确认流程中同步写入、一一对应；产物缺失或不合法一律按「未生成」降级展示，不阻塞世界观 / 角色浏览
   - **创作流以覆盖层盖住中+右栏**（用户选定，左栏书库保持可见）：问答流整体迁移为 CreationFlow，挂载即发起会话，run_finished 后关层 → 刷新书库 → 自动选中新作；中途关闭 = 终止子进程（新增 `agent:stop` IPC，语义同 v1 中断，state 已增量落库）
+    > 2026-09-22 更新：按用户后续需求，创作流从「覆盖层盖住中+右栏」改为**独立创作页**（App 页面级切换，浏览页汉堡 / 三栏结构不与创作页共存），CreationFlow 内部逻辑与联动不变。
   - **诊断钩子语义修正**：AUTOSTART 从「main 直 spawn agent」改为「renderer 自动打开创作覆盖层」——新架构下 agent 会话必须由 CreationFlow 发起（消息监听与提问应答都在其内），main 裸 spawn 会产生无 UI 的孤儿会话；新增 `NOVEL_CLIENT_SELECT=<novelId>` 支持无头冒烟自动选中并预览
 - **结论**：shared 新增 query 契约（novelListItem / novelDetail / characterEntry），agent 新增 query.ts + `NovelStore.listNovels()`，client 新增 library IPC + 三栏组件（NovelListPanel / StructureTreePanel / PreviewPane）+ CreationFlow 覆盖层。核心冲突（coreConflict）未持久化入库，浏览界面不含该类（与现有表能力对齐）。
 

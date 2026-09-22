@@ -10,9 +10,9 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * 三栏浏览主界面：左栏书库（可汉堡折叠）/ 中栏结构树 / 右栏内容预览。
- * 「新建小说」以覆盖层盖住中+右栏呈现创作问答流（CreationFlow），左栏书库保持可见；
- * 创作完成后关闭覆盖层、刷新书库并自动选中新作。
+ * 页面级切换：三栏浏览主页（左栏书库可汉堡折叠 / 中栏结构树 / 右栏内容预览）
+ * 与独立的创作页（CreationFlow 问答流，整页呈现、带返回书库入口）。
+ * 创作完成后返回浏览页、刷新书库并自动选中新作。
  */
 export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -87,7 +87,7 @@ export function App() {
     };
   }, [selectedId]);
 
-  /** 创作完成：关覆盖层 → 刷新书库 → 自动选中新作（列表已含新作时） */
+  /** 创作完成：回浏览页 → 刷新书库 → 自动选中新作（列表已含新作时） */
   const handleFinished = (novelId: string): void => {
     setCreating(false);
     void refreshList().then((list) => {
@@ -95,7 +95,7 @@ export function App() {
     });
   };
 
-  /** 手动关闭创作覆盖层：终止 agent（已增量落库）并刷新书库（中途成果可见） */
+  /** 返回书库：终止 agent（已增量落库）并刷新书库（中途成果可见） */
   const handleCloseCreation = (): void => {
     setCreating(false);
     void refreshList();
@@ -139,6 +139,15 @@ export function App() {
     }
   };
 
+  // 创作页：独立整页呈现（不带浏览页的汉堡 / 三栏结构）
+  if (creating) {
+    return (
+      <div className="app create-app">
+        <CreationFlow onFinished={handleFinished} onClose={handleCloseCreation} />
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <header className="header">
@@ -152,7 +161,7 @@ export function App() {
           </button>
           <h1>📖 novel-agent</h1>
         </div>
-        <button className="primary" disabled={creating} onClick={() => setCreating(true)}>
+        <button className="primary" onClick={() => setCreating(true)}>
           ＋ 新建小说
         </button>
       </header>
@@ -188,12 +197,6 @@ export function App() {
             selection={selection}
           />
         </main>
-
-        {creating ? (
-          <div className="creation-overlay">
-            <CreationFlow onFinished={handleFinished} onClose={handleCloseCreation} />
-          </div>
-        ) : null}
       </div>
     </div>
   );

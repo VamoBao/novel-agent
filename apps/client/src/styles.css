@@ -82,13 +82,11 @@ body {
   padding: 16px 20px 32px;
 }
 
-.creation-overlay {
-  grid-column: 2 / 4;
-  z-index: 10;
-  background: #f6f7f9;
+/* 创作页：独立整页（不与浏览页三栏共存），CreationFlow 自带头部 + 滚动问答流 */
+.create-app {
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  height: 100vh;
 }
 
 .creation-header {
@@ -98,12 +96,6 @@ body {
   padding: 10px 20px;
   background: #fff;
   border-bottom: 1px solid #e4e7eb;
-  position: sticky;
-  top: 0;
-}
-
-.creation-header .close-btn {
-  margin-left: auto;
 }
 
 .row.center {

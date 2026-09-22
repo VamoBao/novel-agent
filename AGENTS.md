@@ -44,7 +44,7 @@
 - `apps/client/`：`@novel/client`——Electron 桌面客户端（electron-vite 三段式 + React，三栏浏览 + 覆盖层创作）
   - `electron/main.ts`：主进程——窗口管理 + AgentProcess（spawn `bun run apps/agent/src/headless.ts`、协议消息 zod 复验后 IPC 转发、hello 协议版本校验、退出回收）+ library 查询 / 管理 IPC（spawn `apps/agent/src/query.ts`、shared schema 复验、超时兜底）；WSL2 需禁 GPU/sandbox；`NOVEL_CLIENT_AUTOSTART` / `NOVEL_CLIENT_SELECT` / `NOVEL_CLIENT_SCREENSHOT` 为诊断钩子（自动开创作覆盖层 / 自动选中预览 / 无头截图）
   - `electron/preload.ts`：contextBridge 暴露最小 API（start / stop / respond / onMessage / onExit / listNovels / getNovelDetail / renameNovel / setNovelPinned / setNovelFavorite / deleteNovel / 诊断钩子读取）
-  - `src/`：renderer（React）——App 三栏浏览壳（左栏书库可汉堡折叠，右键菜单管理：重命名 / 置顶 / 收藏 / 删除；中栏世界观·角色·大纲结构树；右栏预览）+ CreationFlow 创作覆盖层（问答流，盖住中+右栏）+ NovelListPanel / StructureTreePanel / PreviewPane / StageBar 六阶段进度 / ViewCard 只读视图 / QuestionCard 五类提问输入
+  - `src/`：renderer（React）——App 页面级切换：三栏浏览主页（左栏书库可汉堡折叠，右键菜单管理：重命名 / 置顶 / 收藏 / 删除；中栏世界观·角色·大纲结构树；右栏预览）↔ 独立创作页（CreationFlow 问答流，整页呈现、头部返回书库）+ NovelListPanel / StructureTreePanel / PreviewPane / StageBar 六阶段进度 / ViewCard 只读视图 / QuestionCard 五类提问输入
 - `docs/`：Agent 工作流指导文档（需求 / 提交 / 修 Bug 三份指引）；`docs/superpowers/specs/` 存放前期设计规格（如 monorepo 与 Electron 客户端设计，状态以文首标注为准）
 - `files/`：本地参考资料（`prompt.md` 原始工作流需求、`role.md` 角色属性设计参考），已 gitignore
 - `.env.example`：环境变量样例（`.env` 已 gitignore，Bun 自动加载）

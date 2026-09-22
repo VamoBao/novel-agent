@@ -15,7 +15,10 @@ interface CreationFlowProps {
   onClose: () => void;
 }
 
-/** 创作问答流（覆盖层内容）：挂载即 spawn agent 开始一次创作会话。 */
+/**
+ * 创作问答流（独立创作页内容）：挂载即 spawn agent 开始一次创作会话；
+ * 头部提供「返回书库」（终止 agent，已完成部分已落库）。
+ */
 export function CreationFlow({ onFinished, onClose }: CreationFlowProps) {
   const [phase, setPhase] = useState<Phase>("running");
   const [flow, setFlow] = useState<FlowItem[]>([]);
@@ -94,7 +97,7 @@ export function CreationFlow({ onFinished, onClose }: CreationFlowProps) {
     void window.agent.respond(id, value);
   };
 
-  /** 关闭 = 终止 agent（v1 无优雅取消，state 已增量落库）并回到书库 */
+  /** 返回书库 = 终止 agent（v1 无优雅取消，state 已增量落库） */
   const close = (): void => {
     void window.agent.stop();
     onClose();
@@ -105,11 +108,11 @@ export function CreationFlow({ onFinished, onClose }: CreationFlowProps) {
   return (
     <>
       <div className="creation-header">
+        <button className="icon-btn" onClick={close} title="终止创作并返回书库">
+          ←
+        </button>
         <strong>✍️ 新建小说</strong>
         {phase === "running" ? <StageBar current={stage} /> : null}
-        <button className="icon-btn close-btn" onClick={close} title="终止创作并返回书库">
-          ✕
-        </button>
       </div>
       <main className="flow">
         {flow.map((item, index) =>
