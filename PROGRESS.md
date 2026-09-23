@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-09-23 [feat] 位置概念数据层：locations 表 + LocationStore（任务包经用户确认，决策见 DECISIONS）：shared 新增 locationSchema（名称 / 横纵坐标 / 图层自由文本 / 人口可空非负整数 / 父级可选）+ 导出与单测；SCHEMA_VERSION 6→7 纯新增表迁移（novel_id 外键 + parent_id 自引用外键双索引，population CHECK 非负），连带修正 5→6 迁移段缺 `version <= 5` 守卫的隐患（版本再递增时 v6 库会重放 ALTER 报 duplicate column）；LocationStore `addLocation`（父级须存在且同小说，先查后插给可读错误）/ `listLocations` 按入库顺序，读写双向 zod 校验；deleteNovel 级联清五表。AC：typecheck 3 工程 / lint / 137 用例全过（新增 10：schema 4 + 迁移 1 + store 5）；真实库副本迁移实跑（版本升 7、locations 表列结构齐、4 小说 22 大纲 3 角色 3 世界观无损）。创作流采集 / query CLI / 客户端浏览为后续需求
+
 - 2026-09-23 [feat] 删除小说改为 GitHub 删 repo 式强确认（简单需求快速通道）：删除菜单项打开 DeleteNovelDialog 模态（遮罩 + 危险色卡片）——展示书名 / ID 前 8 位 / 级联范围（世界观、角色、大纲节点及 output 产物，不可恢复），必须输入小说名（trim 后全等；未命名小说输入「未命名小说」）才放行「删除这本小说」按钮；输入框自动聚焦，Esc / 点遮罩 / 取消关闭，Enter 放行时提交；对话框条目从列表解析，删除后列表刷新自动关闭；替代原内联二次确认条（样式同步移除），onDelete 链路（IPC / 级联 / 产物清理）不变。AC：typecheck 3 工程 / lint / 127 用例过；DeleteNovelDialog SSR 冒烟（命名 / 未命名口令回落、级联警示与范围文案、按钮初始禁用）；对话框交互（输入放行 / Esc / Enter）待用户 dev:client 人工验收
 
 - 2026-09-23 [feat] 客户端大纲浏览切换为 outlines 表节点（任务包经用户确认）：shared query 契约 `outline: Outline|null` → `outlineNodes: OutlineNodeEntry[]`（id/parentId/type/name/sort/summary/keyPlotPoints，currentOnly 当前版本；类比 characterEntry 带主键先例）；query CLI `buildNovelDetail` 接 `listOutlineNodes(currentOnly)`，`readOutlineArtifact` 退役（outlineFilePath 留给 delete 清产物）——产物缺失不再影响浏览；renderer `Selection` 大纲分支携带 `outlineNodeId`，结构树按 parentId 通用建树（部▸/幕·，去《标题》伪根），新增 OutlineNodeCard（类型徽标 + 梗概 + 幕级情节点列表，NULL 展示「暂无梗概 / 暂无关键情节点——旧数据未入库内容」占位，不进 View 体系避免渗入创作流协议）；App 冒烟 autoSelect 改取首个大纲节点。AC：typecheck 3 工程 / lint / 127 用例全过（重写契约与 CLI 大纲用例）；种子临时库 query 实跑（部 summary 有 + 幕情节点 3/2 条）；真实库《漂亮话》6 节点内容列全 null（旧数据空占位数据源）；OutlineNodeCard SSR 冒烟（内容 / 旧幕 / 旧部三路径，部无情节区）；无头截图实证树由 DB 节点渲染（▸ 第一部：漂亮话 + 五幕，无渲染异常）；创作流协议零改动。点击交互观感待用户 dev:client 人工验收。决策见 DECISIONS
@@ -16,9 +18,9 @@
 
 - 2026-09-23 [docs] 需求指南收紧任务包确认门：取消「方案唯一且无高风险时确认单兼作执行摘要、输出后可直接开始」的例外，全部复杂需求输出《任务包确认单》后必须停下等待用户明确回复「确认」/「开始」才可编码（Human-in-the-loop 检查点）；同步更新流水线示意（任务包确认（必须经用户确认））、确认单模板尾注与工作流程第 2 步表述（「或执行摘要输出」→「经用户确认任务包后」）。交叉检查：快速通道（简单需求免确认单）与回退机制（执行中升级须补确认）表述一致，无残留旧措辞。AC：`grep` 全仓校验「直接开始 / 执行摘要 / 必要时」零残留
 
-- 2026-09-22 [refactor] 新建小说改为独立创作页：App 从「三栏 + 覆盖层盖住中右栏」改为页面级切换（浏览页 ↔ 创作页），创作页整页呈现 CreationFlow 问答流（头部「←」终止 agent 返回书库，替代原右上 ✕），浏览页汉堡 / 三栏结构不再与创作共存；样式移除 creation-overlay grid 定位，新增 create-app 整页容器；AUTOSTART 冒烟钩子语义不变（自动进入创作页）。AC：typecheck / lint / 111 用例过；无头冒烟截图实证创作页独立整页形态（无三栏 / 汉堡）；AGENTS / ARCHITECTURE / DECISIONS（旧决策补更新注记）同步
-
 ## 历史归档
+
+- 2026-09-22 [refactor] 新建小说改为独立创作页：App 从「三栏 + 覆盖层」改为页面级切换（浏览 ↔ 创作），创作页整页 CreationFlow 问答流（头部「←」终止返回书库），覆盖层模式退役；AUTOSTART 冒烟钩子语义不变。AC：typecheck / lint / 111 用例过；无头截图实证整页形态；AGENTS / ARCHITECTURE / DECISIONS 同步
 
 - 2026-09-21 [fix] 跨进程并发打开库报 `database is locked`（书库管理需求遗留 Bug）：所有连接统一 `busy_timeout=5000`；`journal_mode` 幂等读检查后设置；`user_version` 写入收敛到真正迁移 / 重建分支内——版本匹配的纯浏览打开零写，WAL 下读写连接天然共存。AC：复现场景修复 + 并发防锁单测 + 111 用例过；并发约定落盘 ARCHITECTURE 关键约定
 

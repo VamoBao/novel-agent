@@ -37,10 +37,10 @@
   - `src/providers/`：LLM 接入层（`deepseek.ts`：Key 读 `DEEPSEEK_API_KEY`，模型读 `DEEPSEEK_MODEL_NAME`，默认 `deepseek-flash`）
   - `src/agents/react.ts`：通用 ReAct Agent 运行器（终态工具模式 + 未完成自动续跑）
   - `src/tools/`：提供给 LLM 使用的通用工具（`ask-user.ts` 工厂函数，按 Agent 标签生成），经 `tools/index.ts` 汇总导出；workflow 私有终态工具在对应 agent 文件内定义
-  - `src/state/`：小说创作状态与持久化（`NovelStateStore` 接口 + 内存实现 + UUIDv7 生成；`db.ts` 建库建表（novels / characters / worldviews / outlines，外键关联），`novel-store.ts`/`character-store.ts`/`worldview-store.ts`/`outline-store.ts` 按 UUIDv7 创作 ID 落 SQLite）
+  - `src/state/`：小说创作状态与持久化（`NovelStateStore` 接口 + 内存实现 + UUIDv7 生成；`db.ts` 建库建表（novels / characters / worldviews / outlines / locations，外键关联），`novel-store.ts`/`character-store.ts`/`worldview-store.ts`/`outline-store.ts`/`location-store.ts` 按 UUIDv7 创作 ID 落 SQLite）
   - `src/output/`：产物落盘（大纲按创作 ID 保存为 `output/<id>.json`）
   - `src/workflows/`：工作流编排（`create-novel.ts` 主流程 + `agents/` 下 worldview / character / outline 三个 subAgent；本模块已建立模块级状态文档 `apps/agent/src/workflows/ARCHITECTURE.md` 与 `PROGRESS.md`）
-- `packages/shared/`：`@novel/shared`——双端共享的纯 zod 层：领域 schema（worldview / character / conflict / outline / audience / outline-node，原 `src/schemas/` 迁出）+ 展示视图 schema（views.ts）+ stdio JSON 协议消息 schema（protocol.ts）+ 库查询结果契约（query.ts）；agent 与客户端共同引用，零运行时依赖
+- `packages/shared/`：`@novel/shared`——双端共享的纯 zod 层：领域 schema（worldview / character / location / conflict / outline / audience / outline-node，原 `src/schemas/` 迁出）+ 展示视图 schema（views.ts）+ stdio JSON 协议消息 schema（protocol.ts）+ 库查询结果契约（query.ts）；agent 与客户端共同引用，零运行时依赖
 - `apps/client/`：`@novel/client`——Electron 桌面客户端（electron-vite 三段式 + React，三栏浏览 + 覆盖层创作）
   - `electron/main.ts`：主进程——窗口管理 + AgentProcess（spawn `bun run apps/agent/src/headless.ts`、协议消息 zod 复验后 IPC 转发、hello 协议版本校验、退出回收）+ library 查询 / 管理 IPC（spawn `apps/agent/src/query.ts`、shared schema 复验、超时兜底）；WSL2 需禁 GPU/sandbox；`NOVEL_CLIENT_AUTOSTART` / `NOVEL_CLIENT_SELECT` / `NOVEL_CLIENT_SCREENSHOT` 为诊断钩子（自动开创作覆盖层 / 自动选中预览 / 无头截图）
   - `electron/preload.ts`：contextBridge 暴露最小 API（start / stop / respond / onMessage / onExit / listNovels / getNovelDetail / renameNovel / setNovelPinned / setNovelFavorite / deleteNovel / 诊断钩子读取）

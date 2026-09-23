@@ -2,6 +2,21 @@
 
 记录「为什么」而非「做了什么」：决策背景、备选方案、权衡依据与结论。
 
+## 2026-09-23 新增「位置」概念数据层（独立 locations 表，本次不接工作流）
+
+- **背景**：大纲内容已入库，用户开始为小说世界补充结构化概念，首个是「位置」（地理位置：名称 / 横纵坐标 / 图层 / 人口 / 父级层级）。经确认本次交付仅落数据层（schema + 表 + store），采集与浏览后续接入——与大纲「先入库、后切读取路径」同样的两步节奏。
+- **备选方案**：
+  1. **独立 locations 表 + LocationStore**（选定）：对照 characters / outlines 既有模式，坐标 REAL、人口 INTEGER 可空、父级 parent_id 自引用外键（与 outlines 树同型）
+  2. 位置存 worldviews 表 JSON 列：无外键 / 类型约束 / 索引，级联删除与未来按位置检索都要手写 JSON 解析
+  3. 仿 outlines 多版本行（version / is_current_version）：位置是设定资料而非需回溯的大纲产物，无版本诉求（YAGNI）
+- **设计要点**：
+  - **图层自由文本不加 CHECK 枚举**：天上 / 地面 / 地底只是举例，架空世界可能有「深渊层」「星界」；zod 侧仅约束非空
+  - **人口可空（NULL）**：无人 / 未设定地点存 NULL，与「填 0」语义区分；库侧 CHECK 非负
+  - **addLocation 父级先查后插**：外键只保证父级行存在，拦不住跨小说挂接——层级语义要求父子同书，代码层校验并给可读错误
+  - **连带修正 5→6 迁移段守卫**：原实现两段 ALTER 在 `version >= 4` 分支内无条件执行，SCHEMA_VERSION 升 7 后 v6 库打开会重放 ALTER 报 duplicate column——补 `version <= 5` 链式守卫（注释「逐级补列」既定意图的实现遗漏，在本次版本递增时暴露）
+  - 类型名 `Location` 与 DOM 全局同名：agent / 主进程无 DOM 语义、renderer 按名引用 DOM Location 的场景极罕，沿用最自然的领域命名
+- **结论**：SCHEMA_VERSION 6→7 为纯新增表迁移（CREATE TABLE IF NOT EXISTS 幂等落地，旧数据零影响）；真实库副本实跑验证数据无损。创作流采集 / query CLI / 客户端浏览为后续需求。
+
 ## 2026-09-23 大纲浏览读取路径切换为 outlines 表节点（按节点展示内容）
 
 - **背景**：内容列（summary / keyPlotPoints）已入库（见当日上一决策），客户端「结构-大纲」仍读 `output/<id>.json` 全量大纲（整树一个选中态）。用户要求：结构树点击节点 → 右栏按节点展示 summary 与 keyPlotPoints；旧数据（迁移前行，两列 NULL）展示空内容，不再从 JSON 读取。

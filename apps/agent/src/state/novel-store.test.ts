@@ -105,7 +105,7 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     await rm(dir, { recursive: true, force: true });
   });
 
-  test("deleteNovel 单事务级联清空四表关联数据", async () => {
+  test("deleteNovel 单事务级联清空五表关联数据", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-del-"));
     const db = openDatabase(join(dir, "test.db"));
     const store = new NovelStore(db);
@@ -133,18 +133,27 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
                 ('act-1', ?, 'part-1', 'act', '第一幕', 1, 1, 1, 'planned', ?, ?);`,
       )
       .run(id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+    db
+      .prepare(
+        `INSERT INTO locations (id, novel_id, parent_id, name, x, y, layer, population,
+         created_at, updated_at)
+         VALUES ('loc-1', ?, NULL, '北境大陆', 0, 0, '地面', NULL, ?, ?),
+                ('loc-2', ?, 'loc-1', '雾港城', 123.5, -67.8, '地面', 250000, ?, ?);`,
+      )
+      .run(id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
 
     store.deleteNovel(id);
     expect(store.getNovel(id)).toBeUndefined();
     expect((db.prepare("SELECT COUNT(*) AS c FROM worldviews").get() as { c: number }).c).toBe(0);
     expect((db.prepare("SELECT COUNT(*) AS c FROM characters").get() as { c: number }).c).toBe(0);
     expect((db.prepare("SELECT COUNT(*) AS c FROM outlines").get() as { c: number }).c).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) AS c FROM locations").get() as { c: number }).c).toBe(0);
     expect(() => store.deleteNovel(id)).toThrow("不存在");
     db.close();
     await rm(dir, { recursive: true, force: true });
   });
 
-  test("v4 旧库经 openDatabase 迁移：数据保留、新列可用、版本升到 6", async () => {
+  test("v4 旧库经 openDatabase 迁移：数据保留、新列可用、版本升到 7", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-mig-"));
     const dbPath = join(dir, "v4.db");
     // 手工构造 v4 形态的库：旧 novels 结构（无 pinned / favorite）+ 旧 outlines 结构
@@ -193,7 +202,7 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     expect(store.listNovels()[0]?.pinned).toBe(true);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(6);
+    ).toBe(7);
     db.close();
     await rm(dir, { recursive: true, force: true });
   });

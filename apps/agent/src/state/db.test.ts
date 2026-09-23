@@ -5,36 +5,40 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase } from "./db";
 
-/** v4/v5 形态的 outlines 建表（无内容列）——5→6 迁移的目标表 */
-const LEGACY_OUTLINES_SQL = `
-  CREATE TABLE outlines (
-    id TEXT PRIMARY KEY,
-    novel_id TEXT NOT NULL REFERENCES novels(id),
-    parent_id TEXT REFERENCES outlines(id),
-    type TEXT NOT NULL CHECK (type IN ('part', 'act', 'chapter')),
-    name TEXT NOT NULL,
-    sort INTEGER NOT NULL CHECK (sort >= 1),
-    version INTEGER NOT NULL CHECK (version >= 1),
-    is_current_version INTEGER NOT NULL CHECK (is_current_version IN (0, 1)),
-    status TEXT NOT NULL CHECK (status IN ('deprecated', 'planned', 'writing', 'completed')),
-    document_id TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-`;
+/** v4/v5/v6 形态的 outlines 建表（v6 起含内容列）——增量迁移的目标表 */
+function legacyOutlinesSql(version: 4 | 5 | 6): string {
+  const contentCols = version === 6 ? "summary TEXT, key_plot_points TEXT," : "";
+  return `
+    CREATE TABLE outlines (
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL REFERENCES novels(id),
+      parent_id TEXT REFERENCES outlines(id),
+      type TEXT NOT NULL CHECK (type IN ('part', 'act', 'chapter')),
+      name TEXT NOT NULL,
+      ${contentCols}
+      sort INTEGER NOT NULL CHECK (sort >= 1),
+      version INTEGER NOT NULL CHECK (version >= 1),
+      is_current_version INTEGER NOT NULL CHECK (is_current_version IN (0, 1)),
+      status TEXT NOT NULL CHECK (status IN ('deprecated', 'planned', 'writing', 'completed')),
+      document_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `;
+}
 
 const NOVEL_ID = "aaaaaaaa-0000-7000-8000-000000000004";
 const NOW = "2026-01-01T00:00:00Z";
 
 /**
- * 手工构造旧版本形态的库：novels（v4 无 pinned/favorite / v5 有）+ outlines（均无内容列），
+ * 手工构造旧版本形态的库：novels（v4 无 pinned/favorite / v5 起有）+ outlines（v6 起含内容列），
  * 各插一行真实数据并写 user_version，随后关闭交由 openDatabase 触发迁移。
  */
-function createLegacyDb(path: string, version: 4 | 5): void {
+function createLegacyDb(path: string, version: 4 | 5 | 6): void {
   const legacy = new Database(path, { create: true });
   legacy.exec("PRAGMA foreign_keys = ON;");
   const pinnedCols =
-    version === 5
+    version >= 5
       ? "pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)), favorite INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0, 1)),"
       : "";
   legacy.exec(`
@@ -48,8 +52,8 @@ function createLegacyDb(path: string, version: 4 | 5): void {
       updated_at TEXT NOT NULL
     );
   `);
-  legacy.exec(LEGACY_OUTLINES_SQL);
-  if (version === 5) {
+  legacy.exec(legacyOutlinesSql(version));
+  if (version >= 5) {
     legacy
       .prepare(
         "INSERT INTO novels (id, name, author, description, pinned, favorite, created_at, updated_at) VALUES (?, ?, NULL, NULL, 1, 0, ?, ?);",
@@ -62,9 +66,10 @@ function createLegacyDb(path: string, version: 4 | 5): void {
       )
       .run(NOVEL_ID, "旧世界之书", NOW, NOW);
   }
+  const summaryCol = version === 6 ? ", summary" : "";
   legacy
     .prepare(
-      "INSERT INTO outlines (id, novel_id, parent_id, type, name, sort, version, is_current_version, status, created_at, updated_at) VALUES (?, ?, NULL, 'part', '第一部', 1, 1, 1, 'planned', ?, ?);",
+      `INSERT INTO outlines (id, novel_id, parent_id, type, name${summaryCol}, sort, version, is_current_version, status, created_at, updated_at) VALUES (?, ?, NULL, 'part', '第一部'${version === 6 ? ", '旧部梗概留存'" : ""}, 1, 1, 1, 'planned', ?, ?);`,
     )
     .run("bbbbbbbb-0000-7000-8000-000000000004", NOVEL_ID, NOW, NOW);
   legacy.exec(`PRAGMA user_version = ${version};`);
@@ -75,14 +80,14 @@ function tableColumns(db: Database, table: string): string[] {
   return (db.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
 }
 
-describe("openDatabase 迁移（SCHEMA_VERSION 6）", () => {
+describe("openDatabase 迁移（SCHEMA_VERSION 7）", () => {
   const tempDirs: string[] = [];
 
   afterAll(async () => {
     await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
   });
 
-  test("v5 库迁移：outlines 补内容列、数据无损、版本升 6", async () => {
+  test("v5 库迁移：outlines 补内容列、数据无损、版本升 7", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig5-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "v5.db");
@@ -111,7 +116,54 @@ describe("openDatabase 迁移（SCHEMA_VERSION 6）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(6);
+    ).toBe(7);
+    db.close();
+  });
+
+  test("v6 库迁移：locations 表落地、既有数据无损、版本升 7（5→6 段不重复执行）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-db-mig6-"));
+    tempDirs.push(dir);
+    const dbPath = join(dir, "v6.db");
+    createLegacyDb(dbPath, 6);
+
+    // 6→7 为纯新增表迁移：v6 库打开不再重放 5→6 的 ALTER（守卫 version <= 5），
+    // 能顺利建完 locations 即说明守卫生效——否则先报 duplicate column
+    const db = openDatabase(dbPath);
+    expect(
+      db
+        .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'locations'")
+        .get(),
+    ).toBeDefined();
+    expect(tableColumns(db, "locations")).toEqual([
+      "id",
+      "novel_id",
+      "parent_id",
+      "name",
+      "x",
+      "y",
+      "layer",
+      "population",
+      "created_at",
+      "updated_at",
+    ]);
+
+    // v6 已入库的大纲内容与小说数据不受迁移影响
+    const outline = db
+      .query(
+        "SELECT name, summary FROM outlines WHERE id = 'bbbbbbbb-0000-7000-8000-000000000004'",
+      )
+      .get() as { name: string; summary: string | null };
+    expect(outline.name).toBe("第一部");
+    expect(outline.summary).toBe("旧部梗概留存");
+    const novel = db
+      .query("SELECT name, pinned FROM novels WHERE id = ?")
+      .get(NOVEL_ID) as { name: string; pinned: number };
+    expect(novel.name).toBe("旧世界之书");
+    expect(novel.pinned).toBe(1);
+
+    expect(
+      (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
+    ).toBe(7);
     db.close();
   });
 
@@ -137,20 +189,21 @@ describe("openDatabase 迁移（SCHEMA_VERSION 6）", () => {
     ).toBe(1);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(6);
+    ).toBe(7);
     db.close();
   });
 
-  test("全新库：建表即含内容列且版本为 6", async () => {
+  test("全新库：建表即含内容列与 locations 表、版本为 7", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-fresh-"));
     tempDirs.push(dir);
     const db = openDatabase(join(dir, "fresh.db"));
     const cols = tableColumns(db, "outlines");
     expect(cols).toContain("summary");
     expect(cols).toContain("key_plot_points");
+    expect(tableColumns(db, "locations")).toContain("population");
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(6);
+    ).toBe(7);
     db.close();
   });
 });

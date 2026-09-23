@@ -3,6 +3,7 @@ import {
   audienceSuggestionSchema,
   characterSchema,
   coreConflictSchema,
+  locationSchema,
   outlineNodePatchSchema,
   outlineNodeSchema,
   outlineSchema,
@@ -82,6 +83,49 @@ describe("characterSchema", () => {
     expect(() =>
       characterSchema.parse({ ...validCharacter, basicInfo: { name: "" } }),
     ).toThrow();
+  });
+});
+
+describe("locationSchema", () => {
+  test("完整位置通过校验（含人口与父级）", () => {
+    const loc = locationSchema.parse({
+      name: "雾港城",
+      x: 123.45,
+      y: -67.8,
+      layer: "地面",
+      population: 250000,
+      parentId: "cccccccc-0000-7000-8000-000000000001",
+    });
+    expect(loc.name).toBe("雾港城");
+    expect(loc.population).toBe(250000);
+  });
+
+  test("仅必填项通过，人口与父级缺省为 undefined", () => {
+    const loc = locationSchema.parse({
+      name: "北境大陆",
+      x: 0,
+      y: 0,
+      layer: "地面",
+    });
+    expect(loc.population).toBeUndefined();
+    expect(loc.parentId).toBeUndefined();
+  });
+
+  test("空名称 / 空图层 / 缺坐标被拒绝", () => {
+    const base = { name: "雾港城", x: 1.5, y: 2.5, layer: "地面" };
+    expect(() => locationSchema.parse({ ...base, name: "" })).toThrow();
+    expect(() => locationSchema.parse({ ...base, layer: "" })).toThrow();
+    expect(() => {
+      const { y: _y, ...noY } = base;
+      locationSchema.parse(noY);
+    }).toThrow();
+  });
+
+  test("人口为负数或非整数被拒绝", () => {
+    const base = { name: "雾港城", x: 1.5, y: 2.5, layer: "地面" };
+    expect(() => locationSchema.parse({ ...base, population: -1 })).toThrow();
+    expect(() => locationSchema.parse({ ...base, population: 1.5 })).toThrow();
+    expect(locationSchema.parse({ ...base, population: 0 })).toBeDefined();
   });
 });
 
