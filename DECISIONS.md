@@ -2,6 +2,20 @@
 
 记录「为什么」而非「做了什么」：决策背景、备选方案、权衡依据与结论。
 
+## 2026-09-23 大纲浏览读取路径切换为 outlines 表节点（按节点展示内容）
+
+- **背景**：内容列（summary / keyPlotPoints）已入库（见当日上一决策），客户端「结构-大纲」仍读 `output/<id>.json` 全量大纲（整树一个选中态）。用户要求：结构树点击节点 → 右栏按节点展示 summary 与 keyPlotPoints；旧数据（迁移前行，两列 NULL）展示空内容，不再从 JSON 读取。
+- **备选方案**：
+  1. **契约改为节点数组 + 客户端按节点选中**（选定）：`novelDetail.outline: Outline|null` → `outlineNodes: OutlineNodeEntry[]`（id/parentId/type/name/sort/summary/keyPlotPoints，`currentOnly` 当前版本），树按 parentId 建树、选中携带 `outlineNodeId`（对照角色 characterId 模式）
+  2. 保留全量 outline 字段、客户端自行拆节点：仍依赖产物文件，与「DB 为浏览数据源」相悖；title/logline/theme 也无库内归宿
+  3. 把 title/logline/theme 一并落库并维持全量视图：范围扩大（novels.name 可能已被用户改名、theme 无处可放），且用户要的是节点粒度交互而非总览页
+- **设计要点**：
+  - **去掉《标题》伪根节点**：伪根不是库表节点、无 summary / keyPlotPoints 可展示；书名已在预览区标题栏，部直接作树根（「大纲」分节标题保留）
+  - **节点卡片不进 shared View 体系**：浏览专用 `OutlineNodeCard`（客户端自有组件，复用 viewcard 样式）——避免浏览视图渗入创作流协议（protocol.ts 内嵌 viewSchema 会连带扩大 agent 可发消息面）
+  - `readOutlineArtifact` 从 query CLI 退役（`outlineFilePath` 保留给 delete 清产物）；产物缺失不再影响浏览，未生成为空数组
+  - 旧数据空占位：「（暂无梗概——旧数据未入库内容）」/「（暂无关键情节点——旧数据未入库内容）」（dim 样式）
+- **结论**：创作流协议与 `create-novel.ts` 双写零改动；AC 见 PROGRESS。旧书如需补内容，回填另起需求（此前已决策暂不回填）。
+
 ## 2026-09-23 大纲内容（summary / keyPlotPoints）入库 outlines 表，document_id 仍留写作期
 
 - **背景**：outlines 表此前只存树形骨架（标题 / 排序 / 版本），梗概与关键情节点仅存在于 `output/<id>.json`——写作期「按每幕内容生成章节大纲」需要库内数据源，且产物文件一旦丢失内容即不可恢复。
@@ -14,6 +28,7 @@
   - `OutlineTreeInput` 内容必填（与 outlineSchema.parts 结构对齐）：`saveOutlineTree(id, outline.parts)` 类型直接匹配，内容不可再被编译期静默丢弃（此前正是输入类型只声明 name 导致丢弃）
   - patch 放行内容两字段（undefined=不动 / null=清空，合并语义对齐 documentId），为将来修订流预留
   - **读取路径不动**：query CLI / 客户端预览仍读 output JSON——title / logline / theme 尚无库内归宿（novels.name 可能已被用户改名、theme 无处可放），切 DB 读需先解决其落库位置，另起需求；DB 内容服务于写作期（`listOutlineNodes` 消费）
+    > 2026-09-23 更新（二）：读取路径已切换——浏览改读 outlines 表节点并按节点展示内容（见当日「大纲浏览读取路径切换」决策）；title/logline/theme 不进浏览大纲的取舍在该决策中重申。
   - **旧数据不回填**：旧行 NULL 即可（读取路径不变、旧书预览不受影响）；回填需读产物文件，属一次性数据维护，写作期涉旧书时再议
 - **结论**：SCHEMA_VERSION 5→6，迁移分支按版本链式逐级补列（v4 库直升时 novels 与 outlines 两段列同批补齐，避免跳段漏列）；db.test.ts 三用例（v5 / v4 / 全新建库）+ 真实库实跑验证（4 本小说 14 行大纲无损、旧行未回填、`get` 读取路径行为不变）。
 
@@ -48,7 +63,7 @@
 - **权衡依据**：与既有 headless spawn 模式同构（无新通信范式）；store 层与 shared schema 全复用，双端结构零漂移；查询为低频只读操作，子进程冷启动（百毫秒级）可接受。查询入口以只读连接打开库（先判断库文件存在，readonly 打开），不触发 `openDatabase` 的建表 / 版本重建副作用。
 - **设计要点**：
   - **大纲预览以 `output/<id>.json` 产物为数据源**：outlines 表只存树节点名（title / logline / summary / keyPlotPoints 在表外），产物与库在确认流程中同步写入、一一对应；产物缺失或不合法一律按「未生成」降级展示，不阻塞世界观 / 角色浏览
-    > 2026-09-23 更新：summary / keyPlotPoints 已随 5→6 升版入库（见当日决策），但客户端预览读取路径暂未切换，仍以产物为数据源。
+    > 2026-09-23 更新：summary / keyPlotPoints 已随 5→6 升版入库，客户端预览读取路径亦已切换为读 outlines 表节点（见当日两条决策），产物仅供留存；本条「产物为数据源」的表述已被取代。
   - **创作流以覆盖层盖住中+右栏**（用户选定，左栏书库保持可见）：问答流整体迁移为 CreationFlow，挂载即发起会话，run_finished 后关层 → 刷新书库 → 自动选中新作；中途关闭 = 终止子进程（新增 `agent:stop` IPC，语义同 v1 中断，state 已增量落库）
     > 2026-09-22 更新：按用户后续需求，创作流从「覆盖层盖住中+右栏」改为**独立创作页**（App 页面级切换，浏览页汉堡 / 三栏结构不与创作页共存），CreationFlow 内部逻辑与联动不变。
   - **诊断钩子语义修正**：AUTOSTART 从「main 直 spawn agent」改为「renderer 自动打开创作覆盖层」——新架构下 agent 会话必须由 CreationFlow 发起（消息监听与提问应答都在其内），main 裸 spawn 会产生无 UI 的孤儿会话；新增 `NOVEL_CLIENT_SELECT=<novelId>` 支持无头冒烟自动选中并预览

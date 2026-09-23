@@ -65,10 +65,15 @@ export function App() {
       .then((loaded) => {
         if (cancelled) return;
         setDetail(loaded);
-        // 冒烟诊断：自动预览首个可用节点（世界观 → 大纲）
+        // 冒烟诊断：自动预览首个可用节点（世界观 → 首个大纲节点）
         if (window.agent.autoSelectNovelId()) {
+          const firstOutlineNode = loaded.outlineNodes[0];
           setSelection(
-            loaded.worldview ? { kind: "worldview" } : loaded.outline ? { kind: "outline" } : null,
+            loaded.worldview
+              ? { kind: "worldview" }
+              : firstOutlineNode
+                ? { kind: "outline", outlineNodeId: firstOutlineNode.id }
+                : null,
           );
         } else {
           setSelection(null);

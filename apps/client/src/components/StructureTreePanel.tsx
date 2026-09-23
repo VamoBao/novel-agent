@@ -1,10 +1,11 @@
-import type { NovelDetail } from "@novel/shared";
+import type { NovelDetail, OutlineNodeEntry } from "@novel/shared";
+import type { ReactNode } from "react";
 
-/** 结构树选中项：三类节点（角色携带库表主键区分同名人） */
+/** 结构树选中项：三类节点（角色 / 大纲节点携带库表主键区分同名人） */
 export type Selection =
   | { kind: "worldview" }
   | { kind: "character"; characterId: string }
-  | { kind: "outline" };
+  | { kind: "outline"; outlineNodeId: string };
 
 interface StructureTreePanelProps {
   /** null = 未选中小说 */
@@ -42,9 +43,39 @@ function TreeNode({ label, muted, active, depth, onClick }: TreeNodeProps) {
   );
 }
 
+/** 大纲节点树形前缀：部实心三角、幕/章圆点（章为写作期预留） */
+function outlinePrefix(type: OutlineNodeEntry["type"]): string {
+  return type === "part" ? "▸" : "·";
+}
+
 /**
- * 中栏结构树：世界观 / 角色 / 大纲（部→幕）三类组成节点。
- * 大纲任意层级节点点击均在右栏预览整份大纲（视图粒度 = 整树，树节点是导航入口）。
+ * 大纲节点按 parentId 递归建树渲染：根（部，parentId=null）在 depth=1，
+ * 子级按 sort 逐层下探；点击节点 → 右栏按节点展示 summary / keyPlotPoints。
+ */
+function renderOutlineNodes(
+  nodes: OutlineNodeEntry[],
+  parentId: string | null,
+  depth: number,
+  selection: Selection | null,
+  onSelect: (selection: Selection) => void,
+): ReactNode[] {
+  return nodes
+    .filter((node) => node.parentId === parentId)
+    .flatMap((node) => [
+      <TreeNode
+        key={node.id}
+        label={`${outlinePrefix(node.type)} ${node.name}`}
+        depth={depth}
+        active={selection?.kind === "outline" && selection.outlineNodeId === node.id}
+        onClick={() => onSelect({ kind: "outline", outlineNodeId: node.id })}
+      />,
+      ...renderOutlineNodes(nodes, node.id, depth + 1, selection, onSelect),
+    ]);
+}
+
+/**
+ * 中栏结构树：世界观 / 角色 / 大纲（部→幕，读 outlines 表当前版本节点）三类组成节点。
+ * 大纲按节点选中预览（视图粒度 = 单节点）。
  */
 export function StructureTreePanel({
   detail,
@@ -94,36 +125,10 @@ export function StructureTreePanel({
           )}
 
           <div className="tree-group">📖 大纲</div>
-          {!detail.outline ? (
+          {detail.outlineNodes.length === 0 ? (
             <TreeNode label="（未生成）" depth={1} muted />
           ) : (
-            <>
-              <TreeNode
-                label={`《${detail.outline.title}》`}
-                depth={1}
-                active={selection?.kind === "outline"}
-                onClick={() => onSelect({ kind: "outline" })}
-              />
-              {detail.outline.parts.map((part, partIndex) => (
-                <div key={`${part.name}-${partIndex}`}>
-                  <TreeNode
-                    label={`▸ ${part.name}`}
-                    depth={2}
-                    active={selection?.kind === "outline"}
-                    onClick={() => onSelect({ kind: "outline" })}
-                  />
-                  {part.acts.map((act, actIndex) => (
-                    <TreeNode
-                      key={`${act.name}-${actIndex}`}
-                      label={`· ${act.name}`}
-                      depth={3}
-                      active={selection?.kind === "outline"}
-                      onClick={() => onSelect({ kind: "outline" })}
-                    />
-                  ))}
-                </div>
-              ))}
-            </>
+            renderOutlineNodes(detail.outlineNodes, null, 1, selection, onSelect)
           )}
         </>
       ) : null}

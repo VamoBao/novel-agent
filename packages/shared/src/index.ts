@@ -41,10 +41,12 @@ export {
 export {
   novelListItemSchema,
   characterEntrySchema,
+  outlineNodeEntrySchema,
   novelDetailSchema,
   novelDeletedResultSchema,
   type NovelListItem,
   type CharacterEntry,
+  type OutlineNodeEntry,
   type NovelDetail,
   type NovelDeletedResult,
 } from "./query";

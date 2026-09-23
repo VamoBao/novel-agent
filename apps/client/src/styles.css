@@ -375,6 +375,10 @@ button.danger {
   margin: 4px 0;
 }
 
+.viewcard .dim {
+  color: #6a737d;
+}
+
 .viewcard .part-name {
   font-weight: 600;
   margin: 8px 0 2px;

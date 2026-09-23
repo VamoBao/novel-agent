@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import type { NovelDetail, View } from "@novel/shared";
 import { ViewCard } from "./ViewCard";
+import { OutlineNodeCard } from "./OutlineNodeCard";
 import type { Selection } from "./StructureTreePanel";
 
 interface PreviewPaneProps {
@@ -11,7 +12,7 @@ interface PreviewPaneProps {
   selection: Selection | null;
 }
 
-/** 选中项 → 只读视图（复用创作流的 ViewCard 渲染） */
+/** 选中项 → 只读视图（世界观 / 角色复用创作流 ViewCard；大纲节点走 OutlineNodeCard，不经此处） */
 function toView(detail: NovelDetail, selection: Selection): View | null {
   switch (selection.kind) {
     case "worldview":
@@ -21,7 +22,7 @@ function toView(detail: NovelDetail, selection: Selection): View | null {
       return entry ? { kind: "character-card", character: entry } : null;
     }
     case "outline":
-      return detail.outline ? { kind: "outline", detail: "full", outline: detail.outline } : null;
+      return null;
   }
 }
 
@@ -36,6 +37,13 @@ export function PreviewPane({ detail, loading, error, selection }: PreviewPanePr
     );
   } else if (!selection) {
     body = <p className="pane-hint">← 点击中间结构树节点预览对应内容。</p>;
+  } else if (selection.kind === "outline") {
+    const node = detail.outlineNodes.find((n) => n.id === selection.outlineNodeId);
+    body = node ? (
+      <OutlineNodeCard node={node} />
+    ) : (
+      <p className="pane-error">该节点内容未能加载（数据缺失）。</p>
+    );
   } else {
     const view = toView(detail, selection);
     body = view ? (

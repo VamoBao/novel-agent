@@ -7,6 +7,7 @@ import type { Database } from "bun:sqlite";
 import { CharacterStore } from "./state/character-store";
 import { openDatabase } from "./state/db";
 import { NovelStore } from "./state/novel-store";
+import { OutlineStore } from "./state/outline-store";
 import { WorldviewStore } from "./state/worldview-store";
 import {
   buildNovelDetail,
@@ -70,62 +71,77 @@ describe("query CLI（buildNovelList / buildNovelDetail）", () => {
     db.close();
   });
 
-  test("get 全量资料：世界观 + 角色 + 大纲产物", async () => {
-    const { db, outputDir } = await newFixture();
+  test("get 全量资料：世界观 + 角色 + 大纲节点（读 outlines 表，含梗概与情节点）", async () => {
+    const { db } = await newFixture();
     const id = "bbbbbbbb-0000-7000-8000-000000000001";
     new NovelStore(db).createNovel({ id, name: "九州残脉" });
     new WorldviewStore(db).saveWorldview(id, worldview);
     new CharacterStore(db).addCharacter(id, character);
-    const { saveOutline } = await import("./output/outline-writer");
-    await saveOutline(
-      id,
+    new OutlineStore(db).saveOutlineTree(id, [
       {
-        title: "九州残脉",
-        logline: "残脉少年重走修行路",
-        parts: [
-          {
-            name: "第一部·风起",
-            summary: "少年觉醒",
-            acts: [
-              {
-                name: "第一幕·开端",
-                summary: "残脉初现",
-                keyPlotPoints: ["测灵受辱", "得遇残卷"],
-              },
-            ],
-          },
+        name: "第一部·风起",
+        summary: "少年觉醒",
+        acts: [
+          { name: "第一幕·开端", summary: "残脉初现", keyPlotPoints: ["测灵受辱", "得遇残卷"] },
+          { name: "第二幕·对抗", summary: "宗门追杀", keyPlotPoints: ["夜遁青云"] },
         ],
       },
-      outputDir,
-    );
+    ]);
 
-    const detail = buildNovelDetail(db, id, outputDir);
+    const detail = buildNovelDetail(db, id);
     expect(detail.novel.name).toBe("九州残脉");
     expect(detail.worldview?.background.geography).toBe("维斯特洛大陆");
     expect(detail.characters).toHaveLength(1);
     expect(detail.characters[0]?.basicInfo.name).toBe("林澜");
-    expect(detail.outline?.parts[0]?.acts[0]?.keyPlotPoints).toHaveLength(2);
+
+    // 节点按「父级分组 + sort」排序：部在前，幕按所属部 sort 递增
+    expect(detail.outlineNodes).toHaveLength(3);
+    const [part, act1, act2] = detail.outlineNodes;
+    expect(part?.type).toBe("part");
+    expect(part?.parentId).toBeNull();
+    expect(part?.summary).toBe("少年觉醒");
+    expect(part?.keyPlotPoints).toBeNull();
+    expect(act1?.type).toBe("act");
+    expect(act1?.parentId).toBe(part?.id);
+    expect(act1?.summary).toBe("残脉初现");
+    expect(act1?.keyPlotPoints).toEqual(["测灵受辱", "得遇残卷"]);
+    expect(act2?.sort).toBe(2);
     db.close();
   });
 
-  test("大纲产物缺失时 outline 为 null（世界观 / 角色仍可见）", async () => {
+  test("表有节点但 output 产物缺失时照常返回（产物不再决定浏览读取）", async () => {
     const { db, outputDir } = await newFixture();
+    const id = "bbbbbbbb-0000-7000-8000-000000000002";
+    new NovelStore(db).createNovel({ id });
+    new OutlineStore(db).saveOutlineTree(id, [
+      { name: "孤部", summary: "梗概", acts: [{ name: "孤幕", summary: "幕梗概", keyPlotPoints: ["点"] }] },
+    ]);
+    expect(existsSync(join(outputDir, `${id}.json`))).toBe(false);
+
+    const detail = buildNovelDetail(db, id);
+    expect(detail.outlineNodes).toHaveLength(2);
+    expect(detail.outlineNodes[0]?.name).toBe("孤部");
+    db.close();
+  });
+
+  test("大纲未入库时 outlineNodes 为空数组（世界观 / 角色仍可见）", async () => {
+    const { db } = await newFixture();
     const id = "cccccccc-0000-7000-8000-000000000001";
     new NovelStore(db).createNovel({ id });
     new WorldviewStore(db).saveWorldview(id, worldview);
 
-    const detail = buildNovelDetail(db, id, outputDir);
+    const detail = buildNovelDetail(db, id);
     expect(detail.novel.name).toBeNull();
     expect(detail.worldview).not.toBeNull();
     expect(detail.characters).toEqual([]);
-    expect(detail.outline).toBeNull();
+    expect(detail.outlineNodes).toEqual([]);
     db.close();
   });
 
   test("get 不存在的小说抛错", async () => {
-    const { db, outputDir } = await newFixture();
+    const { db } = await newFixture();
     expect(() =>
-      buildNovelDetail(db, "dddddddd-0000-7000-8000-00000000dead", outputDir),
+      buildNovelDetail(db, "dddddddd-0000-7000-8000-00000000dead"),
     ).toThrow("小说不存在");
     db.close();
   });

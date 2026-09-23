@@ -1,17 +1,17 @@
-import { readFileSync, unlinkSync } from "node:fs";
+import { unlinkSync } from "node:fs";
 import {
   novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
-  outlineSchema,
   type NovelDeletedResult,
   type NovelDetail,
   type NovelListItem,
-  type Outline,
+  type OutlineNodeEntry,
 } from "@novel/shared";
 import { CharacterStore } from "./state/character-store";
 import { openDatabase } from "./state/db";
 import { NovelStore, type NovelRecord } from "./state/novel-store";
+import { OutlineStore } from "./state/outline-store";
 import { WorldviewStore } from "./state/worldview-store";
 import { OUTPUT_DIR, outlineFilePath } from "./output/outline-writer";
 
@@ -22,7 +22,8 @@ import { OUTPUT_DIR, outlineFilePath } from "./output/outline-writer";
  * 与 headless.ts 的长驻问答协议相区分：无会话状态、即起即退。
  *
  * 命令一览：
- * - 查询：`list`（全部小说，置顶优先）/ `get <novelId>`（单本全量资料）
+ * - 查询：`list`（全部小说，置顶优先）/ `get <novelId>`（单本全量资料，
+ *   大纲读 outlines 表当前版本节点——output 产物仅供留存，不再决定浏览读取）
  * - 管理：`rename <novelId> <name>` / `pin|unpin <novelId>` / `favorite|unfavorite <novelId>`
  *   / `delete <novelId>`（级联删除关联数据并清理 output 产物）
  *
@@ -41,22 +42,6 @@ function toListItem(record: NovelRecord): NovelListItem {
   });
 }
 
-/** 大纲产物读取：output/<id>.json 缺失或结构不合法一律视为未生成 */
-function readOutlineArtifact(novelId: string, outputDir: string): Outline | null {
-  let file: string;
-  try {
-    file = outlineFilePath(novelId, outputDir);
-  } catch {
-    return null;
-  }
-  try {
-    const parsed = outlineSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
-
 /** list 载荷：全部小说（置顶优先，组内按创建时间倒序） */
 export function buildNovelList(db: ReturnType<typeof openDatabase>): NovelListItem[] {
   return new NovelStore(db).listNovels().map(toListItem);
@@ -66,7 +51,6 @@ export function buildNovelList(db: ReturnType<typeof openDatabase>): NovelListIt
 export function buildNovelDetail(
   db: ReturnType<typeof openDatabase>,
   novelId: string,
-  outputDir: string = OUTPUT_DIR,
 ): NovelDetail {
   const novel = new NovelStore(db).getNovel(novelId);
   if (!novel) {
@@ -76,11 +60,22 @@ export function buildNovelDetail(
   const characters = new CharacterStore(db)
     .listCharacters(novelId)
     .map((stored) => ({ id: stored.id, ...stored.character }));
+  const outlineNodes: OutlineNodeEntry[] = new OutlineStore(db)
+    .listOutlineNodes(novelId, { currentOnly: true })
+    .map((stored) => ({
+      id: stored.id,
+      parentId: stored.node.parentId,
+      type: stored.node.type,
+      name: stored.node.name,
+      sort: stored.node.sort,
+      summary: stored.node.summary,
+      keyPlotPoints: stored.node.keyPlotPoints,
+    }));
   return novelDetailSchema.parse({
     novel: toListItem(novel),
     worldview,
     characters,
-    outline: readOutlineArtifact(novelId, outputDir),
+    outlineNodes,
   });
 }
 

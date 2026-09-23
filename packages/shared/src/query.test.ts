@@ -4,6 +4,7 @@ import {
   novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
+  outlineNodeEntrySchema,
 } from "./query";
 
 const validListItem = {
@@ -23,17 +24,26 @@ const validCharacter = {
   endingDirection: "公开真相并拯救城市",
 };
 
-const validOutline = {
-  title: "灵脉破晓",
-  logline: "废土少年觉醒灵脉重塑世界秩序",
-  parts: [
-    {
-      name: "第一部·风起",
-      summary: "少年觉醒",
-      acts: [{ name: "第一幕·开端", summary: "灵脉初现", keyPlotPoints: ["遭遇袭击", "觉醒"] }],
-    },
-  ],
-};
+const validOutlineNodes = [
+  {
+    id: "0199c0de-0000-7000-8000-0000000000a1",
+    parentId: null,
+    type: "part",
+    name: "第一部·风起",
+    sort: 1,
+    summary: "少年觉醒",
+    keyPlotPoints: null,
+  },
+  {
+    id: "0199c0de-0000-7000-8000-0000000000a2",
+    parentId: "0199c0de-0000-7000-8000-0000000000a1",
+    type: "act",
+    name: "第一幕·开端",
+    sort: 1,
+    summary: "灵脉初现",
+    keyPlotPoints: ["遭遇袭击", "觉醒"],
+  },
+];
 
 describe("novelListItemSchema", () => {
   test("完整列表项通过校验", () => {
@@ -90,6 +100,37 @@ describe("characterEntrySchema", () => {
   });
 });
 
+describe("outlineNodeEntrySchema", () => {
+  test("部节点（keyPlotPoints 为 null）与幕节点（含情节点）均通过", () => {
+    const part = outlineNodeEntrySchema.parse(validOutlineNodes[0]);
+    expect(part.type).toBe("part");
+    expect(part.keyPlotPoints).toBeNull();
+    const act = outlineNodeEntrySchema.parse(validOutlineNodes[1]);
+    expect(act.keyPlotPoints).toHaveLength(2);
+  });
+
+  test("历史数据内容两列为 null 仍通过（空占位来源）", () => {
+    const legacy = outlineNodeEntrySchema.parse({
+      ...validOutlineNodes[1],
+      summary: null,
+      keyPlotPoints: null,
+    });
+    expect(legacy.summary).toBeNull();
+    expect(legacy.keyPlotPoints).toBeNull();
+  });
+
+  test("缺 id / 空 name / 空情节点数组均被拒绝", () => {
+    const { id: _id, ...withoutId } = validOutlineNodes[1] as Record<string, unknown>;
+    expect(() => outlineNodeEntrySchema.parse(withoutId)).toThrow();
+    expect(() =>
+      outlineNodeEntrySchema.parse({ ...validOutlineNodes[1], name: "" }),
+    ).toThrow();
+    expect(() =>
+      outlineNodeEntrySchema.parse({ ...validOutlineNodes[1], keyPlotPoints: [] }),
+    ).toThrow();
+  });
+});
+
 describe("novelDetailSchema", () => {
   test("三类数据齐全的完整 detail 通过校验", () => {
     const detail = novelDetailSchema.parse({
@@ -99,30 +140,31 @@ describe("novelDetailSchema", () => {
         taboos: ["不能出现现代科技物品"],
       },
       characters: [{ ...validCharacter, id: "0199c0de-0000-7000-8000-000000000002" }],
-      outline: validOutline,
+      outlineNodes: validOutlineNodes,
     });
     expect(detail.characters).toHaveLength(1);
-    expect(detail.outline?.parts[0]?.acts[0]?.keyPlotPoints).toHaveLength(2);
+    expect(detail.outlineNodes).toHaveLength(2);
+    expect(detail.outlineNodes[1]?.keyPlotPoints).toHaveLength(2);
   });
 
-  test("创作中途的小说：worldview / outline 为 null、角色为空数组仍通过", () => {
+  test("创作中途的小说：worldview 为 null、角色与大纲节点为空数组仍通过", () => {
     const detail = novelDetailSchema.parse({
       novel: { ...validListItem, name: null },
       worldview: null,
       characters: [],
-      outline: null,
+      outlineNodes: [],
     });
     expect(detail.worldview).toBeNull();
-    expect(detail.outline).toBeNull();
+    expect(detail.outlineNodes).toHaveLength(0);
   });
 
-  test("outline 结构不完整（缺 acts）被拒绝", () => {
+  test("大纲节点条目非法（sort 为 0）被拒绝", () => {
     expect(() =>
       novelDetailSchema.parse({
         novel: validListItem,
         worldview: null,
         characters: [],
-        outline: { ...validOutline, parts: [{ name: "第一部", summary: "少年觉醒" }] },
+        outlineNodes: [{ ...validOutlineNodes[0], sort: 0 }],
       }),
     ).toThrow();
   });
