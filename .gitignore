@@ -49,3 +49,5 @@ output/*
 # 数据目录（SQLite 库文件）
 data/*
 !data/.gitkeep
+
+.zcodeignore
