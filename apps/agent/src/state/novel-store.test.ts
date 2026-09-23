@@ -144,10 +144,11 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     await rm(dir, { recursive: true, force: true });
   });
 
-  test("v4 旧库经 openDatabase 迁移：数据保留、新列可用、版本升到 5", async () => {
+  test("v4 旧库经 openDatabase 迁移：数据保留、新列可用、版本升到 6", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-mig-"));
     const dbPath = join(dir, "v4.db");
-    // 手工构造 v4 形态的库：旧 novels 结构（无 pinned / favorite）+ 一行真实数据
+    // 手工构造 v4 形态的库：旧 novels 结构（无 pinned / favorite）+ 旧 outlines 结构
+    //（无内容列，v4 库必含该表——跨版本直升时 5→6 段会对其补列）+ 一行真实数据
     const legacy = new Database(dbPath, { create: true });
     legacy.exec("PRAGMA foreign_keys = ON;");
     legacy.exec(`
@@ -156,6 +157,20 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
         name TEXT,
         author TEXT,
         description TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE outlines (
+        id TEXT PRIMARY KEY,
+        novel_id TEXT NOT NULL REFERENCES novels(id),
+        parent_id TEXT REFERENCES outlines(id),
+        type TEXT NOT NULL,
+        name TEXT NOT NULL,
+        sort INTEGER NOT NULL,
+        version INTEGER NOT NULL,
+        is_current_version INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        document_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -178,7 +193,7 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     expect(store.listNovels()[0]?.pinned).toBe(true);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(5);
+    ).toBe(6);
     db.close();
     await rm(dir, { recursive: true, force: true });
   });

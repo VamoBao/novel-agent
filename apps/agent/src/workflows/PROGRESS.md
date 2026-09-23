@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-09-23 [feat] 大纲内容入库 outlines 表（编排层联动，任务包经用户确认）：`saveOutlineTree(id, outline.parts)` 输入类型与 outlineSchema.parts 对齐后内容必填（调用处零改动、类型直接匹配），梗概与关键情节点随节点入列；入库通知文案补「含梗概与关键情节点」；createNovel 集成测试补 DB 行内容断言（部有梗概无情节点、幕两者齐全）。schema / 迁移 / store 改动与 AC 见根 PROGRESS 对应条目；读取路径不动（客户端预览仍读 output JSON）
+
 - 2026-09-22 [feat] save_field 保存策略改为「受控发散」（决策见根 DECISIONS）：标识性字段（name/gender/narrativeRole）照存用户原词不扩写（姓名只存名字本身、性别只存性别、叙事定位一句话以内），描述性字段以用户描述为种子发散丰富成 2~4 句设定文字（补充贴合细节与形象，不照抄原话，不与用户事实相悖）；SYSTEM_PROMPT 与 save_field 工具描述同步分级约束；组装校验与双重确认门不变。AC：typecheck/lint/111 用例过；真实 LLM 定向冒烟两轮——首轮暴露标识字段污染（name 混入名字来历长段、gender 混入外貌），分级修正后第二轮 name/gender/narrativeRole 干净照存、描述性字段饱满扩写（背景从一句身世扩为完整设定）；根 ARCHITECTURE 角色流程描述同步
 
 - 2026-09-18 [feat] 大纲接入 outlines 表：类型枚举瘦身为部/幕/章（去卷，章为写作期预留）；`outlineSchema` 重构为「部→幕」两级（部含名称+概述，幕含名称/梗概/情节点），`outlineSchemaFor(actCount, partCount)` 强校验恰好 M 部共 N 幕、每部至少一幕；编排层先问幕数（3-20，默认 5）再问部数（1~幕数，默认 1），各部幕数由模型按剧情节奏分配；确认后 `saveOutlineTree` 整树事务入库 + `output/<id>.json` 落盘（结构变为两级，旧 JSON 不兼容）。AC：typecheck/lint/test 通过（59 用例）；真实 LLM 定向冒烟（createOutline，2 部 5 幕 → 恰好 2 部共 5 幕，模型自分配 3+2，确认循环正常）

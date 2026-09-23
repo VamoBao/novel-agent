@@ -2,6 +2,21 @@
 
 记录「为什么」而非「做了什么」：决策背景、备选方案、权衡依据与结论。
 
+## 2026-09-23 大纲内容（summary / keyPlotPoints）入库 outlines 表，document_id 仍留写作期
+
+- **背景**：outlines 表此前只存树形骨架（标题 / 排序 / 版本），梗概与关键情节点仅存在于 `output/<id>.json`——写作期「按每幕内容生成章节大纲」需要库内数据源，且产物文件一旦丢失内容即不可恢复。
+- **备选方案**：
+  1. **内容直列入 outlines 表**（选定）：`summary TEXT` + `key_plot_points TEXT`（JSON 文本列，对齐 worldviews.taboos / characters.relationships 惯例），零新表，读写随既有树查询
+  2. 内容挂 documents 表经 `document_id` 关联：documents 表定位是写作期章节正文（用户确认 `document_id` 为挂真实章节内容预留），大纲内容与正文是两类数据，混用歪曲其语义；且 documents 表本次不落地
+  3. 独立 outline_contents 表：多一次 join，无查询收益
+- **设计要点**：
+  - keyPlotPoints 仅幕节点携带：outlineNodeSchema refine 强约束（part / chapter 携带即拒绝）；部 / 幕均入库 summary；两列可空——5→6 迁移前的历史行保持 NULL
+  - `OutlineTreeInput` 内容必填（与 outlineSchema.parts 结构对齐）：`saveOutlineTree(id, outline.parts)` 类型直接匹配，内容不可再被编译期静默丢弃（此前正是输入类型只声明 name 导致丢弃）
+  - patch 放行内容两字段（undefined=不动 / null=清空，合并语义对齐 documentId），为将来修订流预留
+  - **读取路径不动**：query CLI / 客户端预览仍读 output JSON——title / logline / theme 尚无库内归宿（novels.name 可能已被用户改名、theme 无处可放），切 DB 读需先解决其落库位置，另起需求；DB 内容服务于写作期（`listOutlineNodes` 消费）
+  - **旧数据不回填**：旧行 NULL 即可（读取路径不变、旧书预览不受影响）；回填需读产物文件，属一次性数据维护，写作期涉旧书时再议
+- **结论**：SCHEMA_VERSION 5→6，迁移分支按版本链式逐级补列（v4 库直升时 novels 与 outlines 两段列同批补齐，避免跳段漏列）；db.test.ts 三用例（v5 / v4 / 全新建库）+ 真实库实跑验证（4 本小说 14 行大纲无损、旧行未回填、`get` 读取路径行为不变）。
+
 ## 2026-09-22 角色字段保存策略：从「保守概括」转为「受控发散」（标识照存 + 描述丰富）
 
 - **背景**：用户要求 save_field 保存角色字段时基于用户描述发散丰富，不要原样保存。原策略（2026-09-16 字段协议确立时）是「概括总结 + 严禁改写 + 不得虚构」——动机是防 deepseek-flash 改写漂移（曾把「记者顾清欢」改写成「修复师苏晚」），但实际效果偏保守，字段内容常是用户原话的复述，缺乏创作价值。
@@ -33,6 +48,7 @@
 - **权衡依据**：与既有 headless spawn 模式同构（无新通信范式）；store 层与 shared schema 全复用，双端结构零漂移；查询为低频只读操作，子进程冷启动（百毫秒级）可接受。查询入口以只读连接打开库（先判断库文件存在，readonly 打开），不触发 `openDatabase` 的建表 / 版本重建副作用。
 - **设计要点**：
   - **大纲预览以 `output/<id>.json` 产物为数据源**：outlines 表只存树节点名（title / logline / summary / keyPlotPoints 在表外），产物与库在确认流程中同步写入、一一对应；产物缺失或不合法一律按「未生成」降级展示，不阻塞世界观 / 角色浏览
+    > 2026-09-23 更新：summary / keyPlotPoints 已随 5→6 升版入库（见当日决策），但客户端预览读取路径暂未切换，仍以产物为数据源。
   - **创作流以覆盖层盖住中+右栏**（用户选定，左栏书库保持可见）：问答流整体迁移为 CreationFlow，挂载即发起会话，run_finished 后关层 → 刷新书库 → 自动选中新作；中途关闭 = 终止子进程（新增 `agent:stop` IPC，语义同 v1 中断，state 已增量落库）
     > 2026-09-22 更新：按用户后续需求，创作流从「覆盖层盖住中+右栏」改为**独立创作页**（App 页面级切换，浏览页汉堡 / 三栏结构不与创作页共存），CreationFlow 内部逻辑与联动不变。
   - **诊断钩子语义修正**：AUTOSTART 从「main 直 spawn agent」改为「renderer 自动打开创作覆盖层」——新架构下 agent 会话必须由 CreationFlow 发起（消息监听与提问应答都在其内），main 裸 spawn 会产生无 UI 的孤儿会话；新增 `NOVEL_CLIENT_SELECT=<novelId>` 支持无头冒烟自动选中并预览
@@ -72,6 +88,7 @@
   - 根节点 `parent_id` 为 NULL，SQLite 唯一索引视 NULL 互异导致根层级判重失效；采用表达式索引 `COALESCE(parent_id, '')` 归一，并把 `novel_id` 纳入索引实现跨小说隔离
   - 当前版本切换不做隐式降级：Store 保持无状态，调用方先降级旧版本再提升新版本，唯一索引兜底并发/漏降级冲突（测试覆盖「未降级直接提升被拒」路径）
   - type/status 用英文枚举值（volume/part/act/chapter、planned/writing/completed/deprecated）+ CHECK 约束，与代码库英文标识符约定一致；本次未加大纲节点内容字段（用户确认暂不加，后续按需随 schema 升版扩展）
+    > 2026-09-23 更新：内容字段已随 5→6 升版加入（见当日决策）。
   - `document_id` 暂为可空裸列：documents 表尚不存在，先不加外键，正文功能落地时补约束
 - **结论**：outlines 成为第 4 张表（UUIDv7 主键 + `novel_id` 外键），SCHEMA_VERSION 2→3（开发期不匹配重建）；`OutlineStore` 提供 add/get/list(currentOnly)/update，读写双向 zod 校验，唯一索引违规转译为可读错误。
 

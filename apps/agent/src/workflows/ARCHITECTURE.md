@@ -41,10 +41,10 @@ apps/agent/src/workflows/
 8. **【5/5】核心冲突**：自由文本 → `generateObject`（coreConflictSchema）归一化
 9. **state 落 params**：status → gathering
 10. **幕数与部数**：`askInt` 幕数（3-20，回车默认 5）→ `askInt` 部数（1~幕数，回车默认 1）
-11. **大纲**：`createOutline(params, { novelTitle, actCount, partCount }, channel)` → `channel.present(outline full)` 两级完整展示 → `saveOutlineTree` 整树事务入库（部根节点 / 幕子节点，version=1/当前/planned）→ `saveOutline` 落盘 `output/<id>.json`
+11. **大纲**：`createOutline(params, { novelTitle, actCount, partCount }, channel)` → `channel.present(outline full)` 两级完整展示 → `saveOutlineTree` 整树事务入库（部根节点 / 幕子节点，version=1/当前/planned，梗概与关键情节点随节点入列——供写作期按幕内容生成章节大纲）→ `saveOutline` 落盘 `output/<id>.json`
 12. **收尾**：status → outlined；`novelStore.updateNovel` 回填（未命名时 name = outline.title；description = outline.logline）
 
-入库时机小结：novels 初始化即建（先于其余表）｜worldviews 确认后 upsert｜characters 每卡确认后增量｜outlines 大纲确认后整树事务入库（saveOutlineTree）＋大纲 JSON 落盘 output｜NovelState 仍为内存态。
+入库时机小结：novels 初始化即建（先于其余表）｜worldviews 确认后 upsert｜characters 每卡确认后增量｜outlines 大纲确认后整树事务入库（saveOutlineTree，梗概与关键情节点随节点入列，keyPlotPoints 仅幕节点）＋大纲 JSON 落盘 output（客户端预览仍读产物，读取路径切换为后续需求）｜NovelState 仍为内存态。
 
 ## subAgent 协作协议（三 Agent 共性）
 

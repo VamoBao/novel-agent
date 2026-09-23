@@ -154,7 +154,7 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     expect(channel.views.at(-1)).toMatchObject({ kind: "outline", detail: "full" });
 
     // 通知：收尾提示与大纲入库统计
-    expect(channel.notifies).toContain("🗂 大纲树已入库：1 部 / 5 幕");
+    expect(channel.notifies).toContain("🗂 大纲树已入库（含梗概与关键情节点）：1 部 / 5 幕");
     expect(channel.notifies.some((n) => n.includes("✅ 小说《灵脉遗孤》初始化完成！"))).toBe(true);
 
     // 持久化：novels 未命名回填大纲标题；世界观 upsert；角色入库
@@ -167,6 +167,16 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     expect(
       characterStore.listCharacters(state.id).map((c) => c.character.basicInfo.name),
     ).toEqual(["林恒"]);
+
+    // 大纲内容入库：部有梗概无情节点，幕梗概与情节点齐全（写作期数据源）
+    const outlineNodes = new OutlineStore(db).listOutlineNodes(state.id);
+    expect(outlineNodes).toHaveLength(6);
+    const partNode = outlineNodes.find((n) => n.node.type === "part");
+    expect(partNode?.node.summary).toBe("少年失去依托，踏上夺脉之路");
+    expect(partNode?.node.keyPlotPoints).toBeNull();
+    const firstAct = outlineNodes.find((n) => n.node.name === "第1幕");
+    expect(firstAct?.node.summary).toBe("第1幕梗概");
+    expect(firstAct?.node.keyPlotPoints).toEqual(["第1幕情节点"]);
   });
 
   test("UserAbortedError：任一提问通道关闭即中止全流程", async () => {

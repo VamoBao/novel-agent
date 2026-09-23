@@ -7,7 +7,7 @@ export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 /**
  * 打开（必要时创建）数据库并完成建表。
@@ -16,7 +16,8 @@ const SCHEMA_VERSION = 5;
  *   其余业务表经 novel_id 外键关联
  * - characters：角色卡，1:N（novel_id 索引）
  * - worldviews：世界观，1:1（novel_id 唯一），taboos 数组存 JSON 文本
- * - outlines：大纲树（部/幕两级入库，章为写作期预留），parent_id 自引用外键，多版本行并存
+ * - outlines：大纲树（部/幕两级入库，章为写作期预留），parent_id 自引用外键，多版本行并存；
+ *   内容随节点入库（summary 梗概，key_plot_points 关键情节点存 JSON 文本，仅幕节点携带）
  */
 export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
   mkdirSync(dirname(path), { recursive: true });
@@ -35,13 +36,20 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
 
   const versionRow = db.query("PRAGMA user_version").get() as { user_version: number };
   if (versionRow.user_version !== SCHEMA_VERSION) {
-    if (versionRow.user_version === 4) {
-      // 4→5：novels 增列 pinned / favorite（书库管理），ALTER 保数据；
-      // 新列有 DEFAULT，旧数据无需回填
-      db.exec("ALTER TABLE novels ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;");
-      db.exec("ALTER TABLE novels ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;");
+    const version = versionRow.user_version;
+    if (version >= 4 && version < SCHEMA_VERSION) {
+      // 已投产库（>=4）保数据增量迁移，逐级补列；跨版本直升时各段同批执行
+      if (version === 4) {
+        // 4→5：novels 增列 pinned / favorite（书库管理），新列有 DEFAULT，旧数据无需回填
+        db.exec("ALTER TABLE novels ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;");
+        db.exec("ALTER TABLE novels ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;");
+      }
+      // 5→6：outlines 增列内容（summary 梗概 / key_plot_points 情节点 JSON 文本），
+      // 旧行留 NULL 不回填（决策见 DECISIONS：读取路径暂不动，旧书预览走 output 产物）
+      db.exec("ALTER TABLE outlines ADD COLUMN summary TEXT;");
+      db.exec("ALTER TABLE outlines ADD COLUMN key_plot_points TEXT;");
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>5 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>6 的库被旧代码打开）：重建兜底
       db.exec("DROP TABLE IF EXISTS outlines;");
       db.exec("DROP TABLE IF EXISTS characters;");
       db.exec("DROP TABLE IF EXISTS worldviews;");
@@ -106,6 +114,8 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       parent_id TEXT REFERENCES outlines(id),
       type TEXT NOT NULL CHECK (type IN ('part', 'act', 'chapter')),
       name TEXT NOT NULL,
+      summary TEXT,
+      key_plot_points TEXT,
       sort INTEGER NOT NULL CHECK (sort >= 1),
       version INTEGER NOT NULL CHECK (version >= 1),
       is_current_version INTEGER NOT NULL CHECK (is_current_version IN (0, 1)),

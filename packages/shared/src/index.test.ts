@@ -3,6 +3,8 @@ import {
   audienceSuggestionSchema,
   characterSchema,
   coreConflictSchema,
+  outlineNodePatchSchema,
+  outlineNodeSchema,
   outlineSchema,
   worldviewSchema,
 } from "./index";
@@ -126,6 +128,55 @@ describe("outlineSchema", () => {
         parts: [{ name: "上部", summary: "概述", acts: [] }],
       }),
     ).toThrow();
+  });
+});
+
+describe("outlineNodeSchema", () => {
+  const baseNode = {
+    parentId: null,
+    type: "act" as const,
+    name: "第一幕·开端",
+    summary: "主角发现异常",
+    keyPlotPoints: ["异常初现", "决定追查"],
+    sort: 1,
+    version: 1,
+    isCurrentVersion: true,
+    status: "planned" as const,
+    documentId: null,
+  };
+
+  test("幕节点携带梗概与关键情节点通过", () => {
+    const node = outlineNodeSchema.parse(baseNode);
+    expect(node.summary).toBe("主角发现异常");
+    expect(node.keyPlotPoints).toEqual(["异常初现", "决定追查"]);
+  });
+
+  test("内容两列为 null 仍通过（历史行兼容）", () => {
+    const node = outlineNodeSchema.parse({ ...baseNode, type: "part", summary: null, keyPlotPoints: null });
+    expect(node.summary).toBeNull();
+    expect(node.keyPlotPoints).toBeNull();
+  });
+
+  test("非幕节点携带关键情节点被拒绝", () => {
+    expect(() => outlineNodeSchema.parse({ ...baseNode, type: "part" })).toThrow(
+      "关键情节点仅幕节点可携带",
+    );
+    expect(() => outlineNodeSchema.parse({ ...baseNode, type: "chapter" })).toThrow(
+      "关键情节点仅幕节点可携带",
+    );
+  });
+
+  test("空关键情节点数组被拒绝（null 与缺省以外的最小约束）", () => {
+    expect(() => outlineNodeSchema.parse({ ...baseNode, keyPlotPoints: [] })).toThrow();
+    expect(() => outlineNodeSchema.parse({ ...baseNode, keyPlotPoints: [""] })).toThrow();
+  });
+
+  test("patch 放行内容字段更新与清空", () => {
+    const patch = outlineNodePatchSchema.parse({
+      summary: "修订后的梗概",
+      keyPlotPoints: null,
+    });
+    expect(patch).toEqual({ summary: "修订后的梗概", keyPlotPoints: null });
   });
 });
 

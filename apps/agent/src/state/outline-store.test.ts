@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { openDatabase } from "./db";
 import { NovelStore } from "./novel-store";
 import { OutlineStore, type OutlineNodeInput } from "./outline-store";
 import type { OutlineNodeStatus, OutlineNodeType } from "@novel/shared";
@@ -24,6 +25,19 @@ function act(name: string, sort: number, extra: Partial<OutlineNodeInput> = {}):
   return { type: "act", name, sort, ...extra };
 }
 
+/** 带完整内容的部输入（与 outlineSchema.parts 结构一致） */
+function treePart(name: string, actNames: string[]) {
+  return {
+    name,
+    summary: `${name}的梗概`,
+    acts: actNames.map((actName) => ({
+      name: actName,
+      summary: `${actName}梗概`,
+      keyPlotPoints: [`${actName}情节点1`, `${actName}情节点2`],
+    })),
+  };
+}
+
 describe("OutlineStore", () => {
   test("addOutlineNode 默认 version=1/当前版本/planned，UUIDv7 主键，get 往返一致", async () => {
     tempDir = await mkdtemp(join(tmpdir(), "novel-outline-db-"));
@@ -39,6 +53,8 @@ describe("OutlineStore", () => {
     expect(added.node.isCurrentVersion).toBe(true);
     expect(added.node.status).toBe("planned");
     expect(added.node.documentId).toBeNull();
+    expect(added.node.summary).toBeNull();
+    expect(added.node.keyPlotPoints).toBeNull();
 
     const got = store.getOutlineNode(added.id);
     expect(got?.node.name).toBe("第一幕·开端");
@@ -222,8 +238,8 @@ describe("OutlineStore", () => {
     const store = setup(dbPath, novelId);
 
     const nodes = store.saveOutlineTree(novelId, [
-      { name: "第一部·风起", acts: [{ name: "第一幕" }, { name: "第二幕" }] },
-      { name: "第二部·云涌", acts: [{ name: "第三幕" }, { name: "第四幕" }, { name: "第五幕" }] },
+      treePart("第一部·风起", ["第一幕", "第二幕"]),
+      treePart("第二部·云涌", ["第三幕", "第四幕", "第五幕"]),
     ]);
     expect(nodes).toHaveLength(7);
     // 全部为 version=1 / 当前版本 / planned
@@ -250,6 +266,35 @@ describe("OutlineStore", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  test("saveOutlineTree 内容入库与往返：部有梗概无情节点，幕梗概与情节点齐全且持久化", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-tree-content-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "aaaaaaaa-bbbb-7ccc-8ddd-000000000005";
+    const store = setup(dbPath, novelId);
+
+    store.saveOutlineTree(novelId, [treePart("第一部·风起", ["第一幕", "第二幕"])]);
+
+    const listed = store.listOutlineNodes(novelId);
+    const part = listed.find((n) => n.node.type === "part");
+    expect(part?.node.summary).toBe("第一部·风起的梗概");
+    expect(part?.node.keyPlotPoints).toBeNull();
+    const act1 = listed.find((n) => n.node.name === "第一幕");
+    expect(act1?.node.summary).toBe("第一幕梗概");
+    expect(act1?.node.keyPlotPoints).toEqual(["第一幕情节点1", "第一幕情节点2"]);
+    store.close();
+
+    // 重开库后内容仍在（真实持久化）
+    const s2 = OutlineStore.open(dbPath);
+    const reread = s2.listOutlineNodes(novelId);
+    expect(reread.find((n) => n.node.type === "part")?.node.summary).toBe("第一部·风起的梗概");
+    expect(reread.find((n) => n.node.name === "第二幕")?.node.keyPlotPoints).toEqual([
+      "第二幕情节点1",
+      "第二幕情节点2",
+    ]);
+    s2.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
   test("saveOutlineTree 空树与空幕部被拒绝", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-tree-empty-"));
     const dbPath = join(dir, "test.db");
@@ -258,7 +303,7 @@ describe("OutlineStore", () => {
 
     expect(() => store.saveOutlineTree(novelId, [])).toThrow("空");
     expect(() =>
-      store.saveOutlineTree(novelId, [{ name: "孤部", acts: [] }]),
+      store.saveOutlineTree(novelId, [{ name: "孤部", summary: "孤部梗概", acts: [] }]),
     ).toThrow("至少一幕");
     expect(store.listOutlineNodes(novelId)).toHaveLength(0);
     store.close();
@@ -274,8 +319,8 @@ describe("OutlineStore", () => {
     // 第二部名称为空触发 zod 拒绝；第一部已插入的行必须整体回滚
     expect(() =>
       store.saveOutlineTree(novelId, [
-        { name: "第一部", acts: [{ name: "第一幕" }] },
-        { name: "", acts: [{ name: "第二幕" }] },
+        treePart("第一部", ["第一幕"]),
+        { ...treePart("", ["第二幕"]), name: "" },
       ]),
     ).toThrow();
     expect(store.listOutlineNodes(novelId)).toHaveLength(0);
@@ -289,14 +334,107 @@ describe("OutlineStore", () => {
     const novelId = "aaaaaaaa-bbbb-7ccc-8ddd-000000000004";
     const store = setup(dbPath, novelId);
 
-    store.saveOutlineTree(novelId, [{ name: "第一部", acts: [{ name: "第一幕" }] }]);
+    store.saveOutlineTree(novelId, [treePart("第一部", ["第一幕"])]);
     expect(() =>
-      store.saveOutlineTree(novelId, [{ name: "另一部", acts: [{ name: "另一幕" }] }]),
+      store.saveOutlineTree(novelId, [treePart("另一部", ["另一幕"])]),
     ).toThrow("sort");
     const remaining = store.listOutlineNodes(novelId);
     expect(remaining).toHaveLength(2);
     expect(remaining.map((n) => n.node.name)).toEqual(["第一部", "第一幕"]);
     store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("部/章节点携带关键情节点被 schema refine 拒绝（写入侧校验）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-kpp-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "aaaaaaaa-bbbb-7ccc-8ddd-000000000006";
+    const store = setup(dbPath, novelId);
+
+    expect(() =>
+      store.addOutlineNode(novelId, {
+        type: "part",
+        name: "第一部",
+        sort: 1,
+        keyPlotPoints: ["不该有的情节点"],
+      }),
+    ).toThrow("关键情节点仅幕节点可携带");
+    expect(() =>
+      store.addOutlineNode(novelId, {
+        type: "chapter",
+        name: "第一章",
+        sort: 1,
+        keyPlotPoints: ["不该有的情节点"],
+      }),
+    ).toThrow("关键情节点仅幕节点可携带");
+    // 幕节点携带合法
+    expect(
+      store.addOutlineNode(novelId, act("第一幕", 1, { keyPlotPoints: ["情节点"] })).node
+        .keyPlotPoints,
+    ).toEqual(["情节点"]);
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("updateOutlineNode 更新与清空内容（summary/keyPlotPoints），盖章 updated_at", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-content-upd-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "aaaaaaaa-bbbb-7ccc-8ddd-000000000007";
+    const store = setup(dbPath, novelId);
+
+    const created = store.addOutlineNode(
+      novelId,
+      act("第一幕", 1, { summary: "原梗概", keyPlotPoints: ["原情节点"] }),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    const updated = store.updateOutlineNode(created.id, {
+      summary: "修订梗概",
+      keyPlotPoints: ["新情节点1", "新情节点2"],
+    });
+    expect(updated.node.summary).toBe("修订梗概");
+    expect(updated.node.keyPlotPoints).toEqual(["新情节点1", "新情节点2"]);
+    expect(updated.updatedAt > created.updatedAt).toBe(true);
+
+    // keyPlotPoints 传 null 清空；summary 传 null 清空
+    const cleared = store.updateOutlineNode(created.id, { keyPlotPoints: null, summary: null });
+    expect(cleared.node.keyPlotPoints).toBeNull();
+    expect(cleared.node.summary).toBeNull();
+
+    // 未传字段不动其余内容
+    const kept = store.updateOutlineNode(created.id, { name: "第一幕·改" });
+    expect(kept.node.summary).toBeNull();
+    expect(kept.node.name).toBe("第一幕·改");
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("迁移前旧行（内容列 NULL）读取正常，损坏 key_plot_points 抛可读错误", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-legacy-row-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "aaaaaaaa-bbbb-7ccc-8ddd-000000000008";
+    NovelStore.open(dbPath).createNovel({ id: novelId });
+    const db = openDatabase(dbPath);
+    const store = new OutlineStore(db);
+
+    // SQL 直插 5→6 迁移前的旧行形态：无 summary / key_plot_points（NULL）
+    db.prepare(`
+      INSERT INTO outlines (id, novel_id, parent_id, type, name, sort, version,
+        is_current_version, status, created_at, updated_at)
+      VALUES ('legacy-row-1', ?, NULL, 'part', '旧部', 1, 1, 1, 'planned', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    `).run(novelId);
+    const legacy = store.getOutlineNode("legacy-row-1");
+    expect(legacy?.node.name).toBe("旧部");
+    expect(legacy?.node.summary).toBeNull();
+    expect(legacy?.node.keyPlotPoints).toBeNull();
+
+    // 损坏的情节点 JSON 文本：读侧抛带节点 ID 的可读错误
+    db.prepare(`
+      INSERT INTO outlines (id, novel_id, parent_id, type, name, key_plot_points, sort, version,
+        is_current_version, status, created_at, updated_at)
+      VALUES ('legacy-row-2', ?, NULL, 'act', '坏幕', '{oops', 2, 1, 1, 'planned', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    `).run(novelId);
+    expect(() => store.getOutlineNode("legacy-row-2")).toThrow("关键情节点列损坏");
+    db.close();
     await rm(dir, { recursive: true, force: true });
   });
 });

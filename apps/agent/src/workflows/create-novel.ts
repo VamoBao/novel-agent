@@ -194,11 +194,11 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
   const outline = await createOutline(params, { novelTitle: novelName, actCount, partCount }, channel);
   channel.present({ kind: "outline", detail: "full", outline });
 
-  // 确认后入库（outlines 表两级树）并落盘 output/<id>.json
+  // 确认后入库（outlines 表两级树，梗概与关键情节点随节点入列）并落盘 output/<id>.json
   const treeNodes = outlineStore.saveOutlineTree(id, outline.parts);
   const partTotal = treeNodes.filter((n) => n.node.type === "part").length;
   const actTotal = treeNodes.filter((n) => n.node.type === "act").length;
-  channel.notify(`🗂 大纲树已入库：${partTotal} 部 / ${actTotal} 幕`);
+  channel.notify(`🗂 大纲树已入库（含梗概与关键情节点）：${partTotal} 部 / ${actTotal} 幕`);
   const savedPath = await saveOutline(id, outline);
   channel.notify(`🗂 大纲已落盘：${savedPath}`);
 

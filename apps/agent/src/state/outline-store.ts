@@ -23,6 +23,10 @@ export interface OutlineNodeInput {
   parentId?: string | null;
   type: OutlineNodeType;
   name: string;
+  /** 节点梗概；缺省 null（saveOutlineTree 部/幕两级必传） */
+  summary?: string | null;
+  /** 关键情节点（JSON 文本列存储）；仅幕节点可携带，缺省 null */
+  keyPlotPoints?: ReadonlyArray<string> | null;
   sort: number;
   /** 缺省 1，首次生成的节点即第一版 */
   version?: number;
@@ -32,19 +36,29 @@ export interface OutlineNodeInput {
   documentId?: string | null;
 }
 
-/** 大纲树入库输入：部（根节点）→ 幕（子节点）两级；章为写作期节点，此处不建 */
+/**
+ * 大纲树入库输入：部（根节点）→ 幕（子节点）两级；章为写作期节点，此处不建。
+ * 内容必填（与 outlineSchema.parts 结构对齐），保证梗概与关键情节点不被静默丢弃。
+ */
 export interface OutlineTreeInput {
   name: string;
-  acts: ReadonlyArray<{ name: string }>;
+  summary: string;
+  acts: ReadonlyArray<{
+    name: string;
+    summary: string;
+    keyPlotPoints: ReadonlyArray<string>;
+  }>;
 }
 
-/** outlines 表行结构（列名蛇形，is_current_version 存 0/1） */
+/** outlines 表行结构（列名蛇形，is_current_version 存 0/1，key_plot_points 存 JSON 文本） */
 interface OutlineRow {
   id: string;
   novel_id: string;
   parent_id: string | null;
   type: string;
   name: string;
+  summary: string | null;
+  key_plot_points: string | null;
   sort: number;
   version: number;
   is_current_version: number;
@@ -55,15 +69,15 @@ interface OutlineRow {
 }
 
 const COLUMNS = `
-  id, novel_id, parent_id, type, name, sort, version, is_current_version,
-  status, document_id, created_at, updated_at
+  id, novel_id, parent_id, type, name, summary, key_plot_points, sort, version,
+  is_current_version, status, document_id, created_at, updated_at
 `;
 
 const INSERT_SQL = `
   INSERT INTO outlines (
-    id, novel_id, parent_id, type, name, sort, version, is_current_version,
-    status, document_id, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    id, novel_id, parent_id, type, name, summary, key_plot_points, sort, version,
+    is_current_version, status, document_id, created_at, updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 `;
 
 const GET_SQL = `
@@ -83,9 +97,22 @@ const LIST_CURRENT_SQL = `
 
 const UPDATE_SQL = `
   UPDATE outlines
-  SET name = ?, sort = ?, is_current_version = ?, status = ?, document_id = ?, updated_at = ?
+  SET name = ?, summary = ?, key_plot_points = ?, sort = ?, is_current_version = ?,
+      status = ?, document_id = ?, updated_at = ?
   WHERE id = ?;
 `;
+
+/** key_plot_points 列（JSON 文本）还原为数组；损坏数据抛可读错误（库内完整性兜底） */
+function parseKeyPlotPoints(raw: string | null, nodeId: string): string[] | null {
+  if (raw === null) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as string[];
+  } catch (cause) {
+    throw new Error(`大纲节点关键情节点列损坏（非合法 JSON）：${nodeId}`, { cause });
+  }
+}
 
 function rowToStored(row: OutlineRow): StoredOutlineNode {
   return {
@@ -98,6 +125,8 @@ function rowToStored(row: OutlineRow): StoredOutlineNode {
       parentId: row.parent_id,
       type: row.type,
       name: row.name,
+      summary: row.summary,
+      keyPlotPoints: parseKeyPlotPoints(row.key_plot_points, row.id),
       sort: row.sort,
       version: row.version,
       isCurrentVersion: row.is_current_version === 1,
@@ -108,7 +137,8 @@ function rowToStored(row: OutlineRow): StoredOutlineNode {
 }
 
 /**
- * 大纲树持久化：按创作 ID 绑定存储部/幕/章节点。
+ * 大纲树持久化：按创作 ID 绑定存储部/幕/章节点，梗概（summary）与
+ * 关键情节点（key_plot_points，仅幕节点，JSON 文本列）随节点入库。
  * 同一节点可有多个版本行并存；当前版本切换由调用方先降级旧版本再提升新版本，
  * 唯一索引保证同父级下各当前版本 sort 不重复。
  */
@@ -120,12 +150,14 @@ export class OutlineStore {
     return new OutlineStore(openDatabase(path));
   }
 
-  /** 写入大纲节点（先过 schema 校验，缺省 version=1/当前版本/status=planned） */
+  /** 写入大纲节点（先过 schema 校验，缺省 version=1/当前版本/status=planned，内容两列缺省 null） */
   addOutlineNode(novelId: string, input: OutlineNodeInput): StoredOutlineNode {
     const node = outlineNodeSchema.parse({
       parentId: input.parentId ?? null,
       type: input.type,
       name: input.name,
+      summary: input.summary ?? null,
+      keyPlotPoints: input.keyPlotPoints ?? null,
       sort: input.sort,
       version: input.version ?? 1,
       isCurrentVersion: input.isCurrentVersion ?? true,
@@ -140,6 +172,8 @@ export class OutlineStore {
       node.parentId,
       node.type,
       node.name,
+      node.summary,
+      node.keyPlotPoints === null ? null : JSON.stringify(node.keyPlotPoints),
       node.sort,
       node.version,
       node.isCurrentVersion ? 1 : 0,
@@ -167,17 +201,23 @@ export class OutlineStore {
     return rows.map(rowToStored);
   }
 
-  /** 部分更新（改名/排序/版本切换/状态/正文回填），自动盖章 updated_at */
+  /** 部分更新（改名/内容/排序/版本切换/状态/正文回填），自动盖章 updated_at */
   updateOutlineNode(id: string, patch: OutlineNodePatch): StoredOutlineNode {
     const current = this.getOutlineNode(id);
     if (!current) {
       throw new Error(`大纲节点不存在，无法更新：${id}`);
     }
     const validated = outlineNodePatchSchema.parse(patch);
+    // 内容两列可空：undefined 表示不动，null 表示显式清空（对齐 documentId 的合并语义）
     const next = outlineNodeSchema.parse({
       parentId: current.node.parentId,
       type: current.node.type,
       name: validated.name ?? current.node.name,
+      summary: validated.summary === undefined ? current.node.summary : validated.summary,
+      keyPlotPoints:
+        validated.keyPlotPoints === undefined
+          ? current.node.keyPlotPoints
+          : validated.keyPlotPoints,
       sort: validated.sort ?? current.node.sort,
       version: current.node.version,
       isCurrentVersion: validated.isCurrentVersion ?? current.node.isCurrentVersion,
@@ -189,6 +229,8 @@ export class OutlineStore {
       UPDATE_SQL,
       [
         next.name,
+        next.summary,
+        next.keyPlotPoints === null ? null : JSON.stringify(next.keyPlotPoints),
         next.sort,
         next.isCurrentVersion ? 1 : 0,
         next.status,
@@ -203,7 +245,8 @@ export class OutlineStore {
 
   /**
    * 整棵大纲树入库（事务原子）：部为根节点（sort 从 1 递增）、幕为其子节点
-   * （sort 按所属部从 1 递增），全部为 version=1 / 当前版本 / planned。
+   * （sort 按所属部从 1 递增），全部为 version=1 / 当前版本 / planned，
+   * 梗概与关键情节点随节点入列（部无关键情节点）。
    * 任一节点失败整树回滚，不留半棵树。
    */
   saveOutlineTree(novelId: string, parts: readonly OutlineTreeInput[]): StoredOutlineNode[] {
@@ -219,6 +262,7 @@ export class OutlineStore {
         const partNode = this.addOutlineNode(novelId, {
           type: "part",
           name: part.name,
+          summary: part.summary,
           sort: partIndex + 1,
         });
         created.push(partNode);
@@ -227,6 +271,8 @@ export class OutlineStore {
             this.addOutlineNode(novelId, {
               type: "act",
               name: act.name,
+              summary: act.summary,
+              keyPlotPoints: act.keyPlotPoints,
               sort: actIndex + 1,
               parentId: partNode.id,
             }),
