@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-09-23 [feat] 删除小说改为 GitHub 删 repo 式强确认（简单需求快速通道）：删除菜单项打开 DeleteNovelDialog 模态（遮罩 + 危险色卡片）——展示书名 / ID 前 8 位 / 级联范围（世界观、角色、大纲节点及 output 产物，不可恢复），必须输入小说名（trim 后全等；未命名小说输入「未命名小说」）才放行「删除这本小说」按钮；输入框自动聚焦，Esc / 点遮罩 / 取消关闭，Enter 放行时提交；对话框条目从列表解析，删除后列表刷新自动关闭；替代原内联二次确认条（样式同步移除），onDelete 链路（IPC / 级联 / 产物清理）不变。AC：typecheck 3 工程 / lint / 127 用例过；DeleteNovelDialog SSR 冒烟（命名 / 未命名口令回落、级联警示与范围文案、按钮初始禁用）；对话框交互（输入放行 / Esc / Enter）待用户 dev:client 人工验收
+
 - 2026-09-23 [feat] 客户端大纲浏览切换为 outlines 表节点（任务包经用户确认）：shared query 契约 `outline: Outline|null` → `outlineNodes: OutlineNodeEntry[]`（id/parentId/type/name/sort/summary/keyPlotPoints，currentOnly 当前版本；类比 characterEntry 带主键先例）；query CLI `buildNovelDetail` 接 `listOutlineNodes(currentOnly)`，`readOutlineArtifact` 退役（outlineFilePath 留给 delete 清产物）——产物缺失不再影响浏览；renderer `Selection` 大纲分支携带 `outlineNodeId`，结构树按 parentId 通用建树（部▸/幕·，去《标题》伪根），新增 OutlineNodeCard（类型徽标 + 梗概 + 幕级情节点列表，NULL 展示「暂无梗概 / 暂无关键情节点——旧数据未入库内容」占位，不进 View 体系避免渗入创作流协议）；App 冒烟 autoSelect 改取首个大纲节点。AC：typecheck 3 工程 / lint / 127 用例全过（重写契约与 CLI 大纲用例）；种子临时库 query 实跑（部 summary 有 + 幕情节点 3/2 条）；真实库《漂亮话》6 节点内容列全 null（旧数据空占位数据源）；OutlineNodeCard SSR 冒烟（内容 / 旧幕 / 旧部三路径，部无情节区）；无头截图实证树由 DB 节点渲染（▸ 第一部：漂亮话 + 五幕，无渲染异常）；创作流协议零改动。点击交互观感待用户 dev:client 人工验收。决策见 DECISIONS
 
 - 2026-09-23 [feat] 大纲内容（summary / keyPlotPoints）入库 outlines 表（任务包经用户确认；默认决策：读取路径不动、旧数据不回填，见 DECISIONS）：outlineNodeSchema 增内容两字段（nullable + refine「keyPlotPoints 非 null 时 type 须为 act」+ patch 放行；zod 4 refine 后不可 pick，patch 由内部纯 object schema 派生）；SCHEMA_VERSION 5→6 链式保数据迁移（v4 库直升时 novels / outlines 两段列同批补齐；连带修正 novel-store 旧 v4 迁移用例缺 outlines 表的合成失真）；OutlineStore 输入 / 行 / SQL / 读写全链路扩展（OutlineTreeInput 内容必填、与 outlineSchema.parts 对齐，内容不可再被编译期静默丢弃；key_plot_points 存 JSON 文本，损坏抛带节点 ID 的可读错误）。AC：typecheck 3 工程 / lint / 123 用例全过（新增 12：shared schema 5 + db 迁移 3 + outline-store 内容 4）；真实库迁移实跑（4 本小说 14 行大纲无损、旧行未回填、`get` 仍读产物路径行为不变）；createNovel 集成断言 DB 行含梗概与情节点。读取路径切换 / 旧数据回填 / documents 表为后续需求
@@ -16,9 +18,9 @@
 
 - 2026-09-22 [refactor] 新建小说改为独立创作页：App 从「三栏 + 覆盖层盖住中右栏」改为页面级切换（浏览页 ↔ 创作页），创作页整页呈现 CreationFlow 问答流（头部「←」终止 agent 返回书库，替代原右上 ✕），浏览页汉堡 / 三栏结构不再与创作共存；样式移除 creation-overlay grid 定位，新增 create-app 整页容器；AUTOSTART 冒烟钩子语义不变（自动进入创作页）。AC：typecheck / lint / 111 用例过；无头冒烟截图实证创作页独立整页形态（无三栏 / 汉堡）；AGENTS / ARCHITECTURE / DECISIONS（旧决策补更新注记）同步
 
-- 2026-09-21 [fix] 跨进程并发打开库报 `database is locked`（书库管理需求遗留 Bug）：根因是 `openDatabase` 每次打开都无条件执行 `PRAGMA user_version` 赋值（写语句）且连接默认 `busy_timeout=0`——agent 创作进程写库期间，查询 CLI 子进程打开库抢写锁立即抛错（临时库多进程复现实证）。修复：所有连接统一 `busy_timeout=5000`（短锁冲突等待化解）；`journal_mode` 改幂等读检查后设置；`user_version` 写入收敛到真正的迁移 / 重建分支内——版本匹配的纯浏览打开零写，WAL 下读写连接天然共存。AC：复现场景（他进程持写锁 3s + 并发 `query list`）修复后 exit 0 正常返回；新增并发防锁单测（busy_timeout 生效 + 持锁读不阻塞）；全仓 111 用例 / typecheck / lint 过；v4→v5 迁移用例回归通过。并发约定落盘 ARCHITECTURE 关键约定
-
 ## 历史归档
+
+- 2026-09-21 [fix] 跨进程并发打开库报 `database is locked`（书库管理需求遗留 Bug）：所有连接统一 `busy_timeout=5000`；`journal_mode` 幂等读检查后设置；`user_version` 写入收敛到真正迁移 / 重建分支内——版本匹配的纯浏览打开零写，WAL 下读写连接天然共存。AC：复现场景修复 + 并发防锁单测 + 111 用例过；并发约定落盘 ARCHITECTURE 关键约定
 
 - 2026-09-21 [feat] 书库管理右键菜单（设计规格 `docs/superpowers/specs/2026-09-21-novel-management-design.md`）：novels 增列 pinned / favorite（SCHEMA_VERSION 4→5，DROP 重建改 ALTER 保数据迁移）+ NovelStore 置顶/收藏/级联删除与排序 + query CLI 管理子命令（rename / pin / unpin / favorite / unfavorite / delete + 产物清理）+ client library 管理 IPC 与右键菜单（重命名内联编辑、📌⭐ 标识、删除二次确认）。AC：110 用例（新增 11）+ 真实 v4 库迁移实跑保留 + 冒烟截图；右键菜单 GUI 待人工验收
 - 2026-09-21 [feat] 客户端三栏浏览 UI（设计规格 `docs/superpowers/specs/2026-09-21-client-browse-ui-design.md`）：shared 新增库查询契约 + agent 一次性查询 CLI（list / get，NovelStore 补 listNovels）+ client library IPC（spawn + schema 复验 + 8s 超时）与 agent:stop；renderer 三栏浏览壳（书库 / 结构树 / 预览）+ CreationFlow 创作覆盖层（后改独立创作页，见 2026-09-22）；AUTOSTART 改 renderer 触发、新增 NOVEL_CLIENT_SELECT。AC：typecheck / lint / 99 用例（新增 16）+ 无头冒烟截图；GUI 观感待人工验收

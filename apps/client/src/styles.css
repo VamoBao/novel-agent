@@ -275,24 +275,86 @@ button.danger {
   font-size: 14px;
 }
 
-/* 删除二次确认条 */
-.delete-confirm {
-  margin: 2px 8px 6px;
-  padding: 8px 10px;
+/* 删除强确认对话框（GitHub 删 repo 式：输入小说名放行） */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(31, 35, 40, 0.45);
+}
+
+.dialog {
+  width: 420px;
+  max-width: calc(100vw - 48px);
+  padding: 18px 20px;
+  background: #fff;
+  border: 1px solid #e4e7eb;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(31, 35, 40, 0.22);
+}
+
+.dialog h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.dialog-danger h3 {
+  color: #b42318;
+}
+
+.dialog-lead {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.dialog-hint {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.dialog-hint code {
+  padding: 1px 6px;
   background: #fef3f2;
   border: 1px solid #fecdca;
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: 5px;
   color: #912018;
 }
 
-.delete-confirm .row {
-  margin-top: 6px;
+.dialog input {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 14px;
 }
 
-.delete-confirm .row button {
-  padding: 4px 10px;
-  font-size: 12px;
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.dialog-actions button {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+.dialog-actions .danger-filled {
+  background: #b42318;
+  border-color: #b42318;
+  color: #fff;
+}
+
+.dialog-actions .danger-filled:hover:not(:disabled) {
+  background: #912018;
+}
+
+.dialog-actions .danger-filled:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .stagebar {

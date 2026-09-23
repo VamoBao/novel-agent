@@ -62,8 +62,8 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 ├── src/                 # renderer（React）：App 页面级切换——三栏浏览主页（书库 / 结构树 /
 │                        #   预览）↔ 独立创作页（CreationFlow 问答流，头部返回书库）
 │                        #   + NovelListPanel（右键菜单管理：重命名 / 置顶 / 收藏 / 删除
-│                        #   二次确认）/ StructureTreePanel / PreviewPane / StageBar /
-│                        #   ViewCard / QuestionCard
+│                        #   强确认——DeleteNovelDialog 输入小说名放行）/ StructureTreePanel /
+│                        #   PreviewPane / OutlineNodeCard / StageBar / ViewCard / QuestionCard
 └── electron.vite.config.ts
 ```
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { NovelListItem } from "@novel/shared";
+import { DeleteNovelDialog } from "./DeleteNovelDialog";
 
 interface NovelListPanelProps {
   /** null = 列表加载中 */
@@ -33,7 +34,7 @@ export function NovelListPanel({
   /** 正在内联重命名的小说：null = 无 */
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
-  /** 等待二次确认删除的小说：null = 无 */
+  /** 等待强确认删除的小说：null = 无；从列表解析条目，删除完成后列表刷新自动关闭 */
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
@@ -54,6 +55,9 @@ export function NovelListPanel({
   }, [renamingId]);
 
   const menuNovel = menu ? novels?.find((novel) => novel.id === menu.novelId) : undefined;
+  const confirmDeleteNovel = confirmDeleteId
+    ? novels?.find((novel) => novel.id === confirmDeleteId)
+    : undefined;
 
   const submitRename = (): void => {
     if (!renamingId) return;
@@ -126,17 +130,6 @@ export function NovelListPanel({
                 </span>
                 <span className="novel-id">{novel.id.slice(0, 8)}</span>
               </button>
-              {confirmDeleteId === novel.id ? (
-                <div className="delete-confirm">
-                  <span>删除后将一并清除角色 / 世界观 / 大纲，确认？</span>
-                  <div className="row">
-                    <button className="danger" onClick={() => onDelete(novel.id)}>
-                      确认删除
-                    </button>
-                    <button onClick={() => setConfirmDeleteId(null)}>取消</button>
-                  </div>
-                </div>
-              ) : null}
             </li>
           ),
         )}
@@ -158,12 +151,21 @@ export function NovelListPanel({
           <button
             className="danger"
             onClick={() => {
+              setMenu(null);
               setConfirmDeleteId(menuNovel.id);
             }}
           >
             🗑 删除
           </button>
         </div>
+      ) : null}
+
+      {confirmDeleteNovel ? (
+        <DeleteNovelDialog
+          novel={confirmDeleteNovel}
+          onCancel={() => setConfirmDeleteId(null)}
+          onConfirm={onDelete}
+        />
       ) : null}
     </div>
   );
