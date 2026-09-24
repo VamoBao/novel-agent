@@ -7,11 +7,11 @@ export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 /**
  * 打开（必要时创建）数据库并完成建表。
- * 五张表主键均为应用层生成的 UUIDv7（时间有序，索引友好）：
+ * 六张表主键均为应用层生成的 UUIDv7（时间有序，索引友好）：
  * - novels：小说信息（pinned / favorite 为书库管理标记；name 在大纲确认后回填），
  *   其余业务表经 novel_id 外键关联
  * - characters：角色卡，1:N（novel_id 索引）
@@ -20,6 +20,9 @@ const SCHEMA_VERSION = 7;
  *   内容随节点入库（summary 梗概，key_plot_points 关键情节点存 JSON 文本，仅幕节点携带）
  * - locations：小说世界的地理位置（坐标/图层/人口），parent_id 自引用外键（城市→大陆层级），
  *   population 可空（无人/未设定）
+ * - foreshadows：伏笔（表面行为/隐藏真相/读者注意度 1-10/回收状态枚举），
+ *   出现章节 ID 为可空裸列（chapter 节点写作期落地后补约束，先例 document_id），
+ *   回收章节 IDs 与服务角色 IDs 存 JSON 文本
  */
 export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
   mkdirSync(dirname(path), { recursive: true });
@@ -54,10 +57,12 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
         db.exec("ALTER TABLE outlines ADD COLUMN key_plot_points TEXT;");
       }
       // 6→7：新增 locations 表，无 ALTER——由下方 CREATE TABLE IF NOT EXISTS 幂等落地
+      // 7→8：新增 foreshadows 表，同上
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>7 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>8 的库被旧代码打开）：重建兜底
       db.exec("DROP TABLE IF EXISTS outlines;");
       db.exec("DROP TABLE IF EXISTS locations;");
+      db.exec("DROP TABLE IF EXISTS foreshadows;");
       db.exec("DROP TABLE IF EXISTS characters;");
       db.exec("DROP TABLE IF EXISTS worldviews;");
       db.exec("DROP TABLE IF EXISTS novels;");
@@ -164,6 +169,27 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_locations_parent_id ON locations(parent_id);",
+  );
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS foreshadows (
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL REFERENCES novels(id),
+      surface_action TEXT NOT NULL,
+      hidden_truth TEXT NOT NULL,
+      attention_level INTEGER NOT NULL CHECK (attention_level BETWEEN 1 AND 10),
+      recovery_status TEXT NOT NULL DEFAULT 'unrecovered'
+        CHECK (recovery_status IN ('unrecovered', 'partial', 'recovered')),
+      planting_method TEXT,
+      purpose TEXT,
+      appear_chapter_id TEXT,
+      recover_chapter_ids TEXT,
+      character_ids TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_foreshadows_novel_id ON foreshadows(novel_id);",
   );
   return db;
 }

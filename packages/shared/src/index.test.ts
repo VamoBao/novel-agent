@@ -3,6 +3,8 @@ import {
   audienceSuggestionSchema,
   characterSchema,
   coreConflictSchema,
+  foreshadowPatchSchema,
+  foreshadowSchema,
   locationSchema,
   outlineNodePatchSchema,
   outlineNodeSchema,
@@ -126,6 +128,84 @@ describe("locationSchema", () => {
     expect(() => locationSchema.parse({ ...base, population: -1 })).toThrow();
     expect(() => locationSchema.parse({ ...base, population: 1.5 })).toThrow();
     expect(locationSchema.parse({ ...base, population: 0 })).toBeDefined();
+  });
+});
+
+describe("foreshadowSchema", () => {
+  const base = {
+    surfaceAction: "老周把主角派去北境送信",
+    hiddenTruth: "暗示老周已经投敌，借刀除掉主角",
+    attentionLevel: 4,
+  };
+
+  test("完整伏笔通过校验（含全部可选字段）", () => {
+    const f = foreshadowSchema.parse({
+      ...base,
+      recoveryStatus: "partial",
+      plantingMethod: "对话中的一个物件描述",
+      purpose: "北境之战的引子",
+      appearChapterId: "cccccccc-0000-7000-8000-0000000000c1",
+      recoverChapterIds: ["cccccccc-0000-7000-8000-0000000000d1", "cccccccc-0000-7000-8000-0000000000d2"],
+      characterIds: ["cccccccc-0000-7000-8000-0000000000e1", "cccccccc-0000-7000-8000-0000000000e2"],
+    });
+    expect(f.recoveryStatus).toBe("partial");
+    expect(f.recoverChapterIds).toHaveLength(2);
+  });
+
+  test("仅核心必填项通过，回收状态缺省 unrecovered、可选项缺省 undefined", () => {
+    const f = foreshadowSchema.parse(base);
+    expect(f.recoveryStatus).toBe("unrecovered");
+    expect(f.plantingMethod).toBeUndefined();
+    expect(f.recoverChapterIds).toBeUndefined();
+  });
+
+  test("核心必填缺一或为空被拒绝", () => {
+    for (const key of ["surfaceAction", "hiddenTruth", "attentionLevel"] as const) {
+      const broken: Record<string, unknown> = { ...base };
+      delete broken[key];
+      expect(() => foreshadowSchema.parse(broken)).toThrow();
+    }
+    expect(() => foreshadowSchema.parse({ ...base, surfaceAction: "" })).toThrow();
+    expect(() => foreshadowSchema.parse({ ...base, hiddenTruth: "" })).toThrow();
+  });
+
+  test("注意度越界与非整数被拒绝，边界 1 / 10 通过", () => {
+    expect(() => foreshadowSchema.parse({ ...base, attentionLevel: 0 })).toThrow();
+    expect(() => foreshadowSchema.parse({ ...base, attentionLevel: 11 })).toThrow();
+    expect(() => foreshadowSchema.parse({ ...base, attentionLevel: 1.5 })).toThrow();
+    expect(foreshadowSchema.parse({ ...base, attentionLevel: 1 }).attentionLevel).toBe(1);
+    expect(foreshadowSchema.parse({ ...base, attentionLevel: 10 }).attentionLevel).toBe(10);
+  });
+
+  test("非法回收状态与空多值数组被拒绝", () => {
+    expect(() =>
+      foreshadowSchema.parse({ ...base, recoveryStatus: "recycled" }),
+    ).toThrow();
+    expect(() => foreshadowSchema.parse({ ...base, recoverChapterIds: [] })).toThrow();
+    expect(() => foreshadowSchema.parse({ ...base, characterIds: [] })).toThrow();
+  });
+});
+
+describe("foreshadowPatchSchema", () => {
+  test("放行字段覆盖与 null 清空，空 patch 合法", () => {
+    const patch = foreshadowPatchSchema.parse({
+      recoveryStatus: "recovered",
+      plantingMethod: null,
+      recoverChapterIds: ["cccccccc-0000-7000-8000-0000000000d9"],
+    });
+    expect(patch.recoveryStatus).toBe("recovered");
+    expect(patch.plantingMethod).toBeNull();
+    expect(foreshadowPatchSchema.parse({})).toEqual({});
+  });
+
+  test("必填字段与回收状态不允许 null 清空，越界值仍被拒绝", () => {
+    expect(() =>
+      foreshadowPatchSchema.parse({ surfaceAction: null }),
+    ).toThrow();
+    expect(() => foreshadowPatchSchema.parse({ hiddenTruth: null })).toThrow();
+    expect(() => foreshadowPatchSchema.parse({ attentionLevel: null })).toThrow();
+    expect(() => foreshadowPatchSchema.parse({ recoveryStatus: null })).toThrow();
+    expect(() => foreshadowPatchSchema.parse({ attentionLevel: 11 })).toThrow();
   });
 });
 

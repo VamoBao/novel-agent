@@ -1,6 +1,13 @@
 export { worldviewSchema, type Worldview } from "./worldview";
 export { characterSchema, type Character } from "./character";
 export { locationSchema, type Location } from "./location";
+export {
+  foreshadowRecoveryStatusSchema,
+  foreshadowSchema,
+  foreshadowPatchSchema,
+  type Foreshadow,
+  type ForeshadowPatch,
+} from "./foreshadow";
 export { coreConflictSchema, type CoreConflict } from "./conflict";
 export { outlineSchema, type Outline } from "./outline";
 export {

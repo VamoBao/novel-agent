@@ -14,7 +14,7 @@
 
 - **多阶段创作工作流**：类型选择 → 受众推断（LLM 生成候选 + 用户多选）→ 世界观（ReAct Agent 多轮追问）→ 角色卡（逐字段「发散丰富 → 确认 → 保存」）→ 核心冲突 → 两级大纲（部→幕，结构强校验 + 确认循环）
 - **人机确认门**：世界观提交、角色卡整卡确认、大纲确认均设用户确认环节，拒绝后按反馈修订重提
-- **SQLite 持久化**：novels / characters / worldviews / outlines / locations 五表外键关联，主键均为应用层生成的 UUIDv7；schema 以 `PRAGMA user_version` 版本化增量迁移
+- **SQLite 持久化**：novels / characters / worldviews / outlines / locations / foreshadows 六表外键关联，主键均为应用层生成的 UUIDv7；schema 以 `PRAGMA user_version` 版本化增量迁移
 - **双运行模式**：终端交互模式（CLI）与 stdio JSON 行协议模式（`headless`，供 Electron 等宿主进程 spawn）
 - **库查询与管理**：一次性查询 CLI（`query.ts`）：`list` / `get` 查询 + `rename` / `pin` / `unpin` / `favorite` / `unfavorite` / `delete` 管理
 - **Electron 客户端**：三栏浏览主页（书库 / 结构树 / 预览，右键菜单管理，删除需输入小说名强确认）↔ 独立创作页（问答流）
@@ -83,7 +83,7 @@ Bun 自动加载根目录 `.env`（参考 `.env.example`）：
 
 ## 数据存储
 
-- **SQLite**（默认 `data/novel.db`）：五张表按 UUIDv7 创作 ID 外键关联——`novels`（小说信息与置顶/收藏标记）、`worldviews`（1:1）、`characters`（1:N）、`outlines`（大纲树，部/幕两级、多版本、内容随节点入库）、`locations`（层级位置，数据层先行）
+- **SQLite**（默认 `data/novel.db`）：六张表按 UUIDv7 创作 ID 外键关联——`novels`（小说信息与置顶/收藏标记）、`worldviews`（1:1）、`characters`（1:N）、`outlines`（大纲树，部/幕两级、多版本、内容随节点入库）、`locations`（层级位置，数据层先行）、`foreshadows`（伏笔，完整 CRUD 与回收状态流转，数据层先行）
 - **产物落盘**：大纲 JSON 保存为 `output/<id>.json`，仅供留存
 - **本地查库辅助**：`docker-compose.yaml` 提供 sqlite-web 网页查看 `data/novel.db`（宿主 8081 端口，非应用运行时依赖）：
 
