@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-09-24 [feat] 大纲节点预览卡精简（简单需求快速通道）：OutlineNodeCard 移除「📖 大纲节点 · 部/幕/章」类型徽标标题行与节点名大标题——点击大纲节点右栏只展示梗概与关键情节点（仅幕节点有情节点区），节点名以左栏结构树选中高亮为准，不再重复；旧数据（内容列 NULL）空占位文案保留。AC：typecheck 3 工程 / lint / 157 用例过；OutlineNodeCard SSR 冒烟 9 条全过（部/幕无标题行无节点名、部无情节点区、幕梗概+情节点齐全、旧数据双占位）；无头截图（临时反转 autoSelect 优先级指向大纲节点，已还原）视觉评审 pass——卡片仅「梗概」标签+正文、选中高亮正常、无渲染异常
+
 - 2026-09-24 [feat] 第一幕章节规划工作流（决策见 DECISIONS）：大纲确认入库后新增章节规划段——shared 新增 chapterPlanSchema（章名+剧情概述，数量由模型推荐、强约束 1~12 章）+ `chapter-plan` 自包含确认视图 + `chapter` 阶段枚举（协议七阶段）+ 单测；`planChapters` 章节 ReAct Agent（chapter-agent，save_chapters 终态确认门：拒绝→反馈→修订→再确认，对齐 outline-agent 模式）；`OutlineStore.saveChapters` 幕下事务批量建 chapter 子节点（父级须为幕且同小说、sort 从 1 递增、概述随节点入列、章节点不携带情节点——沿用既有 refine；中途失败整体回滚、重复保存撞唯一索引拒绝）+ 单测（父级校验 / 回滚 / 唯一索引）；createNovel 大纲落盘后接规划段（第一幕 = 树中首个 act 节点），确认后入库并通知；CLI renderView / client ViewCard / StageBar 穷尽性联动渲染，客户端浏览侧结构树第三层本就预留零改动。AC：typecheck 3 工程 / lint / 157 用例全过（新增 7：schema 3 + store 3 + renderView 1；create-novel 集成改写覆盖章节段——章节点挂幕/概述/sort/入库统计断言）；真实 LLM 端到端待用户复验（`bun run dev` 走到章节确认门）。后续幕逐幕推进为后续需求
 
 - 2026-09-24 [feat] 伏笔概念数据层：foreshadows 表 + ForeshadowStore 完整 CRUD（任务包经用户确认，决策见 DECISIONS）：shared 新增 foreshadowSchema（表面行为 / 隐藏真相 / 注意度 1-10 必填；回收状态枚举缺省 unrecovered；埋线方式 / 创作目的 / 出现章节 / 回收章节多值 / 服务角色多值可选）+ foreshadowPatchSchema（undefined=不动 / null=清空 / 值=覆盖）+ 单测；SCHEMA_VERSION 7→8 纯新增表迁移（recovery_status CHECK 枚举、attention_level CHECK 1-10、多值 JSON 文本列、novel_id 索引）；ForeshadowStore add（服务角色须存在且同小说）/ list / updateForeshadow patch（回收状态流转、追加回收章节、null 清空、updated_at 盖章）/ delete，JSON 列损坏抛带 ID 可读错误，读写双向 zod 校验；deleteNovel 级联清六表。AC：typecheck 3 工程 / lint / 150 用例全过（新增 13：schema 7 + 迁移 1 + store 5）；真实库副本迁移实跑（版本升 8、foreshadows 列结构齐、既有数据无损）。创作流采集 / query CLI / 客户端浏览 / chapter 落地后补章节外键为后续需求
@@ -16,10 +18,9 @@
 
 - 2026-09-23 [feat] 位置概念数据层：locations 表 + LocationStore（任务包经用户确认，决策见 DECISIONS）：shared 新增 locationSchema（名称 / 横纵坐标 / 图层自由文本 / 人口可空非负整数 / 父级可选）+ 导出与单测；SCHEMA_VERSION 6→7 纯新增表迁移（novel_id 外键 + parent_id 自引用外键双索引，population CHECK 非负），连带修正 5→6 迁移段缺 `version <= 5` 守卫的隐患（版本再递增时 v6 库会重放 ALTER 报 duplicate column）；LocationStore `addLocation`（父级须存在且同小说，先查后插给可读错误）/ `listLocations` 按入库顺序，读写双向 zod 校验；deleteNovel 级联清五表。AC：typecheck 3 工程 / lint / 137 用例全过（新增 10：schema 4 + 迁移 1 + store 5）；真实库副本迁移实跑（版本升 7、locations 表列结构齐、4 小说 22 大纲 3 角色 3 世界观无损）。创作流采集 / query CLI / 客户端浏览为后续需求
 
-- 2026-09-23 [feat] 删除小说改为 GitHub 删 repo 式强确认（简单需求快速通道）：删除菜单项打开 DeleteNovelDialog 模态（遮罩 + 危险色卡片）——展示书名 / ID 前 8 位 / 级联范围（世界观、角色、大纲节点及 output 产物，不可恢复），必须输入小说名（trim 后全等；未命名小说输入「未命名小说」）才放行「删除这本小说」按钮；输入框自动聚焦，Esc / 点遮罩 / 取消关闭，Enter 放行时提交；对话框条目从列表解析，删除后列表刷新自动关闭；替代原内联二次确认条（样式同步移除），onDelete 链路（IPC / 级联 / 产物清理）不变。AC：typecheck 3 工程 / lint / 127 用例过；DeleteNovelDialog SSR 冒烟（命名 / 未命名口令回落、级联警示与范围文案、按钮初始禁用）；对话框交互（输入放行 / Esc / Enter）待用户 dev:client 人工验收
-
 ## 历史归档
 
+- 2026-09-23 [feat] 删除小说改为 GitHub 删 repo 式强确认（简单需求快速通道）：DeleteNovelDialog 模态——展示书名 / ID 前 8 位 / 级联范围，必须输入小说名（trim 后全等）才放行删除；Esc / 点遮罩 / 取消关闭，Enter 放行时提交；替代原内联二次确认条，onDelete 链路不变。AC：127 用例过 + SSR 冒烟；对话框交互待人工验收
 - 2026-09-23 [feat] 客户端大纲浏览切换为 outlines 表节点（任务包经用户确认）：shared query 契约 `outline: Outline|null` → `outlineNodes: OutlineNodeEntry[]`（类比 characterEntry 带主键先例）；query CLI `buildNovelDetail` 接 `listOutlineNodes(currentOnly)`，`readOutlineArtifact` 退役——产物缺失不再影响浏览；renderer 结构树按 parentId 通用建树（部▸/幕·，去《标题》伪根），新增 OutlineNodeCard（类型徽标 + 梗概 + 幕级情节点列表，NULL 展示占位，不进 View 体系）；AC：127 用例 + 种子库 query 实跑 + 无头截图实证。决策见 DECISIONS
 - 2026-09-23 [feat] 大纲内容（summary / keyPlotPoints）入库 outlines 表（任务包经用户确认；默认决策：读取路径不动、旧数据不回填，见 DECISIONS）：outlineNodeSchema 增内容两字段 + OutlineStore 全链路扩展 + SCHEMA_VERSION 5→6 链式保数据迁移；createNovel 集成断言 DB 行含梗概与情节点。AC：123 用例（新增 12）+ 真实库迁移实跑无损。读取路径切换（后已实施，见上一条）/ 旧数据回填 / documents 表为后续需求
 

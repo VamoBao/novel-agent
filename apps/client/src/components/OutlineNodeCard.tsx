@@ -1,21 +1,15 @@
 import type { OutlineNodeEntry } from "@novel/shared";
 
-const TYPE_LABEL: Record<OutlineNodeEntry["type"], string> = {
-  part: "部",
-  act: "幕",
-  chapter: "章",
-};
-
 /**
- * 大纲节点只读卡片：浏览路径专用，不进 shared 的 View 体系——
+ * 大纲节点只读卡片：只展示梗概与关键情节点（仅幕节点有）——
+ * 节点名与类型以左栏结构树为准（点击时已高亮），右栏不再重复；
+ * 浏览路径专用，不进 shared 的 View 体系——
  * 避免浏览专用视图渗入创作流协议（protocol.ts 内嵌 viewSchema）。
  * 历史数据（6 版迁移前入库）summary / keyPlotPoints 为 null，展示空占位。
  */
 export function OutlineNodeCard({ node }: { node: OutlineNodeEntry }) {
   return (
     <section className="viewcard">
-      <h3>📖 大纲节点 · {TYPE_LABEL[node.type]}</h3>
-      <p className="title-line">{node.name}</p>
       <dl>
         <dt>梗概</dt>
         {node.summary ? (
