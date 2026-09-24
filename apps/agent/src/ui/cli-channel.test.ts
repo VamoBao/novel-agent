@@ -55,6 +55,27 @@ describe("renderView", () => {
     expect(full).toContain("情节点A：灵眼被夺");
   });
 
+  test("chapter-plan：幕梗概、情节点与章节列表齐全", () => {
+    const text = renderView({
+      kind: "chapter-plan",
+      actName: "第1幕",
+      actSummary: "第1幕梗概",
+      keyPlotPoints: ["第1幕情节点"],
+      plan: {
+        chapters: [
+          { name: "第一章·雨夜", summary: "雨夜的剧情概述" },
+          { name: "第二章·来客", summary: "来客的剧情概述" },
+        ],
+      },
+    });
+    expect(text).toContain("📑 章节规划草稿（第1幕）");
+    expect(text).toContain("本幕梗概：第1幕梗概");
+    expect(text).toContain("1) 第1幕情节点");
+    expect(text).toContain("拟分 2 章：");
+    expect(text).toContain("第1章 第一章·雨夜：雨夜的剧情概述");
+    expect(text).toContain("第2章 第二章·来客：来客的剧情概述");
+  });
+
   test("worldview：可选行缺省不渲染", () => {
     const text = renderView({
       kind: "worldview",

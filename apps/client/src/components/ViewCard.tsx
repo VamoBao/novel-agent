@@ -70,6 +70,30 @@ export function ViewCard({ view }: { view: View }) {
           ))}
         </section>
       );
+    case "chapter-plan":
+      return (
+        <section className="viewcard">
+          <h3>📑 章节规划草稿（{view.actName}）</h3>
+          <dl>
+            <dt>本幕梗概</dt>
+            <dd>{view.actSummary}</dd>
+          </dl>
+          <p className="part-name">关键情节点</p>
+          {view.keyPlotPoints.map((point, index) => (
+            <p key={index} className="plot">
+              {index + 1}) {point}
+            </p>
+          ))}
+          <p className="part-name">拟分 {view.plan.chapters.length} 章</p>
+          {view.plan.chapters.map((chapter, index) => (
+            <div key={index} className="act">
+              <p>
+                第{index + 1}章 {chapter.name}：{chapter.summary}
+              </p>
+            </div>
+          ))}
+        </section>
+      );
     case "field-summary":
       return (
         <section className="viewcard">

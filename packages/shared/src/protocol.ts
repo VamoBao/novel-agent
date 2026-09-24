@@ -4,7 +4,7 @@ import { viewSchema } from "./views";
 /** stdio JSON 行协议版本；hello 时不一致由 client 拒绝继续 */
 export const PROTOCOL_VERSION = 1;
 
-/** 创作流程阶段（client 侧 StageBar 进度展示用） */
+/** 创作流程阶段（client 侧 StageBar 进度展示用）；chapter 为写作期章节规划段 */
 export const stageSchema = z.enum([
   "type",
   "audience",
@@ -12,6 +12,7 @@ export const stageSchema = z.enum([
   "character",
   "conflict",
   "outline",
+  "chapter",
 ]);
 export type Stage = z.infer<typeof stageSchema>;
 

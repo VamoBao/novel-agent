@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { characterSchema } from "./character";
+import { chapterPlanSchema } from "./chapter";
 import { coreConflictSchema } from "./conflict";
 import { outlineSchema } from "./outline";
 import { worldviewSchema } from "./worldview";
@@ -7,7 +8,7 @@ import { worldviewSchema } from "./worldview";
 /**
  * 结构化展示/确认视图：agent 侧组装、UI 侧渲染共用同一份 schema，
  * 杜绝两侧结构漂移。
- * - field-summary / character-card / outline(confirm)：确认门视图，与提问原子绑定
+ * - field-summary / character-card / outline(confirm) / chapter-plan：确认门视图，与提问原子绑定
  * - worldview / conflict / outline(full)：阶段性成果的独立展示
  */
 export const fieldSummaryViewSchema = z.object({
@@ -33,6 +34,15 @@ export const worldviewViewSchema = z.object({
   worldview: worldviewSchema,
 });
 
+/** 章节规划确认门：自包含（幕信息 + 规划全文），UI 渲染不依赖外部上下文 */
+export const chapterPlanViewSchema = z.object({
+  kind: z.literal("chapter-plan"),
+  actName: z.string().describe("幕名（规划的拆解对象）"),
+  actSummary: z.string().describe("幕梗概"),
+  keyPlotPoints: z.array(z.string()).describe("幕关键情节点"),
+  plan: chapterPlanSchema.describe("推荐的本幕章节规划"),
+});
+
 export const conflictViewSchema = z.object({
   kind: z.literal("conflict"),
   conflict: coreConflictSchema,
@@ -43,6 +53,7 @@ export const viewSchema = z.discriminatedUnion("kind", [
   characterCardViewSchema,
   outlineViewSchema,
   worldviewViewSchema,
+  chapterPlanViewSchema,
   conflictViewSchema,
 ]);
 
@@ -50,5 +61,6 @@ export type FieldSummaryView = z.infer<typeof fieldSummaryViewSchema>;
 export type CharacterCardView = z.infer<typeof characterCardViewSchema>;
 export type OutlineView = z.infer<typeof outlineViewSchema>;
 export type WorldviewView = z.infer<typeof worldviewViewSchema>;
+export type ChapterPlanView = z.infer<typeof chapterPlanViewSchema>;
 export type ConflictView = z.infer<typeof conflictViewSchema>;
 export type View = z.infer<typeof viewSchema>;

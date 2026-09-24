@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-09-24 [feat] 第一幕章节规划工作流（决策见 DECISIONS）：大纲确认入库后新增章节规划段——shared 新增 chapterPlanSchema（章名+剧情概述，数量由模型推荐、强约束 1~12 章）+ `chapter-plan` 自包含确认视图 + `chapter` 阶段枚举（协议七阶段）+ 单测；`planChapters` 章节 ReAct Agent（chapter-agent，save_chapters 终态确认门：拒绝→反馈→修订→再确认，对齐 outline-agent 模式）；`OutlineStore.saveChapters` 幕下事务批量建 chapter 子节点（父级须为幕且同小说、sort 从 1 递增、概述随节点入列、章节点不携带情节点——沿用既有 refine；中途失败整体回滚、重复保存撞唯一索引拒绝）+ 单测（父级校验 / 回滚 / 唯一索引）；createNovel 大纲落盘后接规划段（第一幕 = 树中首个 act 节点），确认后入库并通知；CLI renderView / client ViewCard / StageBar 穷尽性联动渲染，客户端浏览侧结构树第三层本就预留零改动。AC：typecheck 3 工程 / lint / 157 用例全过（新增 7：schema 3 + store 3 + renderView 1；create-novel 集成改写覆盖章节段——章节点挂幕/概述/sort/入库统计断言）；真实 LLM 端到端待用户复验（`bun run dev` 走到章节确认门）。后续幕逐幕推进为后续需求
+
 - 2026-09-24 [feat] 伏笔概念数据层：foreshadows 表 + ForeshadowStore 完整 CRUD（任务包经用户确认，决策见 DECISIONS）：shared 新增 foreshadowSchema（表面行为 / 隐藏真相 / 注意度 1-10 必填；回收状态枚举缺省 unrecovered；埋线方式 / 创作目的 / 出现章节 / 回收章节多值 / 服务角色多值可选）+ foreshadowPatchSchema（undefined=不动 / null=清空 / 值=覆盖）+ 单测；SCHEMA_VERSION 7→8 纯新增表迁移（recovery_status CHECK 枚举、attention_level CHECK 1-10、多值 JSON 文本列、novel_id 索引）；ForeshadowStore add（服务角色须存在且同小说）/ list / updateForeshadow patch（回收状态流转、追加回收章节、null 清空、updated_at 盖章）/ delete，JSON 列损坏抛带 ID 可读错误，读写双向 zod 校验；deleteNovel 级联清六表。AC：typecheck 3 工程 / lint / 150 用例全过（新增 13：schema 7 + 迁移 1 + store 5）；真实库副本迁移实跑（版本升 8、foreshadows 列结构齐、既有数据无损）。创作流采集 / query CLI / 客户端浏览 / chapter 落地后补章节外键为后续需求
 
 - 2026-09-24 [docs] 重写 README 对齐项目现状（简单需求快速通道）：原 `bun init` 模板残留全量替换——项目简介与三工作区一览（agent / shared / client）、功能特性（多阶段创作工作流、人机确认门、五表 SQLite 持久化、双运行模式、库查询管理、Electron 客户端、产物落盘）、技术栈、快速开始（Bun 1.4+ / DeepSeek Key / 安装配置）、常用命令表（与 AGENTS.md 一致）、环境变量表（补登 NOVEL_OUTPUT_DIR）、数据存储（五表职责 + docker-compose sqlite-web 辅助）、更多文档导引（AGENTS / ARCHITECTURE / PROGRESS / DECISIONS / workflows 模块文档 / docs）。AC：命令与脚本对照根 package.json 核实，环境变量对照 `.env.example` 与 ARCHITECTURE 关键约定核实
@@ -16,11 +18,10 @@
 
 - 2026-09-23 [feat] 删除小说改为 GitHub 删 repo 式强确认（简单需求快速通道）：删除菜单项打开 DeleteNovelDialog 模态（遮罩 + 危险色卡片）——展示书名 / ID 前 8 位 / 级联范围（世界观、角色、大纲节点及 output 产物，不可恢复），必须输入小说名（trim 后全等；未命名小说输入「未命名小说」）才放行「删除这本小说」按钮；输入框自动聚焦，Esc / 点遮罩 / 取消关闭，Enter 放行时提交；对话框条目从列表解析，删除后列表刷新自动关闭；替代原内联二次确认条（样式同步移除），onDelete 链路（IPC / 级联 / 产物清理）不变。AC：typecheck 3 工程 / lint / 127 用例过；DeleteNovelDialog SSR 冒烟（命名 / 未命名口令回落、级联警示与范围文案、按钮初始禁用）；对话框交互（输入放行 / Esc / Enter）待用户 dev:client 人工验收
 
-- 2026-09-23 [feat] 客户端大纲浏览切换为 outlines 表节点（任务包经用户确认）：shared query 契约 `outline: Outline|null` → `outlineNodes: OutlineNodeEntry[]`（id/parentId/type/name/sort/summary/keyPlotPoints，currentOnly 当前版本；类比 characterEntry 带主键先例）；query CLI `buildNovelDetail` 接 `listOutlineNodes(currentOnly)`，`readOutlineArtifact` 退役（outlineFilePath 留给 delete 清产物）——产物缺失不再影响浏览；renderer `Selection` 大纲分支携带 `outlineNodeId`，结构树按 parentId 通用建树（部▸/幕·，去《标题》伪根），新增 OutlineNodeCard（类型徽标 + 梗概 + 幕级情节点列表，NULL 展示「暂无梗概 / 暂无关键情节点——旧数据未入库内容」占位，不进 View 体系避免渗入创作流协议）；App 冒烟 autoSelect 改取首个大纲节点。AC：typecheck 3 工程 / lint / 127 用例全过（重写契约与 CLI 大纲用例）；种子临时库 query 实跑（部 summary 有 + 幕情节点 3/2 条）；真实库《漂亮话》6 节点内容列全 null（旧数据空占位数据源）；OutlineNodeCard SSR 冒烟（内容 / 旧幕 / 旧部三路径，部无情节区）；无头截图实证树由 DB 节点渲染（▸ 第一部：漂亮话 + 五幕，无渲染异常）；创作流协议零改动。点击交互观感待用户 dev:client 人工验收。决策见 DECISIONS
-
 ## 历史归档
 
-- 2026-09-23 [feat] 大纲内容（summary / keyPlotPoints）入库 outlines 表（任务包经用户确认；默认决策：读取路径不动、旧数据不回填，见 DECISIONS）：outlineNodeSchema 增内容两字段 + OutlineStore 全链路扩展 + SCHEMA_VERSION 5→6 链式保数据迁移；createNovel 集成断言 DB 行含梗概与情节点。AC：123 用例（新增 12）+ 真实库迁移实跑无损。读取路径切换（后已实施，见 09-23 浏览切换条目）/ 旧数据回填 / documents 表为后续需求
+- 2026-09-23 [feat] 客户端大纲浏览切换为 outlines 表节点（任务包经用户确认）：shared query 契约 `outline: Outline|null` → `outlineNodes: OutlineNodeEntry[]`（类比 characterEntry 带主键先例）；query CLI `buildNovelDetail` 接 `listOutlineNodes(currentOnly)`，`readOutlineArtifact` 退役——产物缺失不再影响浏览；renderer 结构树按 parentId 通用建树（部▸/幕·，去《标题》伪根），新增 OutlineNodeCard（类型徽标 + 梗概 + 幕级情节点列表，NULL 展示占位，不进 View 体系）；AC：127 用例 + 种子库 query 实跑 + 无头截图实证。决策见 DECISIONS
+- 2026-09-23 [feat] 大纲内容（summary / keyPlotPoints）入库 outlines 表（任务包经用户确认；默认决策：读取路径不动、旧数据不回填，见 DECISIONS）：outlineNodeSchema 增内容两字段 + OutlineStore 全链路扩展 + SCHEMA_VERSION 5→6 链式保数据迁移；createNovel 集成断言 DB 行含梗概与情节点。AC：123 用例（新增 12）+ 真实库迁移实跑无损。读取路径切换（后已实施，见上一条）/ 旧数据回填 / documents 表为后续需求
 
 - 2026-09-23 [docs] 需求指南收紧任务包确认门：取消「方案唯一且无高风险时确认单兼作执行摘要、输出后可直接开始」的例外，全部复杂需求输出《任务包确认单》后必须停下等待用户明确回复「确认」/「开始」才可编码（Human-in-the-loop 检查点）。AC：`grep` 全仓校验零残留
 

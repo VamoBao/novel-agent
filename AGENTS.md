@@ -1,6 +1,6 @@
 # novel-agent
 
-一个基于 Bun + TypeScript 构建的交互式小说创作 AI Agent 应用（Bun workspaces monorepo：CLI 应用 `apps/agent` + 共享 schema 包 `packages/shared`，Electron 客户端 `apps/client` 建设中）：通过类型/受众问答、世界观 / 角色 / 核心冲突的多轮收集确认、两级大纲（部→幕）生成确认，完成小说前期设定，并按 UUIDv7 创作 ID 持久化到 SQLite 与 `output/` 落盘。CLI 入口 `apps/agent/src/index.ts`。
+一个基于 Bun + TypeScript 构建的交互式小说创作 AI Agent 应用（Bun workspaces monorepo：CLI 应用 `apps/agent` + 共享 schema 包 `packages/shared`，Electron 客户端 `apps/client` 建设中）：通过类型/受众问答、世界观 / 角色 / 核心冲突的多轮收集确认、两级大纲（部→幕）生成确认与第一幕章节规划（章名 + 剧情概述，确认后入库），完成小说前期设定与写作准备，并按 UUIDv7 创作 ID 持久化到 SQLite 与 `output/` 落盘。CLI 入口 `apps/agent/src/index.ts`。
 
 ## 技术栈
 
@@ -39,12 +39,12 @@
   - `src/tools/`：提供给 LLM 使用的通用工具（`ask-user.ts` 工厂函数，按 Agent 标签生成），经 `tools/index.ts` 汇总导出；workflow 私有终态工具在对应 agent 文件内定义
   - `src/state/`：小说创作状态与持久化（`NovelStateStore` 接口 + 内存实现 + UUIDv7 生成；`db.ts` 建库建表（novels / characters / worldviews / outlines / locations / foreshadows，外键关联），`novel-store.ts`/`character-store.ts`/`worldview-store.ts`/`outline-store.ts`/`location-store.ts`/`foreshadow-store.ts` 按 UUIDv7 创作 ID 落 SQLite）
   - `src/output/`：产物落盘（大纲按创作 ID 保存为 `output/<id>.json`）
-  - `src/workflows/`：工作流编排（`create-novel.ts` 主流程 + `agents/` 下 worldview / character / outline 三个 subAgent；本模块已建立模块级状态文档 `apps/agent/src/workflows/ARCHITECTURE.md` 与 `PROGRESS.md`）
-- `packages/shared/`：`@novel/shared`——双端共享的纯 zod 层：领域 schema（worldview / character / location / foreshadow / conflict / outline / audience / outline-node，原 `src/schemas/` 迁出）+ 展示视图 schema（views.ts）+ stdio JSON 协议消息 schema（protocol.ts）+ 库查询结果契约（query.ts）；agent 与客户端共同引用，零运行时依赖
+  - `src/workflows/`：工作流编排（`create-novel.ts` 主流程 + `agents/` 下 worldview / character / outline / chapter 四个 subAgent；本模块已建立模块级状态文档 `apps/agent/src/workflows/ARCHITECTURE.md` 与 `PROGRESS.md`）
+- `packages/shared/`：`@novel/shared`——双端共享的纯 zod 层：领域 schema（worldview / character / location / foreshadow / conflict / outline / chapter-plan / audience / outline-node，原 `src/schemas/` 迁出）+ 展示视图 schema（views.ts）+ stdio JSON 协议消息 schema（protocol.ts）+ 库查询结果契约（query.ts）；agent 与客户端共同引用，零运行时依赖
 - `apps/client/`：`@novel/client`——Electron 桌面客户端（electron-vite 三段式 + React，三栏浏览 + 覆盖层创作）
   - `electron/main.ts`：主进程——窗口管理 + AgentProcess（spawn `bun run apps/agent/src/headless.ts`、协议消息 zod 复验后 IPC 转发、hello 协议版本校验、退出回收）+ library 查询 / 管理 IPC（spawn `apps/agent/src/query.ts`、shared schema 复验、超时兜底）；WSL2 需禁 GPU/sandbox；`NOVEL_CLIENT_AUTOSTART` / `NOVEL_CLIENT_SELECT` / `NOVEL_CLIENT_SCREENSHOT` 为诊断钩子（自动开创作覆盖层 / 自动选中预览 / 无头截图）
   - `electron/preload.ts`：contextBridge 暴露最小 API（start / stop / respond / onMessage / onExit / listNovels / getNovelDetail / renameNovel / setNovelPinned / setNovelFavorite / deleteNovel / 诊断钩子读取）
-  - `src/`：renderer（React）——App 页面级切换：三栏浏览主页（左栏书库可汉堡折叠，右键菜单管理：重命名 / 置顶 / 收藏 / 删除——删除走 DeleteNovelDialog 输入小说名强确认；中栏世界观·角色·大纲结构树——大纲读 outlines 表节点，点击节点右栏按节点展示；右栏预览）↔ 独立创作页（CreationFlow 问答流，整页呈现、头部返回书库）+ NovelListPanel / StructureTreePanel / PreviewPane / OutlineNodeCard 大纲节点卡 / DeleteNovelDialog 删除强确认 / StageBar 六阶段进度 / ViewCard 只读视图 / QuestionCard 五类提问输入
+  - `src/`：renderer（React）——App 页面级切换：三栏浏览主页（左栏书库可汉堡折叠，右键菜单管理：重命名 / 置顶 / 收藏 / 删除——删除走 DeleteNovelDialog 输入小说名强确认；中栏世界观·角色·大纲结构树——大纲读 outlines 表节点，点击节点右栏按节点展示；右栏预览）↔ 独立创作页（CreationFlow 问答流，整页呈现、头部返回书库）+ NovelListPanel / StructureTreePanel / PreviewPane / OutlineNodeCard 大纲节点卡 / DeleteNovelDialog 删除强确认 / StageBar 七阶段进度 / ViewCard 只读视图 / QuestionCard 五类提问输入
 - `docs/`：Agent 工作流指导文档（需求 / 提交 / 修 Bug 三份指引）；`docs/superpowers/specs/` 存放前期设计规格（如 monorepo 与 Electron 客户端设计，状态以文首标注为准）
 - `files/`：本地参考资料（`prompt.md` 原始工作流需求、`role.md` 角色属性设计参考），已 gitignore
 - `.env.example`：环境变量样例（`.env` 已 gitignore，Bun 自动加载）

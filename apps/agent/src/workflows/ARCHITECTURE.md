@@ -7,14 +7,16 @@
 
 ```text
 apps/agent/src/workflows/
-├── index.ts                  # 模块出口：createNovel / collectWorldview / createOutline
-├── create-novel.ts           # 主编排 createNovel：ID 生成 → 参数收集 → 大纲生成 → 入库与落盘
+├── index.ts                  # 模块出口：createNovel / collectWorldview / createOutline / planChapters
+├── create-novel.ts           # 主编排 createNovel：ID 生成 → 参数收集 → 大纲生成 → 第一幕章节规划 → 入库与落盘
 └── agents/                   # 业务 subAgent（每个对应一个创作环节）
     ├── worldview-agent.ts    # collectWorldview：多轮追问补全世界观（终态工具 submit_worldview）
     ├── character-agent.ts    # createCharacter：字段协议逐字段确认角色卡（save_field / submit_character）
     │                         #   另导出 FIELD_NAMES / FIELD_SPECS / missingRequiredFields / assembleCharacter 纯函数
     ├── outline-agent.ts      # createOutline：生成「部→幕」两级大纲并过用户确认门（save_outline）
     │                         #   另导出 outlineSchemaFor（恰好 M 部共 N 幕 refine 强校验）
+    ├── chapter-agent.ts      # planChapters：第一幕拆章——按幕梗概与关键情节点推荐章节数量与概述，
+    │                         #   过用户确认门（save_chapters；chapterPlanSchema 强约束 1~12 章）
     ├── character-agent.test.ts  # 字段协议纯函数单测（规格完整性 / 缺失列表 / 组装校验）
     ├── outline-agent.test.ts    # 结构校验单测（恰好 M 部共 N 幕：通过 / 拒绝含提示 / 底座每部至少一幕）
     └── create-novel.test.ts     # 全流程集成（mock ai + FakeChannel + 临时 SQLite，含通道中止）
@@ -42,20 +44,21 @@ apps/agent/src/workflows/
 9. **state 落 params**：status → gathering
 10. **幕数与部数**：`askInt` 幕数（3-20，回车默认 5）→ `askInt` 部数（1~幕数，回车默认 1）
 11. **大纲**：`createOutline(params, { novelTitle, actCount, partCount }, channel)` → `channel.present(outline full)` 两级完整展示 → `saveOutlineTree` 整树事务入库（部根节点 / 幕子节点，version=1/当前/planned，梗概与关键情节点随节点入列——供写作期按幕内容生成章节大纲）→ `saveOutline` 落盘 `output/<id>.json`
-12. **收尾**：status → outlined；`novelStore.updateNovel` 回填（未命名时 name = outline.title；description = outline.logline）
+12. **章节规划（第一幕）**：取 `saveOutlineTree` 返回树中首个 act 节点为第一幕（连同其所属部）→ `planChapters(大纲全局 + 部 + 幕上下文, channel)` 推荐本幕章节规划（数量模型推荐、schema 约束 1~12；每章章名 + 剧情概述）→ `saveChapters` 幕下事务批量建 chapter 子节点（sort 从 1 递增，概述随节点入列）→ notify 入库统计；后续幕逐幕推进为后续需求
+13. **收尾**：status → outlined；`novelStore.updateNovel` 回填（未命名时 name = outline.title；description = outline.logline）
 
-入库时机小结：novels 初始化即建（先于其余表）｜worldviews 确认后 upsert｜characters 每卡确认后增量｜outlines 大纲确认后整树事务入库（saveOutlineTree，梗概与关键情节点随节点入列，keyPlotPoints 仅幕节点）＋大纲 JSON 落盘 output（产物仅供留存；客户端浏览已切换为读 outlines 表节点）｜NovelState 仍为内存态。
+入库时机小结：novels 初始化即建（先于其余表）｜worldviews 确认后 upsert｜characters 每卡确认后增量｜outlines 大纲确认后整树事务入库（saveOutlineTree，梗概与关键情节点随节点入列，keyPlotPoints 仅幕节点）＋大纲 JSON 落盘 output（产物仅供留存；客户端浏览已切换为读 outlines 表节点）｜chapters 章节规划确认后幕下事务批量入库（saveChapters，概述随节点入列，章节点不携带情节点）｜NovelState 仍为内存态。
 
-## subAgent 协作协议（三 Agent 共性）
+## subAgent 协作协议（四 Agent 共性）
 
-- **终态工具模式**：`submit_worldview` / `submit_character` / `save_outline` 的 `inputSchema` 即结果 schema，execute 闭包记录结果，`isDone` 判定终态；终态未达成时抛错（带 stepCount 与最后输出）。结构化组装一律由代码完成（assembleCharacter / schema.parse），杜绝模型在提交时改写数据
+- **终态工具模式**：`submit_worldview` / `submit_character` / `save_outline` / `save_chapters` 的 `inputSchema` 即结果 schema，execute 闭包记录结果，`isDone` 判定终态；终态未达成时抛错（带 stepCount 与最后输出）。结构化组装一律由代码完成（assembleCharacter / schema.parse），杜绝模型在提交时改写数据
 - **停止策略二分**（见根 ARCHITECTURE「ReAct 终态工具模式」）：
   - 提交不会被否决（worldview）：`stopTool: submit_worldview` + maxSteps 16
-  - 终态内含用户最终确认、可被拒需继续修订（character / outline）：不设 stopTool，maxSteps 30 / 12 + `isDone` + `continuationHint` 续跑提示
-- **确认视图原子出现**：字段摘要、角色卡汇总、大纲草稿一律作为 `channel.askConfirm` 的 view 载荷与提问原子绑定（并发工具调用时按通道串行化依次呈现），禁止先展示再问
+  - 终态内含用户最终确认、可被拒需继续修订（character / outline / chapter）：不设 stopTool，maxSteps 30 / 12 / 12 + `isDone` + `continuationHint` 续跑提示
+- **确认视图原子出现**：字段摘要、角色卡汇总、大纲草稿、章节规划一律作为 `channel.askConfirm` 的 view 载荷与提问原子绑定（并发工具调用时按通道串行化依次呈现），禁止先展示再问
 - **用户终止约定**：`ask_user` 返回「用户已终止输入」（EOF）时，Agent 须停止提问并基于已有信息提交/结束，不得拖延
 - **确认循环**：用户给出修改意见 → 工具返回 `{ ok: false, feedback }` → 模型按反馈处理后重新调用终态工具，直到确认
 
 ## 测试
 
-模块内测试两层：单测聚焦**可脱离 LLM 的纯函数**——字段协议（`FIELD_SPECS` 完整性、`missingRequiredFields`、`assembleCharacter` 过 schema）与大纲结构校验（`outlineSchemaFor` 恰好 M 部共 N 幕）；`create-novel.test.ts` 为**全流程集成测试**——mock `ai` 模块（generateObject 返回 fixture、generateText 按脚本逐轮执行工具 execute）+ `FakeChannel` 脚本化应答 + 临时 SQLite，不依赖真实 LLM 验证全链路（含 UserAbortedError 通道中止）。真实 LLM 端到端验证记录见 PROGRESS。
+模块内测试两层：单测聚焦**可脱离 LLM 的纯函数**——字段协议（`FIELD_SPECS` 完整性、`missingRequiredFields`、`assembleCharacter` 过 schema）与大纲结构校验（`outlineSchemaFor` 恰好 M 部共 N 幕）；`create-novel.test.ts` 为**全流程集成测试**——mock `ai` 模块（generateObject 返回 fixture、generateText 按脚本逐轮执行工具 execute，含 save_chapters 章节规划轮）+ `FakeChannel` 脚本化应答 + 临时 SQLite，不依赖真实 LLM 验证全链路（含 UserAbortedError 通道中止；章节规划段断言 chapter-plan 确认视图与幕下章节点入库）。真实 LLM 端到端验证记录见 PROGRESS。

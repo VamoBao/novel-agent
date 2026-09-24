@@ -1,6 +1,14 @@
 import type { Stage } from "@novel/shared";
 
-const STAGES: Stage[] = ["type", "audience", "worldview", "character", "conflict", "outline"];
+const STAGES: Stage[] = [
+  "type",
+  "audience",
+  "worldview",
+  "character",
+  "conflict",
+  "outline",
+  "chapter",
+];
 const LABELS: Record<Stage, string> = {
   type: "类型",
   audience: "受众",
@@ -8,9 +16,10 @@ const LABELS: Record<Stage, string> = {
   character: "角色",
   conflict: "冲突",
   outline: "大纲",
+  chapter: "章节",
 };
 
-/** 六阶段进度条：已过 ✓、当前高亮、未到灰 */
+/** 七阶段进度条：已过 ✓、当前高亮、未到灰 */
 export function StageBar({ current }: { current: Stage | null }) {
   return (
     <ol className="stagebar">

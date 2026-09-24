@@ -10,6 +10,7 @@ export {
 } from "./foreshadow";
 export { coreConflictSchema, type CoreConflict } from "./conflict";
 export { outlineSchema, type Outline } from "./outline";
+export { chapterPlanSchema, type ChapterPlan } from "./chapter";
 export {
   outlineNodeTypeSchema,
   outlineNodeStatusSchema,
@@ -26,12 +27,14 @@ export {
   characterCardViewSchema,
   outlineViewSchema,
   worldviewViewSchema,
+  chapterPlanViewSchema,
   conflictViewSchema,
   viewSchema,
   type FieldSummaryView,
   type CharacterCardView,
   type OutlineView,
   type WorldviewView,
+  type ChapterPlanView,
   type ConflictView,
   type View,
 } from "./views";

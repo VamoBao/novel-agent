@@ -13,6 +13,7 @@ import { saveOutline } from "../output/outline-writer";
 import { collectWorldview } from "./agents/worldview-agent";
 import { createCharacter } from "./agents/character-agent";
 import { createOutline } from "./agents/outline-agent";
+import { planChapters } from "./agents/chapter-agent";
 
 /** 常见热门类型（用户也可自定义输入） */
 const GENRES = [
@@ -201,6 +202,33 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
   channel.notify(`🗂 大纲树已入库（含梗概与关键情节点）：${partTotal} 部 / ${actTotal} 幕`);
   const savedPath = await saveOutline(id, outline);
   channel.notify(`🗂 大纲已落盘：${savedPath}`);
+
+  // 章节规划（写作期第一步）：从第一幕开始，按幕梗概与关键情节点推荐章节规划，
+  // 用户确认后作为 chapter 节点挂到幕下入库；后续幕逐幕推进为后续需求
+  channel.stage("chapter");
+  const firstAct = treeNodes.find((n) => n.node.type === "act");
+  const firstPart = firstAct
+    ? treeNodes.find((n) => n.id === firstAct.node.parentId)
+    : undefined;
+  if (!firstAct || !firstPart) {
+    throw new Error("大纲树中未找到第一幕或其所属部（saveOutlineTree 保证每部至少一幕）");
+  }
+  channel.notify(`\n📑 章节规划 Agent 启动（${firstAct.node.name}）…`);
+  const chapterPlan = await planChapters(
+    {
+      novelTitle: novelName ?? outline.title,
+      logline: outline.logline,
+      theme: outline.theme,
+      partName: firstPart.node.name,
+      partSummary: firstPart.node.summary ?? "",
+      actName: firstAct.node.name,
+      actSummary: firstAct.node.summary ?? "",
+      keyPlotPoints: firstAct.node.keyPlotPoints ?? [],
+    },
+    channel,
+  );
+  const chapterNodes = outlineStore.saveChapters(id, firstAct.id, chapterPlan.chapters);
+  channel.notify(`📑 章节已入库：${firstAct.node.name} 规划 ${chapterNodes.length} 章`);
 
   const finalState = await store.update(id, { status: "outlined", outline });
   // 大纲确认后回填：description = 剧情梗概；name 仅在用户未命名时以大纲标题回填

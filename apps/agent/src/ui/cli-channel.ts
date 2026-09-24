@@ -9,6 +9,7 @@ import {
   closePrompt,
 } from "../cli/prompt";
 import type {
+  ChapterPlanView,
   Character,
   CoreConflict,
   Outline,
@@ -80,6 +81,8 @@ export function renderView(view: View): string {
       return view.detail === "confirm"
         ? formatOutlineForConfirm(view.outline)
         : formatOutlineFull(view.outline);
+    case "chapter-plan":
+      return formatChapterPlan(view);
     case "worldview":
       return formatWorldview(view.worldview);
     case "conflict":
@@ -130,6 +133,19 @@ function formatOutlineFull(o: Outline): string {
       act.keyPlotPoints.forEach((p, i) => lines.push(`      ${i + 1}) ${p}`));
     });
   });
+  return lines.join("\n");
+}
+
+/** 章节规划确认视图：本幕梗概、关键情节点与推荐章节列表（拼入 save_chapters 最终确认提示） */
+function formatChapterPlan(view: ChapterPlanView): string {
+  const lines = [
+    `📑 章节规划草稿（${view.actName}）`,
+    `  本幕梗概：${view.actSummary}`,
+    `  关键情节点：`,
+    ...view.keyPlotPoints.map((p, i) => `    ${i + 1}) ${p}`),
+    `  拟分 ${view.plan.chapters.length} 章：`,
+    ...view.plan.chapters.map((c, i) => `    第${i + 1}章 ${c.name}：${c.summary}`),
+  ];
   return lines.join("\n");
 }
 

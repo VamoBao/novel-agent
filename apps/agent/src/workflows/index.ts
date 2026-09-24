@@ -2,3 +2,4 @@
 export { createNovel, type CreateNovelOptions } from "./create-novel";
 export { collectWorldview } from "./agents/worldview-agent";
 export { createOutline } from "./agents/outline-agent";
+export { planChapters, type PlanChaptersInput } from "./agents/chapter-agent";

@@ -408,6 +408,99 @@ describe("OutlineStore", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  test("saveChapters 幕下批量建章：sort 从 1 递增，概述入库，章节点无情节点", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-chapters-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "bbbbbbbb-cccc-7ddd-8eee-000000000001";
+    const store = setup(dbPath, novelId);
+
+    const nodes = store.saveOutlineTree(novelId, [treePart("第一部·风起", ["第一幕", "第二幕"])]);
+    const firstAct = nodes.find((n) => n.node.type === "act");
+    if (!firstAct) throw new Error("测试前置失败：树中无幕节点");
+
+    const chapters = store.saveChapters(novelId, firstAct.id, [
+      { name: "第一章·雨夜", summary: "雨夜的剧情概述" },
+      { name: "第二章·来客", summary: "来客的剧情概述" },
+    ]);
+    expect(chapters).toHaveLength(2);
+    expect(
+      chapters.every(
+        (n) =>
+          n.node.type === "chapter" &&
+          n.node.parentId === firstAct.id &&
+          n.node.version === 1 &&
+          n.node.isCurrentVersion &&
+          n.node.status === "planned" &&
+          n.node.keyPlotPoints === null,
+      ),
+    ).toBe(true);
+    expect(chapters.map((n) => [n.node.name, n.node.summary, n.node.sort])).toEqual([
+      ["第一章·雨夜", "雨夜的剧情概述", 1],
+      ["第二章·来客", "来客的剧情概述", 2],
+    ]);
+
+    // 章节点挂在幕下（1 部 + 2 幕 + 2 章），另一幕下无章
+    expect(store.listOutlineNodes(novelId)).toHaveLength(5);
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("saveChapters 父节点校验：不存在 / 跨小说 / 非幕节点均拒绝", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-chapters-fk-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "bbbbbbbb-cccc-7ddd-8eee-000000000002";
+    const otherNovelId = "bbbbbbbb-cccc-7ddd-8eee-000000000003";
+    const store = setup(dbPath, novelId);
+    NovelStore.open(dbPath).createNovel({ id: otherNovelId });
+    const foreignAct = store.addOutlineNode(otherNovelId, act("他书之幕", 1));
+    const nodes = store.saveOutlineTree(novelId, [treePart("第一部", ["第一幕"])]);
+    const part = nodes.find((n) => n.node.type === "part");
+    if (!part) throw new Error("测试前置失败：树中无部节点");
+
+    expect(() =>
+      store.saveChapters(novelId, "eeeeeeee-0000-7000-8000-0000000000aa", [
+        { name: "第一章", summary: "概述" },
+      ]),
+    ).toThrow("不存在");
+    expect(() =>
+      store.saveChapters(novelId, foreignAct.id, [{ name: "第一章", summary: "概述" }]),
+    ).toThrow("不属于该小说");
+    expect(() =>
+      store.saveChapters(novelId, part.id, [{ name: "第一章", summary: "概述" }]),
+    ).toThrow("幕节点");
+    expect(store.listOutlineNodes(novelId)).toHaveLength(2);
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("saveChapters 空列表拒绝，中途失败整体回滚，重复保存撞唯一索引", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-chapters-tx-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "bbbbbbbb-cccc-7ddd-8eee-000000000004";
+    const store = setup(dbPath, novelId);
+    const nodes = store.saveOutlineTree(novelId, [treePart("第一部", ["第一幕"])]);
+    const firstAct = nodes.find((n) => n.node.type === "act");
+    if (!firstAct) throw new Error("测试前置失败：树中无幕节点");
+
+    expect(() => store.saveChapters(novelId, firstAct.id, [])).toThrow("空");
+    // 第二章名称为空触发 zod 拒绝；第一章已插入的行必须整体回滚
+    expect(() =>
+      store.saveChapters(novelId, firstAct.id, [
+        { name: "第一章", summary: "概述" },
+        { name: "", summary: "概述" },
+      ]),
+    ).toThrow();
+    expect(store.listOutlineNodes(novelId)).toHaveLength(2);
+
+    store.saveChapters(novelId, firstAct.id, [{ name: "第一章", summary: "概述" }]);
+    expect(() =>
+      store.saveChapters(novelId, firstAct.id, [{ name: "另一章", summary: "概述" }]),
+    ).toThrow("sort");
+    expect(store.listOutlineNodes(novelId)).toHaveLength(3);
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
   test("迁移前旧行（内容列 NULL）读取正常，损坏 key_plot_points 抛可读错误", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-legacy-row-"));
     const dbPath = join(dir, "test.db");

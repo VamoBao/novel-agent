@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   audienceSuggestionSchema,
+  chapterPlanSchema,
   characterSchema,
   coreConflictSchema,
   foreshadowPatchSchema,
@@ -252,6 +253,32 @@ describe("outlineSchema", () => {
         parts: [{ name: "上部", summary: "概述", acts: [] }],
       }),
     ).toThrow();
+  });
+});
+
+describe("chapterPlanSchema", () => {
+  const chapter = (name: string) => ({ name, summary: `${name}的剧情概述` });
+
+  test("多章规划通过，章名与概述均保留", () => {
+    const plan = chapterPlanSchema.parse({
+      chapters: Array.from({ length: 5 }, (_, i) => chapter(`第${i + 1}章`)),
+    });
+    expect(plan.chapters).toHaveLength(5);
+    expect(plan.chapters[0]?.summary).toBe("第1章的剧情概述");
+  });
+
+  test("零章与超过 12 章被拒绝（数量防漂移上下限）", () => {
+    expect(() => chapterPlanSchema.parse({ chapters: [] })).toThrow();
+    expect(() =>
+      chapterPlanSchema.parse({
+        chapters: Array.from({ length: 13 }, (_, i) => chapter(`第${i + 1}章`)),
+      }),
+    ).toThrow();
+  });
+
+  test("空章名或空概述被拒绝", () => {
+    expect(() => chapterPlanSchema.parse({ chapters: [{ name: "", summary: "概述" }] })).toThrow();
+    expect(() => chapterPlanSchema.parse({ chapters: [{ name: "第一章", summary: "" }] })).toThrow();
   });
 });
 

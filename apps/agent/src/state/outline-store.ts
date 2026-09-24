@@ -50,6 +50,12 @@ export interface OutlineTreeInput {
   }>;
 }
 
+/** 章节入库输入（与 chapterPlanSchema.chapters 项结构一致）：章名 + 本章剧情概述 */
+export interface ChapterInput {
+  name: string;
+  summary: string;
+}
+
 /** outlines 表行结构（列名蛇形，is_current_version 存 0/1，key_plot_points 存 JSON 文本） */
 interface OutlineRow {
   id: string;
@@ -282,6 +288,41 @@ export class OutlineStore {
       return created;
     });
     return saveTree(parts);
+  }
+
+  /**
+   * 幕下批量创建章（chapter）节点（事务原子）：parentId 为指定幕节点，
+   * sort 从 1 递增，全部 version=1 / 当前版本 / planned，章节概述随节点入列
+   * （章节点不携带关键情节点，schema 强约束）。父节点须存在、为幕且属于本小说；
+   * 任一章失败整体回滚；同一幕重复保存被唯一索引拒绝（多版本流为后续需求）。
+   */
+  saveChapters(novelId: string, actNodeId: string, chapters: readonly ChapterInput[]): StoredOutlineNode[] {
+    if (chapters.length === 0) {
+      throw new Error("章节列表为空，拒绝入库");
+    }
+    const actNode = this.getOutlineNode(actNodeId);
+    if (!actNode || actNode.novelId !== novelId) {
+      throw new Error(`章节的父级幕节点不存在或不属于该小说：${actNodeId}`);
+    }
+    if (actNode.node.type !== "act") {
+      throw new Error(`章节点只能挂在幕节点下，父级类型为 ${actNode.node.type}：${actNodeId}`);
+    }
+    const saveChaptersTx = this.db.transaction((list: readonly ChapterInput[]) => {
+      const created: StoredOutlineNode[] = [];
+      list.forEach((chapter, index) => {
+        created.push(
+          this.addOutlineNode(novelId, {
+            type: "chapter",
+            name: chapter.name,
+            summary: chapter.summary,
+            sort: index + 1,
+            parentId: actNodeId,
+          }),
+        );
+      });
+      return created;
+    });
+    return saveChaptersTx(chapters);
   }
 
   close(): void {
