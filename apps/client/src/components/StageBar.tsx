@@ -1,5 +1,6 @@
 import type { Stage } from "@novel/shared";
 
+/** 新建小说全流程的六阶段（「章节」阶段属单幕章节规划会话，不经此进度条） */
 const STAGES: Stage[] = [
   "type",
   "audience",
@@ -7,7 +8,6 @@ const STAGES: Stage[] = [
   "character",
   "conflict",
   "outline",
-  "chapter",
 ];
 const LABELS: Record<Stage, string> = {
   type: "类型",
@@ -19,7 +19,7 @@ const LABELS: Record<Stage, string> = {
   chapter: "章节",
 };
 
-/** 七阶段进度条：已过 ✓、当前高亮、未到灰 */
+/** 六阶段进度条：已过 ✓、当前高亮、未到灰 */
 export function StageBar({ current }: { current: Stage | null }) {
   return (
     <ol className="stagebar">

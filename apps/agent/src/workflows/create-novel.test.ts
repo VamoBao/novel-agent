@@ -79,13 +79,6 @@ const outlineFixture = {
   ],
 };
 
-const chapterPlanFixture = {
-  chapters: [
-    { name: "第一章·雨夜", summary: "雨夜夺脉的剧情概述" },
-    { name: "第二章·来客", summary: "神秘来客的剧情概述" },
-  ],
-};
-
 let tempDir: string;
 const originalCwd = process.cwd();
 let closeDb: () => void = () => {};
@@ -104,12 +97,11 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     closeDb = () => db.close();
 
     // LLM 脚本：worldview agent 一次提交；character agent 一轮 7 个 save_field + 一轮 submit；
-    // outline agent 一次 save_outline；chapter agent 一次 save_chapters
+    // outline agent 一次 save_outline（章节规划不随大纲自动进行，无章节 Agent 轮）
     textScript = [
       [[{ tool: "submit_worldview", args: worldviewFixture }]],
       [characterFields.map((f) => ({ tool: "save_field", args: f })), [{ tool: "submit_character", args: {} }]],
       [[{ tool: "save_outline", args: outlineFixture }]],
-      [[{ tool: "save_chapters", args: chapterPlanFixture }]],
     ];
     objectScript = [
       { options: [{ label: "都市青年读者", description: "节奏明快的成长与逆袭" }] },
@@ -117,8 +109,7 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     ];
 
     // 用户应答脚本（FIFO）：跳过命名 → 选仙侠 → 选受众 → 跳过补充 → 世界观描述 →
-    // 首个角色描述 → 7 次字段确认 + 整卡确认 → 结束角色 → 冲突描述 → 幕数/部数 →
-    // 大纲确认 → 章节规划确认
+    // 首个角色描述 → 7 次字段确认 + 整卡确认 → 结束角色 → 冲突描述 → 幕数/部数 → 大纲确认
     const channel = new FakeChannel([
       "",
       "仙侠",
@@ -132,7 +123,6 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
       "宗门垄断灵脉，散修如草芥",
       5,
       1,
-      true,
       true,
     ]);
 
@@ -150,7 +140,8 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     expect(state.outline?.title).toBe("灵脉遗孤");
     expect(existsSync(join(tempDir, "output", `${state.id}.json`))).toBe(true);
 
-    // 交互轨迹：视图按预期顺序（worldview 展示 → 7 字段摘要 + 整卡 → 冲突 → 大纲确认 + 全量 → 章节规划确认）
+    // 交互轨迹：视图按预期顺序（worldview 展示 → 7 字段摘要 + 整卡 → 冲突 → 大纲确认 + 全量），
+    // 章节规划不再自动衔接（无 chapter-plan 视图）
     const kinds: string[] = channel.views.map((v) => v.kind);
     expect(kinds).toEqual([
       "worldview",
@@ -159,20 +150,15 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
       "conflict",
       "outline",
       "outline",
-      "chapter-plan",
     ]);
-    const confirmView = channel.views.at(-3);
-    expect(confirmView).toMatchObject({ kind: "outline", detail: "confirm" });
-    expect(channel.views.at(-2)).toMatchObject({ kind: "outline", detail: "full" });
-    expect(channel.views.at(-1)).toMatchObject({
-      kind: "chapter-plan",
-      actName: "第1幕",
-      plan: { chapters: chapterPlanFixture.chapters },
-    });
+    expect(channel.views.at(-2)).toMatchObject({ kind: "outline", detail: "confirm" });
+    expect(channel.views.at(-1)).toMatchObject({ kind: "outline", detail: "full" });
 
-    // 通知：收尾提示、大纲入库统计与章节入库统计
+    // 通知：收尾提示、大纲入库统计与手动发起章节规划指引
     expect(channel.notifies).toContain("🗂 大纲树已入库（含梗概与关键情节点）：1 部 / 5 幕");
-    expect(channel.notifies).toContain("📑 章节已入库：第1幕 规划 2 章");
+    expect(
+      channel.notifies.some((n) => n.includes("章节规划不自动进行")),
+    ).toBe(true);
     expect(channel.notifies.some((n) => n.includes("✅ 小说《灵脉遗孤》初始化完成！"))).toBe(true);
 
     // 持久化：novels 未命名回填大纲标题；世界观 upsert；角色入库
@@ -186,21 +172,16 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
       characterStore.listCharacters(state.id).map((c) => c.character.basicInfo.name),
     ).toEqual(["林恒"]);
 
-    // 大纲与章节内容入库：部有梗概无情节点，幕梗概与情节点齐全，章挂在第一幕下概述随行
+    // 大纲内容入库：部有梗概无情节点，幕梗概与情节点齐全；无章节点（规划改由单幕会话手动发起）
     const outlineNodes = new OutlineStore(db).listOutlineNodes(state.id);
-    expect(outlineNodes).toHaveLength(8);
+    expect(outlineNodes).toHaveLength(6);
     const partNode = outlineNodes.find((n) => n.node.type === "part");
     expect(partNode?.node.summary).toBe("少年失去依托，踏上夺脉之路");
     expect(partNode?.node.keyPlotPoints).toBeNull();
     const firstAct = outlineNodes.find((n) => n.node.name === "第1幕");
     expect(firstAct?.node.summary).toBe("第1幕梗概");
     expect(firstAct?.node.keyPlotPoints).toEqual(["第1幕情节点"]);
-    if (!firstAct) throw new Error("测试前置失败：库中无第一幕节点");
-    const chapters = outlineNodes.filter((n) => n.node.type === "chapter");
-    expect(chapters.map((c) => [c.node.parentId, c.node.name, c.node.summary, c.node.sort])).toEqual([
-      [firstAct.id, "第一章·雨夜", "雨夜夺脉的剧情概述", 1],
-      [firstAct.id, "第二章·来客", "神秘来客的剧情概述", 2],
-    ]);
+    expect(outlineNodes.some((n) => n.node.type === "chapter")).toBe(false);
   });
 
   test("UserAbortedError：任一提问通道关闭即中止全流程", async () => {

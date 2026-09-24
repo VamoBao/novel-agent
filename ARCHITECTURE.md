@@ -45,13 +45,13 @@ apps/agent/src/
 │   └── outline-writer.ts # 大纲落盘：output/<id>.json（id 做文件名安全校验）+ readOutlineTheme 尽力读取产物主题（供单幕章节规划，缺失省略）
 └── workflows/
     ├── index.ts         # 模块出口（createNovel / planActChapters / collectWorldview / createOutline / planChapters）
-    ├── create-novel.ts  # 主编排：初始化 → 参数收集 → 大纲生成 → 第一幕章节规划
+    ├── create-novel.ts  # 主编排：初始化 → 参数收集 → 大纲生成确认入库 → 会话收尾（章节规划由单幕会话手动发起）
     ├── plan-act-chapters.ts # 单幕章节规划编排：校验并从库组装上下文 → 复用章节 Agent → saveChapters 幕下建章
     └── agents/
         ├── worldview-agent.ts   # 世界观 ReAct Agent（多轮追问 + 终态提交）
         ├── character-agent.ts   # 角色 ReAct Agent（逐字段「发散丰富→确认→保存」：标识性字段照存原词、描述性字段扩写；终态组装校验）
         ├── outline-agent.ts     # 大纲 ReAct Agent（部→幕两级结构，用户确认门 + 幕/部数强校验）
-        └── chapter-agent.ts     # 章节 ReAct Agent（第一幕拆章：按幕梗概与情节点推荐章节数量与概述，用户确认门）
+        └── chapter-agent.ts     # 章节 ReAct Agent（单幕拆章：按幕梗概与情节点推荐章节数量与概述，用户确认门；单幕规划会话调用）
 
 packages/shared/src/     # @novel/shared：双端共享纯 zod 层——领域 schema（worldview / character /
                          #   conflict / outline / chapter-plan / audience / outline-node）+ 展示视图（views）+
@@ -101,8 +101,8 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 7. **角色**：独立 ReAct Agent（`character-agent`）——字段协议驱动（13 个扁平字段映射到角色卡 schema）：`ask_user` 征集文本 → `save_field` 逐字段「发散丰富 → 用户确认 → 保存」（标识性字段 name/gender/narrativeRole 照存用户原词不扩写，其余描述性字段以用户描述为种子扩写成 2~4 句设定文字、不照抄原话；确认与反馈在工具 execute 内代码强制）→ 必填字段（姓名、内核三维、背景、创作目的、结局方向）齐全后 `submit_character` 组装整卡并**展示给用户做最终确认**（用户确认无补充才结束；有反馈则处理后重新提交），组装由代码完成并过 schema 校验（杜绝模型漂移）；每张角色卡确认后立即按创作 ID 写入 SQLite（增量持久化，`character-store`）；外层循环支持多角色，约束至少一名主角；内核/背景/创作目的/结局方向为生成后固定不变的属性
 8. **核心冲突**：自由文本 → generateObject 归一化（由来/影响/理想解决）
 9. **大纲**：先询问幕数（askInt，3-20，直接回车默认 5）再询问部数（1~幕数，默认 1）→ ReAct Agent（`outline-agent`）基于全部参数生成「部 → 幕」两级大纲（用户已命名时 title 沿用书名；结构经 `outlineSchemaFor(actCount, partCount)` refine 强校验恰好 M 部共 N 幕、每部至少一幕，各部幕数由模型按剧情节奏分配）→ `save_outline` 内展示「剧情梗概、主题、每部概述与每幕名称概述」请用户确认——确认无修改才完成，有修改意见按反馈调整后重新提交确认（循环）；确认后 `saveOutlineTree` 两级入库（部为根节点、幕为子节点，整树事务，梗概与关键情节点随节点入列——供写作期按幕内容生成章节大纲）并按 ID 落盘 `output/<id>.json`（`outline-writer`）
-10. **章节规划（第一幕）**：ReAct Agent（`chapter-agent`）取树中首个 act 节点为第一幕，基于大纲全局（标题/logline/主题）、所属部与幕梗概、关键情节点推荐本幕章节规划——章节数量由模型按情节密度推荐（`chapterPlanSchema` 强约束 1~12 章），每章有章名与剧情概述 → `save_chapters` 内展示「本幕梗概、情节点、拟分章节列表」请用户确认（确认循环同大纲）→ 确认后 `saveChapters` 在幕下事务批量建 chapter 子节点（sort 从 1 递增，章节概述随节点入列，章节点不携带情节点）
-11. 全程通过 `NovelStateStore` 更新 state（initializing → gathering → outlined；章节规划后仍为 outlined，写作状态流转待正文工作流）
+10. **章节规划不自动衔接**（2026-09-25 起，决策见 DECISIONS）：大纲确认入库落盘后会话即收尾（run_finished），不自动规划第一幕章节——章节规划（章名 + 剧情概述，确认后幕下事务建章）由用户在客户端幕节点卡「规划本幕章节」入口经 `planActChapters` 单幕会话逐幕手动发起（见下节）；`chapter` 阶段枚举与 `chapter-plan` 确认视图保留，归单幕规划会话使用
+11. 全程通过 `NovelStateStore` 更新 state（initializing → gathering → outlined；写作状态流转待正文工作流）
 
 ## 单幕章节规划工作流（src/workflows/plan-act-chapters.ts）
 

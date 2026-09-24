@@ -18,7 +18,7 @@ interface ChapterPlanFlowProps {
  * 单幕章节规划问答流（独立页面内容）：挂载即以 plan-chapters 模式 spawn agent，
  * 章节 Agent 展示章节规划确认视图，用户确认或提修改意见（与创作流同一确认门）；
  * 头部提供「返回浏览页」（终止 agent，已确认入库的章节保留）。
- * 单阶段会话不展示 StageBar（七阶段进度条为新建小说全流程专用）。
+ * 单阶段会话不展示 StageBar（六阶段进度条为新建小说全流程专用）。
  */
 export function ChapterPlanFlow({
   novelId,
