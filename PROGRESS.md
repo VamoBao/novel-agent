@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-09-24 [docs] 重写 README 对齐项目现状（简单需求快速通道）：原 `bun init` 模板残留全量替换——项目简介与三工作区一览（agent / shared / client）、功能特性（多阶段创作工作流、人机确认门、五表 SQLite 持久化、双运行模式、库查询管理、Electron 客户端、产物落盘）、技术栈、快速开始（Bun 1.4+ / DeepSeek Key / 安装配置）、常用命令表（与 AGENTS.md 一致）、环境变量表（补登 NOVEL_OUTPUT_DIR）、数据存储（五表职责 + docker-compose sqlite-web 辅助）、更多文档导引（AGENTS / ARCHITECTURE / PROGRESS / DECISIONS / workflows 模块文档 / docs）。AC：命令与脚本对照根 package.json 核实，环境变量对照 `.env.example` 与 ARCHITECTURE 关键约定核实
+
 - 2026-09-23 [feat] 位置概念数据层：locations 表 + LocationStore（任务包经用户确认，决策见 DECISIONS）：shared 新增 locationSchema（名称 / 横纵坐标 / 图层自由文本 / 人口可空非负整数 / 父级可选）+ 导出与单测；SCHEMA_VERSION 6→7 纯新增表迁移（novel_id 外键 + parent_id 自引用外键双索引，population CHECK 非负），连带修正 5→6 迁移段缺 `version <= 5` 守卫的隐患（版本再递增时 v6 库会重放 ALTER 报 duplicate column）；LocationStore `addLocation`（父级须存在且同小说，先查后插给可读错误）/ `listLocations` 按入库顺序，读写双向 zod 校验；deleteNovel 级联清五表。AC：typecheck 3 工程 / lint / 137 用例全过（新增 10：schema 4 + 迁移 1 + store 5）；真实库副本迁移实跑（版本升 7、locations 表列结构齐、4 小说 22 大纲 3 角色 3 世界观无损）。创作流采集 / query CLI / 客户端浏览为后续需求
 
 - 2026-09-23 [feat] 删除小说改为 GitHub 删 repo 式强确认（简单需求快速通道）：删除菜单项打开 DeleteNovelDialog 模态（遮罩 + 危险色卡片）——展示书名 / ID 前 8 位 / 级联范围（世界观、角色、大纲节点及 output 产物，不可恢复），必须输入小说名（trim 后全等；未命名小说输入「未命名小说」）才放行「删除这本小说」按钮；输入框自动聚焦，Esc / 点遮罩 / 取消关闭，Enter 放行时提交；对话框条目从列表解析，删除后列表刷新自动关闭；替代原内联二次确认条（样式同步移除），onDelete 链路（IPC / 级联 / 产物清理）不变。AC：typecheck 3 工程 / lint / 127 用例过；DeleteNovelDialog SSR 冒烟（命名 / 未命名口令回落、级联警示与范围文案、按钮初始禁用）；对话框交互（输入放行 / Esc / Enter）待用户 dev:client 人工验收
@@ -16,9 +18,9 @@
 
 - 2026-09-23 [feat] 大纲内容（summary / keyPlotPoints）入库 outlines 表（任务包经用户确认；默认决策：读取路径不动、旧数据不回填，见 DECISIONS）：outlineNodeSchema 增内容两字段（nullable + refine「keyPlotPoints 非 null 时 type 须为 act」+ patch 放行；zod 4 refine 后不可 pick，patch 由内部纯 object schema 派生）；SCHEMA_VERSION 5→6 链式保数据迁移（v4 库直升时 novels / outlines 两段列同批补齐；连带修正 novel-store 旧 v4 迁移用例缺 outlines 表的合成失真）；OutlineStore 输入 / 行 / SQL / 读写全链路扩展（OutlineTreeInput 内容必填、与 outlineSchema.parts 对齐，内容不可再被编译期静默丢弃；key_plot_points 存 JSON 文本，损坏抛带节点 ID 的可读错误）。AC：typecheck 3 工程 / lint / 123 用例全过（新增 12：shared schema 5 + db 迁移 3 + outline-store 内容 4）；真实库迁移实跑（4 本小说 14 行大纲无损、旧行未回填、`get` 仍读产物路径行为不变）；createNovel 集成断言 DB 行含梗概与情节点。读取路径切换 / 旧数据回填 / documents 表为后续需求
 
-- 2026-09-23 [docs] 需求指南收紧任务包确认门：取消「方案唯一且无高风险时确认单兼作执行摘要、输出后可直接开始」的例外，全部复杂需求输出《任务包确认单》后必须停下等待用户明确回复「确认」/「开始」才可编码（Human-in-the-loop 检查点）；同步更新流水线示意（任务包确认（必须经用户确认））、确认单模板尾注与工作流程第 2 步表述（「或执行摘要输出」→「经用户确认任务包后」）。交叉检查：快速通道（简单需求免确认单）与回退机制（执行中升级须补确认）表述一致，无残留旧措辞。AC：`grep` 全仓校验「直接开始 / 执行摘要 / 必要时」零残留
-
 ## 历史归档
+
+- 2026-09-23 [docs] 需求指南收紧任务包确认门：取消「方案唯一且无高风险时确认单兼作执行摘要、输出后可直接开始」的例外，全部复杂需求输出《任务包确认单》后必须停下等待用户明确回复「确认」/「开始」才可编码（Human-in-the-loop 检查点）；同步更新流水线示意（任务包确认（必须经用户确认））、确认单模板尾注与工作流程第 2 步表述（「或执行摘要输出」→「经用户确认任务包后」）。交叉检查：快速通道（简单需求免确认单）与回退机制（执行中升级须补确认）表述一致，无残留旧措辞。AC：`grep` 全仓校验「直接开始 / 执行摘要 / 必要时」零残留
 
 - 2026-09-22 [refactor] 新建小说改为独立创作页：App 从「三栏 + 覆盖层」改为页面级切换（浏览 ↔ 创作），创作页整页 CreationFlow 问答流（头部「←」终止返回书库），覆盖层模式退役；AUTOSTART 冒烟钩子语义不变。AC：typecheck / lint / 111 用例过；无头截图实证整页形态；AGENTS / ARCHITECTURE / DECISIONS 同步
 
