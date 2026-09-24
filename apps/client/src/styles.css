@@ -454,6 +454,12 @@ button.danger {
   margin: 2px 0;
 }
 
+/* 幕卡「规划本幕章节」入口（旧数据幕禁用态沿用全局 button:disabled 样式） */
+.viewcard .act-actions {
+  margin-top: 10px;
+  padding-left: 16px;
+}
+
 .viewcard .plot {
   padding-left: 16px;
   color: #6a737d;

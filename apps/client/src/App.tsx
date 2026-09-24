@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import type { NovelDetail, NovelListItem } from "@novel/shared";
+import type { NovelDetail, NovelListItem, OutlineNodeEntry } from "@novel/shared";
+import { ChapterPlanFlow } from "./components/ChapterPlanFlow";
 import { CreationFlow } from "./components/CreationFlow";
 import { NovelListPanel } from "./components/NovelListPanel";
 import { PreviewPane } from "./components/PreviewPane";
@@ -9,14 +10,23 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** 单幕章节规划页目标：小说 + 幕节点定位（页面生命周期内不变） */
+interface ChapterPlanTarget {
+  novelId: string;
+  novelName: string;
+  actNodeId: string;
+  actName: string;
+}
+
 /**
  * 页面级切换：三栏浏览主页（左栏书库可汉堡折叠 / 中栏结构树 / 右栏内容预览）
- * 与独立的创作页（CreationFlow 问答流，整页呈现、带返回书库入口）。
- * 创作完成后返回浏览页、刷新书库并自动选中新作。
+ * 与两个独立整页会话：创作页（CreationFlow 新建小说问答流）和章节规划页
+ * （ChapterPlanFlow 单幕章节规划问答流）。会话完成后返回浏览页并刷新对应数据。
  */
 export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [chapterPlan, setChapterPlan] = useState<ChapterPlanTarget | null>(null);
 
   /** null = 列表加载中 */
   const [novels, setNovels] = useState<NovelListItem[] | null>(null);
@@ -106,6 +116,38 @@ export function App() {
     void refreshList();
   };
 
+  /** 幕卡「规划本幕章节」：进入独立章节规划页（目标幕定位自当前选中小说） */
+  const handlePlanChapters = (node: OutlineNodeEntry): void => {
+    if (!selectedId || !detail) return;
+    setChapterPlan({
+      novelId: selectedId,
+      novelName: detail.novel.name ?? "未命名小说",
+      actNodeId: node.id,
+      actName: node.name,
+    });
+  };
+
+  /** 重载当前详情（不动选中状态）：章节规划完成后结构树出现章节点，保持选中该幕 */
+  const reloadDetail = useCallback(async (id: string): Promise<void> => {
+    try {
+      setDetail(await window.agent.getNovelDetail(id));
+    } catch (error) {
+      setDetailError(errorMessage(error));
+    }
+  }, []);
+
+  /** 章节规划完成：回浏览页并刷新详情（已确认入库的章节即刻可见） */
+  const handlePlanFinished = (novelId: string): void => {
+    setChapterPlan(null);
+    void reloadDetail(novelId);
+  };
+
+  /** 返回浏览页：终止 agent（未确认的规划不入库）并刷新详情（中途成果可见） */
+  const handleCloseChapterPlan = (): void => {
+    setChapterPlan(null);
+    if (selectedId) void reloadDetail(selectedId);
+  };
+
   /** 书库管理操作：失败回显到书库错误区，成功后刷新列表保持选中 */
   const handleRename = async (id: string, name: string): Promise<void> => {
     try {
@@ -144,11 +186,25 @@ export function App() {
     }
   };
 
-  // 创作页：独立整页呈现（不带浏览页的汉堡 / 三栏结构）
+  // 会话页：独立整页呈现（不带浏览页的汉堡 / 三栏结构），与浏览页互斥
   if (creating) {
     return (
       <div className="app create-app">
         <CreationFlow onFinished={handleFinished} onClose={handleCloseCreation} />
+      </div>
+    );
+  }
+  if (chapterPlan) {
+    return (
+      <div className="app create-app">
+        <ChapterPlanFlow
+          novelId={chapterPlan.novelId}
+          novelName={chapterPlan.novelName}
+          actNodeId={chapterPlan.actNodeId}
+          actName={chapterPlan.actName}
+          onFinished={handlePlanFinished}
+          onClose={handleCloseChapterPlan}
+        />
       </div>
     );
   }
@@ -200,6 +256,7 @@ export function App() {
             loading={detailLoading}
             error={detailError}
             selection={selection}
+            onPlanChapters={handlePlanChapters}
           />
         </main>
       </div>

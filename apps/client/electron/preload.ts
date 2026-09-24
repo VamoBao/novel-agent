@@ -1,12 +1,14 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AgentMessage, NovelDetail, NovelListItem } from "@novel/shared";
+import type { AgentMessage, AgentStartOptions, NovelDetail, NovelListItem } from "@novel/shared";
 
 /**
  * 渲染进程唯一入口：contextBridge 暴露最小 API。
  * 消息经 main 进程 zod 复验后才到达，renderer 直接信任结构。
  */
 contextBridge.exposeInMainWorld("agent", {
-  start: (): Promise<void> => ipcRenderer.invoke("agent:start"),
+  /** 启动 agent 会话；options 选择会话模式（新建小说 / 单幕章节规划），缺省新建 */
+  start: (options?: AgentStartOptions): Promise<void> =>
+    ipcRenderer.invoke("agent:start", options),
   stop: (): Promise<void> => ipcRenderer.invoke("agent:stop"),
   respond: (id: number, answer: string | string[] | boolean | number): Promise<void> =>
     ipcRenderer.invoke("agent:respond", id, answer),

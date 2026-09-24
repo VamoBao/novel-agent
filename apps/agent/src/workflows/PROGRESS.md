@@ -8,16 +8,19 @@
 
 ## 已完成
 
-- 2026-09-24 [feat] 第一幕章节规划工作流（决策见根 DECISIONS）：大纲确认入库落盘后新增章节规划段——`planChapters`（chapter-agent，ReAct + `save_chapters` 终态确认门：拒绝→反馈→修订→再确认）取树中首个 act 节点为第一幕，按幕梗概与关键情节点推荐章节数量（模型推荐，schema 约束 1~12）与各章剧情概述；确认后 `OutlineStore.saveChapters` 幕下事务批量建 chapter 子节点（父级须为幕且同小说、sort 从 1 递增、概述随节点入列、重复保存撞唯一索引拒绝）。协议侧新增 `chapter-plan` 确认视图与 `chapter` 阶段（七阶段）；CLI renderView / client ViewCard / StageBar 联动，客户端浏览侧结构树第三层零改动（本就预留）。AC：typecheck 3 工程 / lint / 157 用例全过（新增 7：shared schema 3 + saveChapters 3 + renderView 1；集成测试改写覆盖章节段——章节点挂幕/概述/sort 断言）；真实 LLM 端到端待用户验证（`bun run dev` 走到章节确认门）。后续幕逐幕推进为后续需求
+- 2026-09-24 [feat] 单幕章节规划工作流 planActChapters（跨模块需求，任务包与决策见根 PROGRESS / DECISIONS，本模块承担编排侧）：`plan-act-chapters.ts`——前置校验（小说存在 / 幕节点存在同小说类型 act / 幕内容非空拒旧数据 / 所属部在 / 无重复规划）→ 从库组装上下文（novels.name/description + 部与幕节点内容，theme 经 outline-writer 新增 `readOutlineTheme` 尽力读取）→ 复用 planChapters 确认门 → saveChapters 幕下建章。headless 新增 `plan-chapters <novelId> <actNodeId>` 会话模式（无参行为不变）。AC：typecheck 3 工程 / lint / 166 用例全过（新增 7：本编排成功路径 + 五类前置校验 + 确认门中止；readOutlineTheme 2 条）；真实 LLM 协议级端到端实跑——「万流归序」第二幕规划 5 章入库、run_finished、重复规划前置拒绝实证
+
+- 2026-09-24 [feat] 第一幕章节规划工作流（决策见根 DECISIONS）：大纲确认入库落盘后新增章节规划段——`planChapters`（chapter-agent，ReAct + `save_chapters` 终态确认门：拒绝→反馈→修订→再确认）取树中首个 act 节点为第一幕，按幕梗概与关键情节点推荐章节数量（模型推荐，schema 约束 1~12）与各章剧情概述；确认后 `OutlineStore.saveChapters` 幕下事务批量建 chapter 子节点（父级须为幕且同小说、sort 从 1 递增、概述随节点入列、重复保存撞唯一索引拒绝）。协议侧新增 `chapter-plan` 确认视图与 `chapter` 阶段（七阶段）；CLI renderView / client ViewCard / StageBar 联动，客户端浏览侧结构树第三层零改动（本就预留）。AC：typecheck 3 工程 / lint / 157 用例全过（新增 7：shared schema 3 + saveChapters 3 + renderView 1；集成测试改写覆盖章节段——章节点挂幕/概述/sort 断言）；真实 LLM 端到端待用户验证（`bun run dev` 走到章节确认门）
 
 - 2026-09-23 [feat] 大纲内容入库 outlines 表（编排层联动，任务包经用户确认）：`saveOutlineTree(id, outline.parts)` 输入类型与 outlineSchema.parts 对齐后内容必填（调用处零改动、类型直接匹配），梗概与关键情节点随节点入列；入库通知文案补「含梗概与关键情节点」；createNovel 集成测试补 DB 行内容断言（部有梗概无情节点、幕两者齐全）。schema / 迁移 / store 改动与 AC 见根 PROGRESS 对应条目；读取路径不动（客户端预览仍读 output JSON）
 
 - 2026-09-22 [feat] save_field 保存策略改为「受控发散」（决策见根 DECISIONS）：标识性字段（name/gender/narrativeRole）照存用户原词不扩写（姓名只存名字本身、性别只存性别、叙事定位一句话以内），描述性字段以用户描述为种子发散丰富成 2~4 句设定文字（补充贴合细节与形象，不照抄原话，不与用户事实相悖）；SYSTEM_PROMPT 与 save_field 工具描述同步分级约束；组装校验与双重确认门不变。AC：typecheck/lint/111 用例过；真实 LLM 定向冒烟两轮——首轮暴露标识字段污染（name 混入名字来历长段、gender 混入外貌），分级修正后第二轮 name/gender/narrativeRole 干净照存、描述性字段饱满扩写（背景从一句身世扩为完整设定）；根 ARCHITECTURE 角色流程描述同步
 
 - 2026-09-18 [feat] 大纲接入 outlines 表：类型枚举瘦身为部/幕/章（去卷，章为写作期预留）；`outlineSchema` 重构为「部→幕」两级（部含名称+概述，幕含名称/梗概/情节点），`outlineSchemaFor(actCount, partCount)` 强校验恰好 M 部共 N 幕、每部至少一幕；编排层先问幕数（3-20，默认 5）再问部数（1~幕数，默认 1），各部幕数由模型按剧情节奏分配；确认后 `saveOutlineTree` 整树事务入库 + `output/<id>.json` 落盘（结构变为两级，旧 JSON 不兼容）。AC：typecheck/lint/test 通过（59 用例）；真实 LLM 定向冒烟（createOutline，2 部 5 幕 → 恰好 2 部共 5 幕，模型自分配 3+2，确认循环正常）
-- 2026-09-18 [docs] 建立本模块 ARCHITECTURE / PROGRESS 文档；顺带修正根架构文档两处失真：依赖边界补 `output/`（create-novel 实际导入 outline-writer）、目录树补 `workflows/index.ts`
 
 ## 历史归档
+
+- 2026-09-18 [docs] 建立本模块 ARCHITECTURE / PROGRESS 文档；顺带修正根架构文档两处失真：依赖边界补 `output/`（create-novel 实际导入 outline-writer）、目录树补 `workflows/index.ts`
 
 - 2026-09-18 大纲生成前询问幕数（`askInt` 3-20 默认 5，经 `outlineSchemaForActs` refine 在 save_outline 入参层强校验，模型给错被 schema 拒绝重试；端到端 4 幕 → 恰好 4 幕）；创建流程新增可选命名步骤（ID 后大纲前回车跳过，novels 行初始化即建，已命名大纲 title 强制沿用、未命名确认后以标题回填 name / logline 回填 description）——两条均为大纲工作流形态定型的配套改造，完整 AC 见当时提交记录
 - 2026-09-15 ~ 2026-09-17【早期建设期滚动摘要，6 条已归并】大纲确认循环（save_outline 最终确认门，拒绝→修订→再确认，isDone 模式 maxSteps 12）；submit_character 整卡确认门（assembleCharacter 代码组装过 schema，杜绝模型改写漂移）；角色收集字段协议（13 字段 FIELD_SPECS，save_field 代码强制「概括→确认→保存」）；主角/核心冲突收集（generateObject 归一化 + 强约束 prompt + 确认门）；模块首建（createNovel 主编排 + worldview/outline subAgent ReAct 终态工具模式，首次端到端跑通并落盘 `output/<id>.json`）；世界观/角色接入 SQLite 持久化（世界观确认后按创作 ID upsert 1:1；角色每卡确认后增量入库 1:N，novels 行先建满足外键顺序）
@@ -31,8 +34,8 @@
 
 - ~~`outlines` 表接入 createNovel~~（2026-09-18 完成：大纲确认后 `saveOutlineTree` 两级入库）
 - ~~第一幕章节规划~~（2026-09-24 完成：大纲后 `planChapters` + `saveChapters` 幕下建章）
-- 后续幕逐幕推进的章节规划（当前只做第一幕，按幕续规划为后续需求）
-- 章节规划修订流：同一幕重复规划章节需先降级旧章（当前重复保存被唯一索引拒绝，与大纲多版本流同属一个待办）
+- ~~后续幕逐幕推进的章节规划~~（2026-09-24 完成：客户端幕卡入口 → `planActChapters` 单幕会话，任意未规划幕可规划）
+- 章节规划修订流：同一幕重复规划章节需先降级旧章（当前重复保存被唯一索引拒绝——客户端幕卡已按「已规划隐藏入口」规避；与大纲多版本流同属一个待办）
 - 大纲/章节修订的多版本流：重新生成时降级旧树、提升新版本（当前重复保存整树会被唯一索引拒绝）
 - NovelState 整体 SQLite 化：state 仍为内存态（`memoryNovelStateStore`），`store` 已参数化可直接替换实现
 - 未来写作工作流：按章节概述生成正文并经 `document_id` 关联（documents 表落地后补外键）

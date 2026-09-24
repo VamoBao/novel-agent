@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { outlineFilePath, saveOutline } from "./outline-writer";
+import { outlineFilePath, readOutlineTheme, saveOutline } from "./outline-writer";
 import { outlineSchema, type Outline } from "@novel/shared";
 
 let tempDir: string;
@@ -60,5 +60,29 @@ describe("saveOutline", () => {
     await mkdir(tempDir, { recursive: true });
     const path = await saveOutline("safe-id-1", outline, dir);
     expect(await Bun.file(path).exists()).toBe(true);
+  });
+});
+
+describe("readOutlineTheme", () => {
+  test("产物存在时读回 theme（有则返回，无则 undefined）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-theme-"));
+    const withTheme = outlineSchema.parse({ ...outline, theme: "反抗垄断" });
+    await saveOutline("safe-id-2", withTheme, dir);
+    await saveOutline("safe-id-3", outline, dir);
+    expect(readOutlineTheme("safe-id-2", dir)).toBe("反抗垄断");
+    expect(readOutlineTheme("safe-id-3", dir)).toBeUndefined();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("产物缺失或损坏（非 JSON / 不合 schema）返回 undefined，不抛错", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-theme-"));
+    const corrupt = join(dir, "corrupt.json");
+    await Bun.write(corrupt, "{ not json");
+    const invalid = join(dir, "invalid.json");
+    await Bun.write(invalid, JSON.stringify({ title: "缺字段" }));
+    expect(readOutlineTheme("corrupt", dir)).toBeUndefined();
+    expect(readOutlineTheme("invalid", dir)).toBeUndefined();
+    expect(readOutlineTheme("missing", dir)).toBeUndefined();
+    await rm(dir, { recursive: true, force: true });
   });
 });

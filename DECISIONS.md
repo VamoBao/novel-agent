@@ -2,6 +2,22 @@
 
 记录「为什么」而非「做了什么」：决策背景、备选方案、权衡依据与结论。
 
+## 2026-09-24 客户端单幕章节规划会话（幕卡入口 + headless argv 模式）
+
+- **背景**：章节 Agent（planChapters + saveChapters）已建成但只在新建小说全流程末尾对第一幕触发（PROGRESS 待办「后续幕逐幕推进」）。用户要求在大纲预览的幕节点卡上加入口，为任意未规划幕启动章节规划。澄清提问（交互载体 / 按钮显示规则）未获即时答复，按推荐项执行并在此落盘供复核。
+- **备选方案**：
+  1. **headless argv 会话模式 + 整页问答流**（选定）：spawn 参数选会话（无参 = 新建全流程；`plan-chapters <novelId> <actNodeId>` = 单幕规划），对齐 query CLI 传参先例，协议消息 schema 零结构改动（run_finished 复用）；交互复用创作页整页问答流模式（新 ChapterPlanFlow，与 CreationFlow 共用抽取的 useAgentSession 会话泵）
+  2. 协议消息触发：hello 后 client 发「开始规划」类消息——client→agent 消息面从单一 response 扩为多类型、协议版本升级连带两端；且「进程即会话」由 spawn 参数天然表达，无增益
+  3. 浏览页右栏内嵌确认区：问答流嵌三栏布局滚动空间小，agent 生命周期挂在常驻浏览页上状态更绕
+- **设计要点**：
+  - **规划上下文全取自库**：novels.name / description（书名 / logline）+ 幕与所属部节点的 summary / keyPlotPoints；theme 仅存于 output 产物，`readOutlineTheme` 尽力读取、缺失省略（theme 本就是 Agent 可选输入）——不为一个可选项扩 novels 表
+  - **按钮显示规则**：未规划幕显示入口；已规划幕隐藏（重复保存被唯一索引拒绝、修订流为既有待办，点击必错不如不给入口）；旧数据幕（内容列 NULL，无规划种子内容）禁用 + title 提示原因
+  - **校验兜底在 agent 侧而非 UI**：小说/幕不存在、异小说、非幕、旧数据缺内容、已有章节均在工作流入口抛可读错误（fatal error → 客户端错误视图），客户端显示规则只是第一道体验优化
+  - **AgentStartOptions 落 shared 为纯类型**：client 三端（main / preload / renderer）共用「会话参数 → spawn argv」映射契约（create → 无参 / plan-chapters → 传双 ID），零运行时、不升协议版本
+  - **run_finished 复用**：语义泛化为「一次 agent 会话正常结束」（新建创作 / 单幕规划），两个会话页互斥挂载各听各的，客户端据 novelId 刷新
+  - **完成后保持选中该幕**：详情手动 reload（不动 selection），结构树第三层出现章节点、幕卡入口随之消失（hasChapters 即时生效）
+- **结论**：`planActChapters` 工作流（校验 → 组装上下文 → 复用章节 Agent → saveChapters）+ headless argv 分发 + client agent:start 携带会话参数 + ChapterPlanFlow 整页 + OutlineNodeCard 幕卡入口。真实 LLM 协议级端到端实跑通过（确认门 → 5 章入库 → run_finished），重复规划前置拒绝实证。
+
 ## 2026-09-24 第一幕章节规划：ReAct 确认门 + 章节挂幕入库（只做第一幕）
 
 - **背景**：大纲确认入库后进入写作准备。用户需求：从第一幕开始，按幕梗概与关键情节点推荐章节数量与各章剧情概述，用户确认后把章节写入大纲表，先做到这一步。

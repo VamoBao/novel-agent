@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import type { NovelDetail, View } from "@novel/shared";
+import type { NovelDetail, OutlineNodeEntry, View } from "@novel/shared";
 import { ViewCard } from "./ViewCard";
 import { OutlineNodeCard } from "./OutlineNodeCard";
 import type { Selection } from "./StructureTreePanel";
@@ -10,6 +10,8 @@ interface PreviewPaneProps {
   loading: boolean;
   error: string | null;
   selection: Selection | null;
+  /** 幕节点「规划本幕章节」入口（App 接线到独立章节规划页）；不传则幕卡不显示入口 */
+  onPlanChapters?: (node: OutlineNodeEntry) => void;
 }
 
 /** 选中项 → 只读视图（世界观 / 角色复用创作流 ViewCard；大纲节点走 OutlineNodeCard，不经此处） */
@@ -27,7 +29,7 @@ function toView(detail: NovelDetail, selection: Selection): View | null {
 }
 
 /** 右栏内容预览：结构树选中节点的只读视图 */
-export function PreviewPane({ detail, loading, error, selection }: PreviewPaneProps) {
+export function PreviewPane({ detail, loading, error, selection, onPlanChapters }: PreviewPaneProps) {
   let body: ReactElement;
   if (!detail) {
     body = (
@@ -40,7 +42,13 @@ export function PreviewPane({ detail, loading, error, selection }: PreviewPanePr
   } else if (selection.kind === "outline") {
     const node = detail.outlineNodes.find((n) => n.id === selection.outlineNodeId);
     body = node ? (
-      <OutlineNodeCard node={node} />
+      <OutlineNodeCard
+        node={node}
+        hasChapters={detail.outlineNodes.some(
+          (n) => n.parentId === node.id && n.type === "chapter",
+        )}
+        onPlanChapters={onPlanChapters ? () => onPlanChapters(node) : undefined}
+      />
     ) : (
       <p className="pane-error">该节点内容未能加载（数据缺失）。</p>
     );

@@ -8,6 +8,7 @@ import {
   novelDetailSchema,
   novelListItemSchema,
   PROTOCOL_VERSION,
+  type AgentStartOptions,
   type NovelDetail,
   type NovelListItem,
 } from "@novel/shared";
@@ -101,11 +102,16 @@ class AgentProcess {
     return this.child !== null;
   }
 
-  start(win: BrowserWindow): void {
+  start(win: BrowserWindow, options: AgentStartOptions = { mode: "create" }): void {
     if (this.child) return;
     this.win = win;
     const repoRoot = resolveRepoRoot();
-    const child = spawn("bun", ["run", "apps/agent/src/headless.ts"], {
+    // 会话模式映射为 headless argv（create → 无参；plan-chapters → 传小说与幕节点 ID）
+    const sessionArgs =
+      options.mode === "plan-chapters"
+        ? ["plan-chapters", options.novelId, options.actNodeId]
+        : [];
+    const child = spawn("bun", ["run", "apps/agent/src/headless.ts", ...sessionArgs], {
       cwd: repoRoot,
       env: childEnv(),
       stdio: ["pipe", "pipe", "inherit"],
@@ -245,9 +251,9 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
-ipcMain.handle("agent:start", () => {
+ipcMain.handle("agent:start", (_event, options?: AgentStartOptions) => {
   const win = BrowserWindow.getAllWindows()[0];
-  if (win) agentProcess.start(win);
+  if (win) agentProcess.start(win, options ?? { mode: "create" });
 });
 
 ipcMain.handle("agent:respond", (_event, id: number, answer: string | string[] | boolean | number) => {

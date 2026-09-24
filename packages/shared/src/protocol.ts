@@ -54,7 +54,7 @@ export const askSchema = z.discriminatedUnion("type", [
 ]);
 export type Ask = z.infer<typeof askSchema>;
 
-/** agent → client 消息（每行一个 JSON 对象） */
+/** agent → client 消息（每行一个 JSON 对象）；run_finished 为一次会话正常结束（新建创作 / 单幕章节规划） */
 export const agentMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("hello"),
@@ -84,3 +84,12 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   }),
 ]);
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
+
+/**
+ * agent 会话启动参数（client main → headless argv 的映射契约，非协议消息；纯类型零运行时）。
+ * renderer 经 agent:start IPC 传入，main 映射为 spawn 参数：
+ * create → 无参（新建小说全流程）；plan-chapters → `plan-chapters <novelId> <actNodeId>`。
+ */
+export type AgentStartOptions =
+  | { mode: "create" }
+  | { mode: "plan-chapters"; novelId: string; actNodeId: string };

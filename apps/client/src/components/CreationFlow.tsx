@@ -1,12 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import type { AgentMessage, Stage, View } from "@novel/shared";
+import { useEffect, useRef } from "react";
+import { useAgentSession } from "../hooks/use-agent-session";
 import { QuestionCard } from "./QuestionCard";
 import { StageBar } from "./StageBar";
 import { ViewCard } from "./ViewCard";
-
-type RequestMsg = Extract<AgentMessage, { type: "request" }>;
-type Phase = "running" | "error";
-type FlowItem = { kind: "notify"; text: string } | { kind: "view"; view: View };
 
 interface CreationFlowProps {
   /** run_finished 后上报：父级负责关闭覆盖层、刷新书库并选中新作 */
@@ -18,92 +14,22 @@ interface CreationFlowProps {
 /**
  * 创作问答流（独立创作页内容）：挂载即 spawn agent 开始一次创作会话；
  * 头部提供「返回书库」（终止 agent，已完成部分已落库）。
+ * 会话消息泵抽至 useAgentSession（与单幕章节规划页共用）。
  */
 export function CreationFlow({ onFinished, onClose }: CreationFlowProps) {
-  const [phase, setPhase] = useState<Phase>("running");
-  const [flow, setFlow] = useState<FlowItem[]>([]);
-  const [stage, setStage] = useState<Stage | null>(null);
-  /** 到达但未作答的提问队列（agent 侧无效应答会以新 id 重问，自然入队） */
-  const [requests, setRequests] = useState<RequestMsg[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [exitCode, setExitCode] = useState<number | null>(null);
+  const { phase, flow, stage, requests, currentRequest, error, exitCode, answer, start } =
+    useAgentSession({ onFinished });
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  const start = (): void => {
-    setPhase("running");
-    setFlow([]);
-    setStage(null);
-    setRequests([]);
-    setError(null);
-    setExitCode(null);
-    void window.agent.start();
-  };
-
-  useEffect(() => {
-    start();
-    const offMessage = window.agent.onMessage((message) => {
-      switch (message.type) {
-        case "hello":
-          setPhase("running");
-          break;
-        case "notify":
-          setFlow((items) => [...items, { kind: "notify", text: message.text }]);
-          break;
-        case "view":
-          setFlow((items) => [...items, { kind: "view", view: message.view }]);
-          break;
-        case "stage":
-          setStage(message.stage);
-          break;
-        case "request":
-          setRequests((queue) => [...queue, message]);
-          break;
-        case "run_finished":
-          onFinished(message.novelId);
-          break;
-        case "error":
-          setError(message.message);
-          if (message.fatal) {
-            setRequests([]);
-            setPhase("error");
-          }
-          break;
-      }
-    });
-    const offExit = window.agent.onExit((code) => {
-      setExitCode(code);
-      // agent 结束但流程未完成（异常退出 / 被中断 / 用户关闭）：错误视图提供重启；
-      // run_finished 先于 exit 到达，完成路径不走这里
-      setError(
-        code === 0
-          ? "agent 已结束（本次创作未完成——被中断或输入通道关闭）"
-          : `agent 异常退出（exit ${code}）`,
-      );
-      setRequests([]);
-      setPhase((current) => (current === "running" ? "error" : current));
-    });
-    return () => {
-      offMessage();
-      offExit();
-    };
-  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [flow.length, requests.length]);
-
-  const answer = (id: number, value: string | string[] | boolean | number): void => {
-    setRequests((queue) => queue.filter((request) => request.id !== id));
-    void window.agent.respond(id, value);
-  };
 
   /** 返回书库 = 终止 agent（v1 无优雅取消，state 已增量落库） */
   const close = (): void => {
     void window.agent.stop();
     onClose();
   };
-
-  const currentRequest = requests[0];
 
   return (
     <>

@@ -1,4 +1,5 @@
-import type { Outline } from "@novel/shared";
+import { readFileSync } from "node:fs";
+import { outlineSchema, type Outline } from "@novel/shared";
 
 /** 大纲输出目录（默认项目根相对路径；协议模式下由宿主进程经 NOVEL_OUTPUT_DIR 传绝对路径） */
 export const OUTPUT_DIR = process.env.NOVEL_OUTPUT_DIR ?? "output";
@@ -25,4 +26,18 @@ export async function saveOutline(
   const path = outlineFilePath(id, dir);
   await Bun.write(path, `${JSON.stringify(outline, null, 2)}\n`);
   return path;
+}
+
+/**
+ * 尽力读取大纲产物中的主题（theme）：供单幕章节规划补充上下文。
+ * 产物缺失 / 损坏 / 不合 schema 一律返回 undefined，不阻断调用方——
+ * theme 本就是规划输入的可选项。
+ */
+export function readOutlineTheme(id: string, dir: string = OUTPUT_DIR): string | undefined {
+  try {
+    const parsed = outlineSchema.safeParse(JSON.parse(readFileSync(outlineFilePath(id, dir), "utf8")));
+    return parsed.success ? parsed.data.theme : undefined;
+  } catch {
+    return undefined;
+  }
 }

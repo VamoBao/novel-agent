@@ -48,6 +48,7 @@ export {
   type Ask,
   type AgentMessage,
   type ClientMessage,
+  type AgentStartOptions,
 } from "./protocol";
 export {
   novelListItemSchema,
