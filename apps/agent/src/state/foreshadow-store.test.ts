@@ -111,6 +111,8 @@ describe("ForeshadowStore", () => {
         recoverChapterIds: ["cccccccc-0000-7000-8000-0000000000d1"],
       }),
     );
+    // updated_at 为毫秒精度 ISO，隔 20ms 保证 patch 后严格大于创建时（对齐其余 store 用例惯例）
+    await new Promise((r) => setTimeout(r, 20));
 
     // 未回收 → 部分回收：追加回收章节，修订注意度
     const partial = store.updateForeshadow(created.id, {
