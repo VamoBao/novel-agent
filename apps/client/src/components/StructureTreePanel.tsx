@@ -113,7 +113,9 @@ function renderOutlineNodes(
 
 /**
  * 中栏结构树：世界观 / 角色 / 大纲（部→幕→章，读 outlines 表当前版本节点）三类组成节点。
- * 大纲按节点选中预览（视图粒度 = 单节点）；组头刷新按钮触发大纲重新生成（经弹框确认）。
+ * 大纲分组可整组收起（组头三角，默认展开），组内部/幕可逐节点收起（默认全展开），
+ * 收起态均会话内保持；大纲按节点选中预览（视图粒度 = 单节点）；
+ * 组头刷新按钮触发大纲重新生成（经弹框确认）。
  */
 export function StructureTreePanel({
   detail,
@@ -125,6 +127,8 @@ export function StructureTreePanel({
 }: StructureTreePanelProps) {
   /** 收起的大纲节点 ID 集合（默认空 = 全展开），会话内保持 */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  /** 大纲分组整组收起（默认展开），会话内保持 */
+  const [groupCollapsed, setGroupCollapsed] = useState(false);
   const toggleCollapse = (id: string): void => {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -175,6 +179,15 @@ export function StructureTreePanel({
           )}
 
           <div className="tree-group">
+            {detail.outlineNodes.length > 0 ? (
+              <button
+                className="tree-toggle"
+                title={groupCollapsed ? "展开大纲" : "收起大纲"}
+                onClick={() => setGroupCollapsed((v) => !v)}
+              >
+                {groupCollapsed ? "▸" : "▾"}
+              </button>
+            ) : null}
             <span>📖 大纲</span>
             {detail.outlineNodes.length > 0 && onRegenOutline ? (
               <button
@@ -188,7 +201,7 @@ export function StructureTreePanel({
           </div>
           {detail.outlineNodes.length === 0 ? (
             <TreeNode label="（未生成）" depth={1} muted />
-          ) : (
+          ) : groupCollapsed ? null : (
             renderOutlineNodes(detail.outlineNodes, null, 1, selection, onSelect, collapsed, toggleCollapse)
           )}
         </>

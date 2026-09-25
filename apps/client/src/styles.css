@@ -240,6 +240,14 @@ body {
   color: #b6bcc4;
 }
 
+/* 组头整组收起切换（大纲分组）：沿用三角语汇，紧凑尺寸贴近组头行高 */
+.tree-group .tree-toggle {
+  width: auto;
+  height: auto;
+  margin-left: 0;
+  padding: 0;
+}
+
 .tree-group {
   display: flex;
   align-items: center;
