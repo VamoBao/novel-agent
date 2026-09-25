@@ -88,8 +88,10 @@ export type ClientMessage = z.infer<typeof clientMessageSchema>;
 /**
  * agent 会话启动参数（client main → headless argv 的映射契约，非协议消息；纯类型零运行时）。
  * renderer 经 agent:start IPC 传入，main 映射为 spawn 参数：
- * create → 无参（新建小说全流程）；plan-chapters → `plan-chapters <novelId> <actNodeId>`。
+ * create → 无参（新建小说全流程）；plan-chapters → `plan-chapters <novelId> <actNodeId>`；
+ * regen-outline → `regen-outline <novelId>`（大纲重新生成，新版本入库旧版本归档）。
  */
 export type AgentStartOptions =
   | { mode: "create" }
-  | { mode: "plan-chapters"; novelId: string; actNodeId: string };
+  | { mode: "plan-chapters"; novelId: string; actNodeId: string }
+  | { mode: "regen-outline"; novelId: string };

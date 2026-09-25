@@ -5,6 +5,11 @@ export {
   type PlanActChaptersOptions,
   type PlanActChaptersResult,
 } from "./plan-act-chapters";
+export {
+  regenerateOutline,
+  type RegenOutlineOptions,
+  type RegenOutlineResult,
+} from "./regen-outline";
 export { collectWorldview } from "./agents/worldview-agent";
 export { createOutline } from "./agents/outline-agent";
 export { planChapters, type PlanChaptersInput } from "./agents/chapter-agent";

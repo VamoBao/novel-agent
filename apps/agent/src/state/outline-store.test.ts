@@ -501,6 +501,99 @@ describe("OutlineStore", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  test("saveOutlineTreeNewVersion 版本切换：旧树与旧章降级归档，新树 version=2 当前", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-tree-swap-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "cccccccc-dddd-7eee-8fff-000000000001";
+    const store = setup(dbPath, novelId);
+
+    // v1：1 部 2 幕 + 第一幕下 2 章
+    const v1Nodes = store.saveOutlineTree(novelId, [treePart("旧一部·风起", ["旧一幕", "旧二幕"])]);
+    const oldAct = v1Nodes.find((n) => n.node.type === "act")!;
+    store.saveChapters(novelId, oldAct.id, [
+      { name: "旧章一", summary: "旧章一概述" },
+      { name: "旧章二", summary: "旧章二概述" },
+    ]);
+
+    const v2Nodes = store.saveOutlineTreeNewVersion(novelId, [
+      treePart("新一部·重启", ["新一幕", "新二幕"]),
+    ]);
+    expect(v2Nodes).toHaveLength(3);
+    expect(
+      v2Nodes.every((n) => n.node.version === 2 && n.node.isCurrentVersion && n.node.status === "planned"),
+    ).toBe(true);
+
+    // 当前版本只见新树（新旧 sort 均从 1 起，唯一索引不冲突）
+    const current = store.listOutlineNodes(novelId, { currentOnly: true });
+    expect(current.map((n) => n.node.name)).toEqual(["新一部·重启", "新一幕", "新二幕"]);
+
+    // 全量 = 旧树 3（1 部 + 2 幕）+ 旧章 2 + 新树 3，旧行全部降级归档保留（版本迭代记录）
+    const all = store.listOutlineNodes(novelId);
+    expect(all).toHaveLength(8);
+    const archived = all.filter((n) => n.node.version === 1);
+    expect(archived).toHaveLength(5);
+    expect(archived.every((n) => !n.node.isCurrentVersion)).toBe(true);
+    expect(archived.filter((n) => n.node.type === "chapter").map((n) => n.node.name)).toEqual([
+      "旧章一",
+      "旧章二",
+    ]);
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("saveOutlineTreeNewVersion 可多次迭代（version 递增），跨小说互不影响", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-tree-swap-n-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "cccccccc-dddd-7eee-8fff-000000000002";
+    const otherId = "cccccccc-dddd-7eee-8fff-000000000003";
+    const store = setup(dbPath, novelId);
+    NovelStore.open(dbPath).createNovel({ id: otherId });
+    store.saveOutlineTree(otherId, [treePart("他书一部", ["他书一幕"])]);
+
+    store.saveOutlineTree(novelId, [treePart("v1 部", ["v1 幕"])]);
+    store.saveOutlineTreeNewVersion(novelId, [treePart("v2 部", ["v2 幕"])]);
+    const v3 = store.saveOutlineTreeNewVersion(novelId, [treePart("v3 部", ["v3 幕"])]);
+    expect(v3.every((n) => n.node.version === 3 && n.node.isCurrentVersion)).toBe(true);
+    expect(store.listOutlineNodes(novelId)).toHaveLength(6); // 三版各 1 部 + 1 幕
+    expect(store.listOutlineNodes(novelId, { currentOnly: true }).map((n) => n.node.name)).toEqual([
+      "v3 部",
+      "v3 幕",
+    ]);
+    // 他书不受影响
+    expect(store.listOutlineNodes(otherId, { currentOnly: true }).map((n) => n.node.name)).toEqual([
+      "他书一部",
+      "他书一幕",
+    ]);
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("saveOutlineTreeNewVersion 中途失败整体回滚，旧版本不受影响；空树/空幕拒绝", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-tree-swap-tx-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "cccccccc-dddd-7eee-8fff-000000000004";
+    const store = setup(dbPath, novelId);
+    store.saveOutlineTree(novelId, [treePart("旧一部", ["旧一幕"])]);
+
+    // 新树幕名为空触发 zod 拒绝：降级与插入须整体回滚，旧树仍为当前版本
+    expect(() =>
+      store.saveOutlineTreeNewVersion(novelId, [
+        { name: "新一部", summary: "新一部梗概", acts: [{ name: "", summary: "梗概", keyPlotPoints: ["点"] }] },
+      ]),
+    ).toThrow();
+    const current = store.listOutlineNodes(novelId, { currentOnly: true });
+    expect(current.map((n) => n.node.name)).toEqual(["旧一部", "旧一幕"]);
+    expect(store.listOutlineNodes(novelId)).toHaveLength(2);
+
+    // 入参校验同 saveOutlineTree
+    expect(() => store.saveOutlineTreeNewVersion(novelId, [])).toThrow("空");
+    expect(() =>
+      store.saveOutlineTreeNewVersion(novelId, [{ name: "孤部", summary: "孤部梗概", acts: [] }]),
+    ).toThrow("至少一幕");
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
   test("迁移前旧行（内容列 NULL）读取正常，损坏 key_plot_points 抛可读错误", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-legacy-row-"));
     const dbPath = join(dir, "test.db");

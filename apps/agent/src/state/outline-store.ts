@@ -253,41 +253,80 @@ export class OutlineStore {
    * 整棵大纲树入库（事务原子）：部为根节点（sort 从 1 递增）、幕为其子节点
    * （sort 按所属部从 1 递增），全部为 version=1 / 当前版本 / planned，
    * 梗概与关键情节点随节点入列（部无关键情节点）。
-   * 任一节点失败整树回滚，不留半棵树。
+   * 任一节点失败整树回滚，不留半棵树。首次生成用；重新生成走 saveOutlineTreeNewVersion。
    */
   saveOutlineTree(novelId: string, parts: readonly OutlineTreeInput[]): StoredOutlineNode[] {
+    this.validateTreeInput(parts);
+    const saveTree = this.db.transaction((tree: readonly OutlineTreeInput[]) =>
+      this.insertTree(novelId, tree, 1),
+    );
+    return saveTree(parts);
+  }
+
+  /**
+   * 新版本大纲树入库（事务原子）——大纲重新生成的版本切换流：
+   * 该小说全部当前版本行（部/幕/章，含旧章节规划）先降级 is_current_version=0
+   * 归档为历史版本（版本迭代记录，行保留），再以 version=max+1 插入新树并置为当前版本。
+   * 同父级 sort 不冲突（唯一索引只约束当前版本）；任一步失败整体回滚，旧版本不受影响。
+   */
+  saveOutlineTreeNewVersion(novelId: string, parts: readonly OutlineTreeInput[]): StoredOutlineNode[] {
+    this.validateTreeInput(parts);
+    const swap = this.db.transaction((tree: readonly OutlineTreeInput[]) => {
+      const row = this.db
+        .prepare("SELECT MAX(version) AS maxVersion FROM outlines WHERE novel_id = ?;")
+        .get(novelId) as { maxVersion: number | null } | undefined;
+      const nextVersion = (row?.maxVersion ?? 0) + 1;
+      this.db
+        .prepare(
+          "UPDATE outlines SET is_current_version = 0, updated_at = ? WHERE novel_id = ? AND is_current_version = 1;",
+        )
+        .run(new Date().toISOString(), novelId);
+      return this.insertTree(novelId, tree, nextVersion);
+    });
+    return swap(parts);
+  }
+
+  /** 建树入参校验（两入库入口共用） */
+  private validateTreeInput(parts: readonly OutlineTreeInput[]): void {
     if (parts.length === 0) {
       throw new Error("大纲树为空，拒绝入库");
     }
     if (parts.some((p) => p.acts.length === 0)) {
       throw new Error("大纲树每部至少一幕，拒绝入库");
     }
-    const saveTree = this.db.transaction((tree: readonly OutlineTreeInput[]) => {
-      const created: StoredOutlineNode[] = [];
-      tree.forEach((part, partIndex) => {
-        const partNode = this.addOutlineNode(novelId, {
-          type: "part",
-          name: part.name,
-          summary: part.summary,
-          sort: partIndex + 1,
-        });
-        created.push(partNode);
-        part.acts.forEach((act, actIndex) => {
-          created.push(
-            this.addOutlineNode(novelId, {
-              type: "act",
-              name: act.name,
-              summary: act.summary,
-              keyPlotPoints: act.keyPlotPoints,
-              sort: actIndex + 1,
-              parentId: partNode.id,
-            }),
-          );
-        });
+  }
+
+  /** 按给定版本号逐节点插入两级树（须在事务内调用，sort 从 1 递增） */
+  private insertTree(
+    novelId: string,
+    parts: readonly OutlineTreeInput[],
+    version: number,
+  ): StoredOutlineNode[] {
+    const created: StoredOutlineNode[] = [];
+    parts.forEach((part, partIndex) => {
+      const partNode = this.addOutlineNode(novelId, {
+        type: "part",
+        name: part.name,
+        summary: part.summary,
+        sort: partIndex + 1,
+        version,
       });
-      return created;
+      created.push(partNode);
+      part.acts.forEach((act, actIndex) => {
+        created.push(
+          this.addOutlineNode(novelId, {
+            type: "act",
+            name: act.name,
+            summary: act.summary,
+            keyPlotPoints: act.keyPlotPoints,
+            sort: actIndex + 1,
+            parentId: partNode.id,
+            version,
+          }),
+        );
+      });
     });
-    return saveTree(parts);
+    return created;
   }
 
   /**

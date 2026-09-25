@@ -106,11 +106,13 @@ class AgentProcess {
     if (this.child) return;
     this.win = win;
     const repoRoot = resolveRepoRoot();
-    // 会话模式映射为 headless argv（create → 无参；plan-chapters → 传小说与幕节点 ID）
+    // 会话模式映射为 headless argv（create → 无参；plan-chapters / regen-outline → 传 ID）
     const sessionArgs =
       options.mode === "plan-chapters"
         ? ["plan-chapters", options.novelId, options.actNodeId]
-        : [];
+        : options.mode === "regen-outline"
+          ? ["regen-outline", options.novelId]
+          : [];
     const child = spawn("bun", ["run", "apps/agent/src/headless.ts", ...sessionArgs], {
       cwd: repoRoot,
       env: childEnv(),

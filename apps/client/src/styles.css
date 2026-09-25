@@ -206,11 +206,64 @@ body {
   cursor: default;
 }
 
+/* 大纲树行：三角切换 + 节点按钮横向排布（切换不触发选中） */
+.tree-row {
+  display: flex;
+  align-items: center;
+}
+
+.tree-row .tree-node {
+  flex: 1;
+  width: auto;
+}
+
+.tree-toggle {
+  flex: none;
+  width: 22px;
+  height: 24px;
+  margin: 0 0 0 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #6a737d;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tree-toggle:hover:not(:disabled) {
+  color: #1d4ed8;
+}
+
+.tree-toggle:disabled {
+  cursor: default;
+  color: #b6bcc4;
+}
+
 .tree-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 10px 12px 3px;
   font-size: 12px;
   font-weight: 600;
   color: #6a737d;
+}
+
+/* 组头动作按钮（大纲刷新入口）：小号描边图标钮 */
+.tree-group-btn {
+  margin-left: auto;
+  padding: 1px 7px;
+  font-size: 12px;
+  border: 1px solid #d5d9df;
+  background: transparent;
+  border-radius: 6px;
+  color: #6a737d;
+  cursor: pointer;
+}
+
+.tree-group-btn:hover {
+  background: #eef0f3;
 }
 
 /* 右栏预览 */

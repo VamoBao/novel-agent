@@ -3,6 +3,8 @@ import type { NovelDetail, NovelListItem, OutlineNodeEntry } from "@novel/shared
 import { ChapterPlanFlow } from "./components/ChapterPlanFlow";
 import { CreationFlow } from "./components/CreationFlow";
 import { NovelListPanel } from "./components/NovelListPanel";
+import { OutlineRegenDialog } from "./components/OutlineRegenDialog";
+import { OutlineRegenFlow } from "./components/OutlineRegenFlow";
 import { PreviewPane } from "./components/PreviewPane";
 import { StructureTreePanel, type Selection } from "./components/StructureTreePanel";
 
@@ -18,6 +20,12 @@ interface ChapterPlanTarget {
   actName: string;
 }
 
+/** 大纲重新生成会话目标（弹框确认后转入会话页） */
+interface OutlineRegenTarget {
+  novelId: string;
+  novelName: string;
+}
+
 /**
  * 页面级切换：三栏浏览主页（左栏书库可汉堡折叠 / 中栏结构树 / 右栏内容预览）
  * 与两个独立整页会话：创作页（CreationFlow 新建小说问答流）和章节规划页
@@ -27,6 +35,9 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [creating, setCreating] = useState(false);
   const [chapterPlan, setChapterPlan] = useState<ChapterPlanTarget | null>(null);
+  /** 弹框确认中的重生成目标（非 null 时渲染 OutlineRegenDialog） */
+  const [regenConfirm, setRegenConfirm] = useState<OutlineRegenTarget | null>(null);
+  const [outlineRegen, setOutlineRegen] = useState<OutlineRegenTarget | null>(null);
 
   /** null = 列表加载中 */
   const [novels, setNovels] = useState<NovelListItem[] | null>(null);
@@ -148,6 +159,32 @@ export function App() {
     if (selectedId) void reloadDetail(selectedId);
   };
 
+  /** 大纲组头刷新按钮：打开重生成警告弹框（不动当前状态） */
+  const handleRegenOutline = (): void => {
+    if (!selectedId || !detail) return;
+    setRegenConfirm({ novelId: selectedId, novelName: detail.novel.name ?? "未命名小说" });
+  };
+
+  /** 弹框确认：进入大纲重新生成会话页 */
+  const handleRegenConfirmed = (): void => {
+    if (regenConfirm) setOutlineRegen(regenConfirm);
+    setRegenConfirm(null);
+  };
+
+  /** 大纲重生成完成：回浏览页刷新详情并重置选中（旧节点 ID 已降级失效，结构树显示新版本） */
+  const handleRegenFinished = (novelId: string): void => {
+    setOutlineRegen(null);
+    setSelection(null);
+    void reloadDetail(novelId);
+  };
+
+  /** 返回浏览页：终止 agent 并刷新详情（若已换版同样重置选中） */
+  const handleCloseRegen = (): void => {
+    setOutlineRegen(null);
+    setSelection(null);
+    if (selectedId) void reloadDetail(selectedId);
+  };
+
   /** 书库管理操作：失败回显到书库错误区，成功后刷新列表保持选中 */
   const handleRename = async (id: string, name: string): Promise<void> => {
     try {
@@ -208,6 +245,18 @@ export function App() {
       </div>
     );
   }
+  if (outlineRegen) {
+    return (
+      <div className="app create-app">
+        <OutlineRegenFlow
+          novelId={outlineRegen.novelId}
+          novelName={outlineRegen.novelName}
+          onFinished={handleRegenFinished}
+          onClose={handleCloseRegen}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -248,6 +297,7 @@ export function App() {
             error={detailError}
             selection={selection}
             onSelect={setSelection}
+            onRegenOutline={handleRegenOutline}
           />
         </nav>
         <main className="preview-pane">
@@ -260,6 +310,14 @@ export function App() {
           />
         </main>
       </div>
+
+      {regenConfirm ? (
+        <OutlineRegenDialog
+          novelName={regenConfirm.novelName}
+          onCancel={() => setRegenConfirm(null)}
+          onConfirm={handleRegenConfirmed}
+        />
+      ) : null}
     </div>
   );
 }

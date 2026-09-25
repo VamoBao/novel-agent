@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { PROTOCOL_VERSION, type AgentMessage } from "@novel/shared";
-import { createNovel, planActChapters } from "./workflows";
+import { createNovel, planActChapters, regenerateOutline } from "./workflows";
 import { UserAbortedError } from "./ui/aborted";
 import { ProtocolChannel } from "./ui/protocol-channel";
 import { OUTPUT_DIR } from "./output/outline-writer";
@@ -10,11 +10,15 @@ import { OUTPUT_DIR } from "./output/outline-writer";
  * 由宿主进程（Electron main）spawn，生命周期随 stdin 关闭或 SIGTERM 结束；
  * 数据路径由宿主经环境变量传入绝对路径（NOVEL_DB_PATH / NOVEL_OUTPUT_DIR），hello 回显校验。
  * 会话模式经 argv 选择（对齐 query CLI 传参先例，协议消息 schema 不动）：
- * 无参 = 新建小说全流程；`plan-chapters <novelId> <actNodeId>` = 既有小说单幕章节规划。
+ * 无参 = 新建小说全流程；`plan-chapters <novelId> <actNodeId>` = 既有小说单幕章节规划；
+ * `regen-outline <novelId>` = 既有小说大纲重新生成（新版本入库，旧版本归档）。
  */
 
 /** 会话模式：与 client 侧 AgentStartOptions（@novel/shared）一一对应 */
-type Session = { kind: "create" } | { kind: "plan-chapters"; novelId: string; actNodeId: string };
+type Session =
+  | { kind: "create" }
+  | { kind: "plan-chapters"; novelId: string; actNodeId: string }
+  | { kind: "regen-outline"; novelId: string };
 
 function parseSession(argv: string[]): Session {
   if (argv.length === 0) return { kind: "create" };
@@ -22,10 +26,27 @@ function parseSession(argv: string[]): Session {
   if (mode === "plan-chapters" && argv.length === 3 && novelId && actNodeId) {
     return { kind: "plan-chapters", novelId, actNodeId };
   }
+  if (mode === "regen-outline" && argv.length === 2 && novelId) {
+    return { kind: "regen-outline", novelId };
+  }
   process.stderr.write(
-    `NOVEL_AGENT_FATAL: 无法识别的启动参数：${argv.join(" ")}（用法：headless.ts [plan-chapters <novelId> <actNodeId>]）\n`,
+    `NOVEL_AGENT_FATAL: 无法识别的启动参数：${argv.join(" ")}（用法：headless.ts [plan-chapters <novelId> <actNodeId>] [regen-outline <novelId>]）\n`,
   );
   process.exit(1);
+}
+
+/** 执行会话并返回小说 ID（三种会话共用 run_finished 收尾） */
+async function runSession(session: Session, channel: ProtocolChannel): Promise<string> {
+  switch (session.kind) {
+    case "create":
+      return (await createNovel({ channel })).id;
+    case "plan-chapters":
+      return (
+        await planActChapters({ channel, novelId: session.novelId, actNodeId: session.actNodeId })
+      ).novelId;
+    case "regen-outline":
+      return (await regenerateOutline({ channel, novelId: session.novelId })).novelId;
+  }
 }
 
 async function main(): Promise<void> {
@@ -79,17 +100,8 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => process.exit(0));
 
   try {
-    // 两种会话共用同一收尾：run_finished 携带小说 ID（client 据此刷新书库/详情）
-    const novelId =
-      session.kind === "create"
-        ? (await createNovel({ channel })).id
-        : (
-            await planActChapters({
-              channel,
-              novelId: session.novelId,
-              actNodeId: session.actNodeId,
-            })
-          ).novelId;
+    // 三种会话共用同一收尾：run_finished 携带小说 ID（client 据此刷新书库/详情）
+    const novelId = await runSession(session, channel);
     send({
       type: "run_finished",
       novelId,
