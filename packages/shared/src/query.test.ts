@@ -87,16 +87,34 @@ describe("novelDeletedResultSchema", () => {
 });
 
 describe("characterEntrySchema", () => {
-  test("角色卡平铺 id 后通过校验", () => {
+  test("角色卡平铺 id 与 version 后通过校验", () => {
     const entry = characterEntrySchema.parse({
       ...validCharacter,
       id: "0199c0de-0000-7000-8000-000000000002",
+      version: 1,
     });
     expect(entry.basicInfo.name).toBe("林澜");
+    expect(entry.version).toBe(1);
   });
 
   test("缺少 id 的裸角色卡被拒绝", () => {
     expect(() => characterEntrySchema.parse(validCharacter)).toThrow();
+  });
+
+  test("缺少 version / version 为 0 被拒绝", () => {
+    expect(() =>
+      characterEntrySchema.parse({
+        ...validCharacter,
+        id: "0199c0de-0000-7000-8000-000000000002",
+      }),
+    ).toThrow();
+    expect(() =>
+      characterEntrySchema.parse({
+        ...validCharacter,
+        id: "0199c0de-0000-7000-8000-000000000002",
+        version: 0,
+      }),
+    ).toThrow();
   });
 });
 
@@ -139,7 +157,9 @@ describe("novelDetailSchema", () => {
         background: { geography: "维斯特洛大陆" },
         taboos: ["不能出现现代科技物品"],
       },
-      characters: [{ ...validCharacter, id: "0199c0de-0000-7000-8000-000000000002" }],
+      characters: [
+        { ...validCharacter, id: "0199c0de-0000-7000-8000-000000000002", version: 3 },
+      ],
       outlineNodes: validOutlineNodes,
     });
     expect(detail.characters).toHaveLength(1);

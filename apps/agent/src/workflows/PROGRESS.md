@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-09-25 [feat] 角色 AI 润色工作流 polishCharacter（跨模块需求，任务包经用户确认，决策见根 DECISIONS，任务清单见根 PROGRESS 当日条目）：`polish-character.ts`——前置校验（小说存在 / 角色存在且同小说（编辑流传 ID，新建流不传）/ 世界观已确认）→ generateObject 以表单当前值 + 世界观单轮全字段润色（prompt 约束忠实原意、姓名不变、必填语义不变、空可选项补全；无确认门——确认在客户端表单层）；headless 第四会话模式 `polish-character <novelId> [characterId] <formJson>`（表单 JSON 过 characterSchema 校验，结果经协议新增 polish-result 消息回传，run_finished 收尾）。AC：typecheck 3 工程 / lint / 全量 180 用例过（本编排集成 3：编辑流 prompt 含表单与世界观断言 / 新建流 / 前置校验四类可读错误）；真实 LLM 协议级端到端（临时库，`scripts/polish-e2e.ts`）——polish-result 全字段填充、库零写入、run_finished。数据层版本化与客户端表单部分见根条目
+
 - 2026-09-25 [feat] 大纲重新生成工作流 regenerateOutline（跨模块需求，任务包经用户确认，决策见根 DECISIONS，本模块承担编排侧）：`regen-outline.ts`——前置校验（小说存在 / 世界观已确认 / 至少一角色）→ askInt 幕数/部数表单 → 复用 createOutline（入参松绑为 `OutlineContext`：genre/audience/coreConflict 可选，重生成仅喂库内 worldview+characters、不喂旧大纲）→ `saveOutlineTreeNewVersion` 单事务版本切换（旧树与旧章降级 is_current_version=0 归档、新树 version=max+1 当前）→ 覆盖产物 + 回填 description。headless 新增 `regen-outline <novelId>` 第三会话模式。store 侧 `saveOutlineTreeNewVersion` + 单测 3（降级含旧章 / 多版迭代跨小说隔离 / 回滚与入参校验）。AC：typecheck 3 工程 / lint / 172 用例全过（本编排集成 3：新版本入库断言 / 确认循环 / 三类前置校验）；真实 LLM 协议级端到端（临时库实跑）——表单 3 幕 1 部、确认后第 2 版 1 部 3 幕入库、产物覆盖、run_finished。客户端树收起 / 弹框 / 会话页部分见根条目
 
 - 2026-09-25 [feat] createNovel 移除大纲后的自动第一幕章节规划段（用户直接决策，见根 DECISIONS）：大纲确认入库落盘后会话直接收尾（run_finished），收尾 notify 指引从书库幕节点「规划本幕章节」入口手动发起；planChapters / saveChapters / `chapter` 阶段与 chapter-plan 视图保留，归单幕规划会话（planActChapters）使用；集成测试删章节段断言（视图序列无 chapter-plan、库无章节点、断言手动指引通知）。联动：客户端 StageBar 七 → 六阶段。AC 与真实 LLM 待复验项见根 PROGRESS 当日条目

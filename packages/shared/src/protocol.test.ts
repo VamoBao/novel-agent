@@ -64,6 +64,26 @@ describe("protocol schemas", () => {
     expect(
       agentMessageSchema.parse({ type: "run_finished", novelId: "n1", outputPath: "/abs/out.json" }),
     ).toMatchObject({ novelId: "n1" });
+    expect(
+      agentMessageSchema.parse({
+        type: "polish-result",
+        character: {
+          basicInfo: { name: "林澜", gender: "女" },
+          core: { desire: "找到妹妹", fear: "失去同伴", narrativeRole: "主角" },
+          background: "殖民城市长大的孤儿领航员",
+          creationPurpose: "驱动主线冲突的核心视角",
+          endingDirection: "公开真相并拯救城市",
+          personality: "外冷内热",
+        },
+      }),
+    ).toMatchObject({ type: "polish-result" });
+    // 角色卡缺必填字段（core）的润色结果被拒绝
+    expect(
+      agentMessageSchema.safeParse({
+        type: "polish-result",
+        character: { basicInfo: { name: "林澜" } },
+      }).success,
+    ).toBe(false);
     expect(agentMessageSchema.parse({ type: "error", message: "x", fatal: true })).toMatchObject({
       fatal: true,
     });

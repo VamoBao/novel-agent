@@ -161,7 +161,7 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     await rm(dir, { recursive: true, force: true });
   });
 
-  test("v4 旧库经 openDatabase 迁移：数据保留、新列可用、版本升到 8", async () => {
+  test("v4 旧库经 openDatabase 迁移：数据保留、新列可用、版本升到 9", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-mig-"));
     const dbPath = join(dir, "v4.db");
     // 手工构造 v4 形态的库：旧 novels 结构（无 pinned / favorite）+ 旧 outlines 结构
@@ -191,12 +191,35 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE characters (
+        id TEXT PRIMARY KEY,
+        novel_id TEXT NOT NULL REFERENCES novels(id),
+        name TEXT NOT NULL,
+        gender TEXT,
+        appearance TEXT,
+        desire TEXT NOT NULL,
+        fear TEXT NOT NULL,
+        narrative_role TEXT NOT NULL,
+        background TEXT NOT NULL,
+        personality TEXT,
+        character_goal TEXT,
+        creation_purpose TEXT NOT NULL,
+        trajectory TEXT,
+        ending_direction TEXT NOT NULL,
+        relationships TEXT,
+        created_at TEXT NOT NULL
+      );
     `);
     legacy
       .prepare(
         "INSERT INTO novels (id, name, author, description, created_at, updated_at) VALUES (?, ?, NULL, NULL, ?, ?);",
       )
       .run("aaaaaaaa-0000-7000-8000-000000000004", "旧世界之书", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+    legacy
+      .prepare(
+        "INSERT INTO characters (id, novel_id, name, desire, fear, narrative_role, background, creation_purpose, ending_direction, created_at) VALUES ('eeeeeeee-0000-7000-8000-000000000009', ?, '旧角色', '旧渴望', '旧恐惧', '主角', '旧背景', '旧创作目的', '旧结局方向', ?);",
+      )
+      .run("aaaaaaaa-0000-7000-8000-000000000004", "2026-01-01T00:00:00Z");
     legacy.exec("PRAGMA user_version = 4;");
     legacy.close();
 
@@ -208,9 +231,15 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     expect(record?.favorite).toBe(false);
     store.setNovelPinned("aaaaaaaa-0000-7000-8000-000000000004", true);
     expect(store.listNovels()[0]?.pinned).toBe(true);
+    // 8→9 段：characters 补 version 列，旧行默认版本 1
+    const legacyChar = db
+      .query("SELECT name, version FROM characters WHERE id = 'eeeeeeee-0000-7000-8000-000000000009'")
+      .get() as { name: string; version: number };
+    expect(legacyChar.name).toBe("旧角色");
+    expect(legacyChar.version).toBe(1);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(8);
+    ).toBe(9);
     db.close();
     await rm(dir, { recursive: true, force: true });
   });

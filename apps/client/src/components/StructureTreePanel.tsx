@@ -17,6 +17,8 @@ interface StructureTreePanelProps {
   onSelect: (selection: Selection) => void;
   /** 「📖 大纲」组头的重新生成入口（有大纲时显示刷新按钮）；App 接线到警告弹框 */
   onRegenOutline?: () => void;
+  /** 「👥 角色」组头的「＋ 新增角色」入口（App 接线到右栏新建态）；不传则不显示按钮 */
+  onAddCharacter?: () => void;
 }
 
 interface TreeNodeProps {
@@ -113,9 +115,9 @@ function renderOutlineNodes(
 
 /**
  * 中栏结构树：世界观 / 角色 / 大纲（部→幕→章，读 outlines 表当前版本节点）三类组成节点。
- * 大纲分组可整组收起（组头三角，默认展开），组内部/幕可逐节点收起（默认全展开），
- * 收起态均会话内保持；大纲按节点选中预览（视图粒度 = 单节点）；
- * 组头刷新按钮触发大纲重新生成（经弹框确认）。
+ * 角色与大纲分组均可整组收起（组头三角，默认展开、会话内保持），大纲组内部/幕可逐节点
+ * 收起（默认全展开）；角色组头附「＋ 新增角色」入口；大纲按节点选中预览（视图粒度 =
+ * 单节点）；组头刷新按钮触发大纲重新生成（经弹框确认）。
  */
 export function StructureTreePanel({
   detail,
@@ -124,11 +126,14 @@ export function StructureTreePanel({
   selection,
   onSelect,
   onRegenOutline,
+  onAddCharacter,
 }: StructureTreePanelProps) {
   /** 收起的大纲节点 ID 集合（默认空 = 全展开），会话内保持 */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   /** 大纲分组整组收起（默认展开），会话内保持 */
   const [groupCollapsed, setGroupCollapsed] = useState(false);
+  /** 角色分组整组收起（默认展开），会话内保持 */
+  const [charsCollapsed, setCharsCollapsed] = useState(false);
   const toggleCollapse = (id: string): void => {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -160,10 +165,26 @@ export function StructureTreePanel({
             onClick={detail.worldview ? () => onSelect({ kind: "worldview" }) : undefined}
           />
 
-          <div className="tree-group">👥 角色</div>
+          <div className="tree-group">
+            {detail.characters.length > 0 ? (
+              <button
+                className="tree-toggle"
+                title={charsCollapsed ? "展开角色" : "收起角色"}
+                onClick={() => setCharsCollapsed((v) => !v)}
+              >
+                {charsCollapsed ? "▸" : "▾"}
+              </button>
+            ) : null}
+            <span>👥 角色</span>
+            {onAddCharacter ? (
+              <button className="tree-group-btn" title="新增角色" onClick={onAddCharacter}>
+                ＋
+              </button>
+            ) : null}
+          </div>
           {detail.characters.length === 0 ? (
             <TreeNode label="（暂无角色）" depth={1} muted />
-          ) : (
+          ) : charsCollapsed ? null : (
             detail.characters.map((character) => (
               <TreeNode
                 key={character.id}

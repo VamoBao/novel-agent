@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AgentMessage, AgentStartOptions, NovelDetail, NovelListItem } from "@novel/shared";
+import type {
+  AgentMessage,
+  AgentStartOptions,
+  Character,
+  CharacterEntry,
+  NovelDetail,
+  NovelListItem,
+} from "@novel/shared";
 
 /**
  * 渲染进程唯一入口：contextBridge 暴露最小 API。
@@ -35,6 +42,11 @@ contextBridge.exposeInMainWorld("agent", {
     ipcRenderer.invoke("library:setFavorite", novelId, favorite),
   deleteNovel: (novelId: string): Promise<{ deleted: string }> =>
     ipcRenderer.invoke("library:delete", novelId),
+  /** 角色管理（编辑 / 新增）：返回带 version 的角色条目（编辑旧卡快照归档、version+1；新增 version=1） */
+  addCharacter: (novelId: string, character: Character): Promise<CharacterEntry> =>
+    ipcRenderer.invoke("library:addCharacter", novelId, character),
+  updateCharacter: (novelId: string, characterId: string, character: Character): Promise<CharacterEntry> =>
+    ipcRenderer.invoke("library:updateCharacter", novelId, characterId, character),
   /** 诊断钩子：无头冒烟自动打开创作覆盖层（preload 沙箱关闭，可直接读环境变量） */
   isAutostart: (): boolean => process.env.NOVEL_CLIENT_AUTOSTART === "1",
   /** 诊断钩子：无头冒烟自动选中小说并预览首个可用节点 */

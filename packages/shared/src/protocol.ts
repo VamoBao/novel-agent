@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { characterSchema } from "./character";
 import { viewSchema } from "./views";
 
 /** stdio JSON 行协议版本；hello 时不一致由 client 拒绝继续 */
@@ -54,7 +55,7 @@ export const askSchema = z.discriminatedUnion("type", [
 ]);
 export type Ask = z.infer<typeof askSchema>;
 
-/** agent → client 消息（每行一个 JSON 对象）；run_finished 为一次会话正常结束（新建创作 / 单幕章节规划） */
+/** agent → client 消息（每行一个 JSON 对象）；run_finished 为一次会话正常结束（新建创作 / 单幕章节规划 / 大纲重生成 / 角色润色） */
 export const agentMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("hello"),
@@ -71,6 +72,8 @@ export const agentMessageSchema = z.discriminatedUnion("type", [
     novelId: z.string(),
     outputPath: z.string(),
   }),
+  /** 角色润色结果：LLM 全字段润色后的完整角色卡（客户端回填表单，不自动入库） */
+  z.object({ type: z.literal("polish-result"), character: characterSchema }),
   z.object({ type: z.literal("error"), message: z.string(), fatal: z.boolean() }),
 ]);
 export type AgentMessage = z.infer<typeof agentMessageSchema>;
@@ -89,9 +92,12 @@ export type ClientMessage = z.infer<typeof clientMessageSchema>;
  * agent 会话启动参数（client main → headless argv 的映射契约，非协议消息；纯类型零运行时）。
  * renderer 经 agent:start IPC 传入，main 映射为 spawn 参数：
  * create → 无参（新建小说全流程）；plan-chapters → `plan-chapters <novelId> <actNodeId>`；
- * regen-outline → `regen-outline <novelId>`（大纲重新生成，新版本入库旧版本归档）。
+ * regen-outline → `regen-outline <novelId>`（大纲重新生成，新版本入库旧版本归档）；
+ * polish-character → `polish-character <novelId> [characterId] <formJson>`（角色 AI 润色：
+ * characterId 缺省 = 新建流润色（库中尚无此角色），formJson 为表单当前值的角色卡 JSON）。
  */
 export type AgentStartOptions =
   | { mode: "create" }
   | { mode: "plan-chapters"; novelId: string; actNodeId: string }
-  | { mode: "regen-outline"; novelId: string };
+  | { mode: "regen-outline"; novelId: string }
+  | { mode: "polish-character"; novelId: string; characterId?: string; formJson: string };

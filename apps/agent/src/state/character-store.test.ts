@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -115,6 +116,105 @@ describe("CharacterStore", () => {
     expect(listed[0]?.character.basicInfo.name).toBe("陈默");
     expect(listed[0]?.character.creationPurpose).toBe("承载打破垄断的主线");
     s2.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe("CharacterStore 版本化编辑", () => {
+  test("getCharacter 按主键取回 / 未命中返回 null", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-char-edit0-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "dddddddd-1000-7000-8000-000000000001";
+    const store = setup(dbPath, novelId);
+    const added = store.addCharacter(novelId, makeCharacter("陈默"));
+    expect(added.version).toBe(1);
+
+    const got = store.getCharacter(added.id);
+    expect(got?.character.basicInfo.name).toBe("陈默");
+    expect(got?.version).toBe(1);
+    expect(got?.novelId).toBe(novelId);
+    expect(store.getCharacter("ffffffff-0000-7000-8000-000000000001")).toBeNull();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("updateCharacter 主行更新、version 递增、旧卡快照归档", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-char-edit1-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "dddddddd-2000-7000-8000-000000000001";
+    const store = setup(dbPath, novelId);
+    const added = store.addCharacter(novelId, makeCharacter("陈默"));
+
+    const revised = characterSchema.parse({
+      ...makeCharacter("陈默"),
+      personality: "坚韧寡言，屡败屡战",
+      background: "青云市集的散修少年，幼年失怙",
+    });
+    const updated = store.updateCharacter(novelId, added.id, revised);
+    expect(updated.version).toBe(2);
+    expect(updated.id).toBe(added.id);
+    expect(updated.character.background).toBe("青云市集的散修少年，幼年失怙");
+
+    // 再编辑一次：版本连续递增、快照两条（v1 与 v2）
+    store.updateCharacter(novelId, added.id, makeCharacter("陈默"));
+    expect(store.getCharacter(added.id)?.version).toBe(3);
+    const raw = new Database(dbPath, { readonly: true });
+    const snaps = raw
+      .query("SELECT version, character FROM character_versions WHERE character_id = ? ORDER BY version ASC;")
+      .all(added.id) as { version: number; character: string }[];
+    expect(snaps.map((s) => s.version)).toEqual([1, 2]);
+    expect((JSON.parse(snaps[0]!.character) as { background: string }).background).toBe(
+      "青云市集的散修少年",
+    );
+    expect((JSON.parse(snaps[1]!.character) as { personality: string }).personality).toBe(
+      "坚韧寡言，屡败屡战",
+    );
+    raw.close();
+
+    // 列表读取反映主行最新值；id / novel_id / created_at 稳定
+    const listed = store.listCharacters(novelId);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.version).toBe(3);
+    expect(listed[0]?.createdAt).toBe(added.createdAt);
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("updateCharacter 角色不存在 / 异小说均报可读错误", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-char-edit2-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "dddddddd-3000-7000-8000-000000000001";
+    const otherNovelId = "dddddddd-3000-7000-8000-000000000002";
+    const store = setup(dbPath, novelId);
+    NovelStore.open(dbPath).createNovel({ id: otherNovelId });
+    const added = store.addCharacter(novelId, makeCharacter("陈默"));
+
+    expect(() =>
+      store.updateCharacter(novelId, "ffffffff-0000-7000-8000-000000000001", makeCharacter("影子")),
+    ).toThrow("角色不存在，无法更新");
+    expect(() =>
+      store.updateCharacter(otherNovelId, added.id, makeCharacter("陈默")),
+    ).toThrow("角色不属于该小说，无法更新");
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("updateCharacter 入参过不了 schema 时整体回滚（不留快照、主行不变）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-char-edit3-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "dddddddd-4000-7000-8000-000000000001";
+    const store = setup(dbPath, novelId);
+    const added = store.addCharacter(novelId, makeCharacter("陈默"));
+
+    const invalid = { ...makeCharacter("陈默"), background: "" } as unknown as Character;
+    expect(() => store.updateCharacter(novelId, added.id, invalid)).toThrow();
+
+    expect(store.getCharacter(added.id)?.version).toBe(1);
+    const raw = new Database(dbPath, { readonly: true });
+    const count = raw.query("SELECT COUNT(*) AS c FROM character_versions").get() as { c: number };
+    expect(count.c).toBe(0);
+    raw.close();
+    store.close();
     await rm(dir, { recursive: true, force: true });
   });
 });

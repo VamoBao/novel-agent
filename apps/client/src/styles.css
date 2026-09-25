@@ -532,6 +532,86 @@ button.danger {
   font-size: 13px;
 }
 
+/* 角色编辑 / 新建表单（CharacterEditForm，编辑与新建共用） */
+.character-form {
+  background: #fff;
+  border: 1px solid #e4e7eb;
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin: 10px 0;
+}
+
+.character-form h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.character-form .form-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.character-form .field label {
+  display: block;
+  font-size: 12px;
+  color: #6a737d;
+  margin-bottom: 2px;
+}
+
+.character-form .field .req {
+  color: #b42318;
+}
+
+.character-form .field.invalid label {
+  color: #b42318;
+}
+
+/* 字段选择器带 .field 前缀提高特异性，压过全局 input:not([type]) 规则 */
+.character-form .field input,
+.character-form .field textarea {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.character-form .field textarea {
+  resize: vertical;
+}
+
+.character-form .form-error {
+  margin: 8px 0 0;
+  color: #b42318;
+  font-size: 12px;
+}
+
+.character-form .form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.character-form .form-actions button {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+/* 角色卡预览的编辑入口行（卡片上方右对齐） */
+.preview-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 2px 0 4px;
+}
+
+.preview-actions button {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
 /* 幕预览「规划本幕章节」入口：两张卡片下方右对齐
    （旧数据幕禁用态沿用全局 button:disabled 样式） */
 .act-actions {

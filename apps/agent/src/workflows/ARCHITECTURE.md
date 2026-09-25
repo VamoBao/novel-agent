@@ -14,6 +14,9 @@ apps/agent/src/workflows/
 ├── plan-act-chapters.ts      # 单幕章节规划编排 planActChapters：校验并从库组装上下文 →
 │                             #   复用章节 Agent（确认门）→ saveChapters 幕下建章；
 │                             #   客户端幕节点「规划本幕章节」入口的会话（headless plan-chapters 模式）
+├── polish-character.ts       # 角色 AI 润色编排 polishCharacter：读库校验（小说/角色（传 ID 时）/世界观）
+│                             #   → generateObject 以表单当前值+世界观单轮全字段润色（无确认门，
+│                             #   结果经 headless polish-result 消息回传客户端表单，不自动入库）
 ├── regen-outline.ts          # 大纲重新生成编排 regenerateOutline：读库校验（小说/世界观/角色）→
 │                             #   幕数/部数表单 → 复用大纲 Agent（仅喂库内数据）→
 │                             #   saveOutlineTreeNewVersion 新版本入库（旧版与旧章降级归档）；
@@ -43,6 +46,7 @@ apps/agent/src/workflows/
 - `create-novel.ts` → `ai`（generateObject）、`providers/`（model）、`ui/`（UiChannel：全部提问 / 确认 / 展示的唯一出口）、`@novel/shared`（schemas）、`state/`（types / id / memory-store / novel-store / character-store / worldview-store / outline-store）、`output/`（outline-writer）、本模块 `agents/`
 - `plan-act-chapters.ts` → `ui/`（UiChannel 注入）、`state/`（novel-store / outline-store）、`output/`（outline-writer readOutlineTheme）、本模块 `agents/`（planChapters）——不直接触碰 `ai` / `providers/`（模型调用都在章节 Agent 内）；store 可注入（缺省默认 SQLite store，测试替换）
 - `regen-outline.ts` → `ui/`（UiChannel 注入）、`state/`（novel-store / worldview-store / character-store / outline-store）、`output/`（outline-writer saveOutline）、本模块 `agents/`（createOutline）——不直接触碰 `ai` / `providers/`；store 可注入（缺省默认 SQLite store，测试替换）
+- `polish-character.ts` → `providers/`（model——单轮 generateObject，无 ReAct Agent）、`ui/`（UiChannel 注入）、`state/`（novel-store / worldview-store / character-store）；store 可注入（缺省默认 SQLite store，测试替换）
 - `agents/*.ts` → `ai`（tool）、`zod`、`src/agents/`（runReactAgent）、`tools/`（ask-user 工厂，经注入的 channel 提问）、`ui/`（UiChannel 注入：确认门携带结构化视图）、`@novel/shared`（schemas）、`state/types`（仅 outline-agent 需要 NovelParams 类型）
 - 下层不得反向依赖本模块；`createCharacter` 目前仅供模块内编排使用，未入 `index.ts` 出口
 - `CreateNovelOptions` 注入 `channel`（必填）与 `store / characterStore / worldviewStore / novelStore / outlineStore`，store 缺省用内存 state store + 各默认 SQLite store（测试与未来换实现不改编排代码）

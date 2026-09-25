@@ -1,3 +1,25 @@
+## 2026-09-25 角色版本管理采用「主行不变 + character_versions 快照表」（而非照搬大纲的换行制）
+
+- **背景**：角色编辑需求要求「和大纲的类似」做 version 管理。大纲的机制是同表多版本行并存（新版本 = 新行新 ID + is_current_version 标记，旧行降级归档）；但角色与大纲树结构不同——角色没有父级层级，且角色 ID 已被别处引用（foreshadows.character_ids 服务角色 JSON 列，伏笔浏览/回收尚未建 UI 但数据层已投产），客户端选中态也以 characterId 为键。
+- **备选方案**：
+  1. 照搬大纲换行制：需新增 lineage 列归组同角色各版本行，编辑后角色 ID 换代——伏笔引用悬空、客户端选中失效需二次重选、listCharacters 需 currentOnly 过滤；
+  2. 主行不变 + 快照表：characters 加 version 列，编辑时单事务把旧卡整卡 JSON 快照写入新表 character_versions（记编辑前版本号），主行全量更新并 version+1。
+- **结论**：采用方案 2。版本管理语义与大纲等价（版本号递增、旧版本可追溯，历史浏览/回滚 UI 为后续需求），而 ID 稳定使全部外部引用与选中态零失效；代价是角色与大纲的版本机制不同构（大纲树形结构必须行制归档，角色平铺结构用快照更贴合）。
+
+## 2026-09-25 角色 AI 润色走 headless 协议第四会话模式（而非一次性 LLM CLI）
+
+- **背景**：润色是单轮 LLM 结构化输出（无确认门，确认在客户端表单层），通道可选：扩展 query.ts 类一次性 CLI（main IPC spawn，stdout JSON 单次往返）或扩展 headless 协议会话。
+- **备选方案**：
+  1. 一次性 CLI：不碰协议与 AgentStartOptions，但需要新增「长超时 LLM IPC」类别（现有 library IPC 8s 超时对 LLM 不够），且 IPC invoke 无取消语义——用户取消编辑时进程仍在烧 token；
+  2. headless 第四会话模式 `polish-character <novelId> [characterId] <formJson>`：复用 AgentProcess 单例、消息 zod 复验、生命周期管理；表单 JSON 随 argv 传入（几 KB 量级，argv 上限内），结果经新增 `polish-result` 协议消息先行回传，run_finished 收尾。
+- **结论**：采用方案 2。agent:stop 可真正中止会话（用户取消编辑即停，不浪费 token）；协议 schema 为 discriminatedUnion 超集扩展，PROTOCOL_VERSION 不动（client 与 agent 同仓同版发布）；代价是「浏览页内联会话」复用了整页会话的单例 AgentProcess——浏览页与创作页本就互斥挂载，无实际冲突。
+
+## 2026-09-25 新增角色直接表单提交，不走创作流多轮确认门
+
+- **背景**：角色组头「＋」新增角色复用编辑表单；创作流内角色经 ReAct Agent 逐字段「发散→确认→保存」多轮收集。
+- **备选方案**：新建也走确认门（增加交互轮次，与表单「可编辑后提交」的语义重复）；提交前弹确认框。
+- **结论**：表单提交即入库（version=1、无快照），与编辑提交一致；后续角色删除/管理能力可兜底误建。创作流内角色收集逻辑不动。
+
 # 重大决策记录
 
 记录「为什么」而非「做了什么」：决策背景、备选方案、权衡依据与结论。

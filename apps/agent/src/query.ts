@@ -1,14 +1,18 @@
 import { unlinkSync } from "node:fs";
 import {
+  characterEntrySchema,
+  characterSchema,
   novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
+  type Character,
+  type CharacterEntry,
   type NovelDeletedResult,
   type NovelDetail,
   type NovelListItem,
   type OutlineNodeEntry,
 } from "@novel/shared";
-import { CharacterStore } from "./state/character-store";
+import { CharacterStore, type StoredCharacter } from "./state/character-store";
 import { openDatabase } from "./state/db";
 import { NovelStore, type NovelRecord } from "./state/novel-store";
 import { OutlineStore } from "./state/outline-store";
@@ -26,6 +30,8 @@ import { OUTPUT_DIR, outlineFilePath } from "./output/outline-writer";
  *   大纲读 outlines 表当前版本节点——output 产物仅供留存，不再决定浏览读取）
  * - 管理：`rename <novelId> <name>` / `pin|unpin <novelId>` / `favorite|unfavorite <novelId>`
  *   / `delete <novelId>`（级联删除关联数据并清理 output 产物）
+ *   / `add-character <novelId> <角色卡JSON>`（新增角色，version=1）
+ *   / `update-character <novelId> <characterId> <角色卡JSON>`（版本化编辑角色，旧卡快照归档）
  *
  * 连接统一走 openDatabase：4→5 起有保数据迁移，纯浏览路径也须能完成版本升级
  * （readonly 连接会在旧库上因缺列报错）。
@@ -59,7 +65,7 @@ export function buildNovelDetail(
   const worldview = new WorldviewStore(db).getWorldview(novelId)?.worldview ?? null;
   const characters = new CharacterStore(db)
     .listCharacters(novelId)
-    .map((stored) => ({ id: stored.id, ...stored.character }));
+    .map((stored) => ({ id: stored.id, version: stored.version, ...stored.character }));
   const outlineNodes: OutlineNodeEntry[] = new OutlineStore(db)
     .listOutlineNodes(novelId, { currentOnly: true })
     .map((stored) => ({
@@ -120,6 +126,54 @@ export function deleteNovel(
   return novelDeletedResultSchema.parse({ deleted: novelId });
 }
 
+/** 角色卡 JSON → schema 校验后的 Character（库表管理命令共用；错误信息带首个 issue 定位） */
+function parseCharacterJson(json: string): Character {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch (error) {
+    throw new Error(`角色卡 JSON 解析失败：${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
+  }
+  const result = characterSchema.safeParse(raw);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new Error(
+      `角色卡数据不合法（${issue?.path.join(".") || "根"}）：${issue?.message ?? "未知问题"}`,
+    );
+  }
+  return result.data;
+}
+
+function toCharacterEntry(stored: StoredCharacter): CharacterEntry {
+  return characterEntrySchema.parse({ id: stored.id, version: stored.version, ...stored.character });
+}
+
+/** add-character 载荷：入库新角色（version=1，无历史快照），返回角色条目 */
+export function addCharacterEntry(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  characterJson: string,
+): CharacterEntry {
+  if (!new NovelStore(db).getNovel(novelId)) {
+    throw new Error(`小说不存在，无法新增角色：${novelId}`);
+  }
+  const character = parseCharacterJson(characterJson);
+  return toCharacterEntry(new CharacterStore(db).addCharacter(novelId, character));
+}
+
+/** update-character 载荷：版本化更新角色（旧卡快照归档、version+1），返回更新后条目 */
+export function updateCharacterEntry(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  characterId: string,
+  characterJson: string,
+): CharacterEntry {
+  const character = parseCharacterJson(characterJson);
+  return toCharacterEntry(new CharacterStore(db).updateCharacter(novelId, characterId, character));
+}
+
 function main(argv: string[]): number {
   const [command, novelId, ...rest] = argv;
   const db = openDatabase();
@@ -152,6 +206,14 @@ function main(argv: string[]): number {
         if (!novelId) break;
         process.stdout.write(`${JSON.stringify(deleteNovel(db, novelId))}\n`);
         return 0;
+      case "add-character":
+        if (!novelId || rest.length !== 1 || !rest[0]) break;
+        process.stdout.write(`${JSON.stringify(addCharacterEntry(db, novelId, rest[0]))}\n`);
+        return 0;
+      case "update-character":
+        if (!novelId || rest.length !== 2 || !rest[0] || !rest[1]) break;
+        process.stdout.write(`${JSON.stringify(updateCharacterEntry(db, novelId, rest[0], rest[1]))}\n`);
+        return 0;
       default:
         break;
     }
@@ -159,7 +221,7 @@ function main(argv: string[]): number {
     db.close();
   }
   process.stderr.write(
-    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id>>\n",
+    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id> | add-character <novelId> <角色卡JSON> | update-character <novelId> <characterId> <角色卡JSON>>\n",
   );
   return 1;
 }

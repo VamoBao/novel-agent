@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { NovelDetail, NovelListItem, OutlineNodeEntry } from "@novel/shared";
+import type { CharacterEntry, NovelDetail, NovelListItem, OutlineNodeEntry } from "@novel/shared";
 import { ChapterPlanFlow } from "./components/ChapterPlanFlow";
 import { CreationFlow } from "./components/CreationFlow";
 import { NovelListPanel } from "./components/NovelListPanel";
@@ -35,6 +35,8 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [creating, setCreating] = useState(false);
   const [chapterPlan, setChapterPlan] = useState<ChapterPlanTarget | null>(null);
+  /** 右栏新建角色态（角色组头「＋」进入；提交/取消/改选节点退出） */
+  const [creatingCharacter, setCreatingCharacter] = useState(false);
   /** 弹框确认中的重生成目标（非 null 时渲染 OutlineRegenDialog） */
   const [regenConfirm, setRegenConfirm] = useState<OutlineRegenTarget | null>(null);
   const [outlineRegen, setOutlineRegen] = useState<OutlineRegenTarget | null>(null);
@@ -74,9 +76,10 @@ export function App() {
   // 选中小说变化 → 重新加载详情；切换时清空上一次的结构树选中
   useEffect(() => {
     if (!selectedId) {
-      setDetail(null);
-      setDetailError(null);
-      return;
+        setDetail(null);
+        setDetailError(null);
+        setCreatingCharacter(false);
+        return;
     }
     let cancelled = false;
     setDetailLoading(true);
@@ -112,6 +115,24 @@ export function App() {
       cancelled = true;
     };
   }, [selectedId]);
+
+  /** 结构树选中：同时退出新建角色态（新建中点击其他节点视为取消） */
+  const handleSelect = (next: Selection): void => {
+    setCreatingCharacter(false);
+    setSelection(next);
+  };
+
+  /** 新增角色提交成功：退出新建态、刷新详情并自动选中新角色 */
+  const handleCharacterCreated = (entry: CharacterEntry): void => {
+    setCreatingCharacter(false);
+    setSelection({ kind: "character", characterId: entry.id });
+    if (selectedId) void reloadDetail(selectedId);
+  };
+
+  /** 角色编辑提交成功：刷新详情（角色 id 稳定，选中与编辑态由 PreviewPane 收口） */
+  const handleCharacterSaved = (): void => {
+    if (selectedId) void reloadDetail(selectedId);
+  };
 
   /** 创作完成：回浏览页 → 刷新书库 → 自动选中新作（列表已含新作时） */
   const handleFinished = (novelId: string): void => {
@@ -296,8 +317,9 @@ export function App() {
             loading={detailLoading}
             error={detailError}
             selection={selection}
-            onSelect={setSelection}
+            onSelect={handleSelect}
             onRegenOutline={handleRegenOutline}
+            onAddCharacter={detail ? () => setCreatingCharacter(true) : undefined}
           />
         </nav>
         <main className="preview-pane">
@@ -307,6 +329,10 @@ export function App() {
             error={detailError}
             selection={selection}
             onPlanChapters={handlePlanChapters}
+            creatingCharacter={creatingCharacter}
+            onCreateCharacterSubmitted={handleCharacterCreated}
+            onCreateCharacterCancelled={() => setCreatingCharacter(false)}
+            onCharacterSaved={handleCharacterSaved}
           />
         </main>
       </div>

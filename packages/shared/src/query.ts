@@ -20,9 +20,10 @@ export const novelListItemSchema = z.object({
 });
 export type NovelListItem = z.infer<typeof novelListItemSchema>;
 
-/** 角色条目：角色卡 + 库表主键（客户端结构树节点 key 用） */
+/** 角色条目：角色卡 + 库表主键（客户端结构树节点 key 用）+ 版本号（编辑提交易主行递增，历史快照在 character_versions 表） */
 export const characterEntrySchema = characterSchema.extend({
   id: z.string().min(1).describe("characters 表主键（UUIDv7）"),
+  version: z.number().int().min(1).describe("角色当前版本号，从 1 起；编辑提交后递增"),
 });
 export type CharacterEntry = z.infer<typeof characterEntrySchema>;
 

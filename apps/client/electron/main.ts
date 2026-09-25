@@ -4,11 +4,14 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   agentMessageSchema,
+  characterEntrySchema,
   novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
   PROTOCOL_VERSION,
   type AgentStartOptions,
+  type Character,
+  type CharacterEntry,
   type NovelDetail,
   type NovelListItem,
 } from "@novel/shared";
@@ -106,13 +109,18 @@ class AgentProcess {
     if (this.child) return;
     this.win = win;
     const repoRoot = resolveRepoRoot();
-    // 会话模式映射为 headless argv（create → 无参；plan-chapters / regen-outline → 传 ID）
+    // 会话模式映射为 headless argv（create → 无参；plan-chapters / regen-outline → 传 ID；
+    // polish-character → 表单 JSON 随 argv 传入，编辑流带角色 ID、新建流不带）
     const sessionArgs =
       options.mode === "plan-chapters"
         ? ["plan-chapters", options.novelId, options.actNodeId]
         : options.mode === "regen-outline"
           ? ["regen-outline", options.novelId]
-          : [];
+          : options.mode === "polish-character"
+            ? options.characterId !== undefined
+              ? ["polish-character", options.novelId, options.characterId, options.formJson]
+              : ["polish-character", options.novelId, options.formJson]
+            : [];
     const child = spawn("bun", ["run", "apps/agent/src/headless.ts", ...sessionArgs], {
       cwd: repoRoot,
       env: childEnv(),
@@ -313,6 +321,29 @@ ipcMain.handle("library:delete", async (_event, novelId: string) => {
   }
   return result.data;
 });
+
+/** 角色管理（编辑 / 新增）：操作成功返回带 version 的角色条目 */
+function handleCharacterMutation(args: string[]): Promise<CharacterEntry> {
+  return runLibraryQuery(args).then((raw) => {
+    const result = characterEntrySchema.safeParse(raw);
+    if (!result.success) {
+      throw new Error(`角色结果不合查询 schema：${result.error.issues[0]?.message ?? "未知错误"}`);
+    }
+    return result.data;
+  });
+}
+
+ipcMain.handle(
+  "library:addCharacter",
+  (_event, novelId: string, character: Character): Promise<CharacterEntry> =>
+    handleCharacterMutation(["add-character", novelId, JSON.stringify(character)]),
+);
+
+ipcMain.handle(
+  "library:updateCharacter",
+  (_event, novelId: string, characterId: string, character: Character): Promise<CharacterEntry> =>
+    handleCharacterMutation(["update-character", novelId, characterId, JSON.stringify(character)]),
+);
 
 app.whenReady().then(() => {
   createWindow();

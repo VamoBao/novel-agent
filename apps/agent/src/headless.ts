@@ -1,6 +1,6 @@
 import * as path from "node:path";
-import { PROTOCOL_VERSION, type AgentMessage } from "@novel/shared";
-import { createNovel, planActChapters, regenerateOutline } from "./workflows";
+import { characterSchema, PROTOCOL_VERSION, type AgentMessage, type Character } from "@novel/shared";
+import { createNovel, planActChapters, polishCharacter, regenerateOutline } from "./workflows";
 import { UserAbortedError } from "./ui/aborted";
 import { ProtocolChannel } from "./ui/protocol-channel";
 import { OUTPUT_DIR } from "./output/outline-writer";
@@ -11,32 +11,44 @@ import { OUTPUT_DIR } from "./output/outline-writer";
  * 数据路径由宿主经环境变量传入绝对路径（NOVEL_DB_PATH / NOVEL_OUTPUT_DIR），hello 回显校验。
  * 会话模式经 argv 选择（对齐 query CLI 传参先例，协议消息 schema 不动）：
  * 无参 = 新建小说全流程；`plan-chapters <novelId> <actNodeId>` = 既有小说单幕章节规划；
- * `regen-outline <novelId>` = 既有小说大纲重新生成（新版本入库，旧版本归档）。
+ * `regen-outline <novelId>` = 既有小说大纲重新生成（新版本入库，旧版本归档）；
+ * `polish-character <novelId> [characterId] <formJson>` = 角色 AI 润色（编辑流传角色 ID，
+ * 新建流缺省；formJson 为表单当前值 JSON——argv 传参，结果经 polish-result 消息回传）。
  */
 
 /** 会话模式：与 client 侧 AgentStartOptions（@novel/shared）一一对应 */
 type Session =
   | { kind: "create" }
   | { kind: "plan-chapters"; novelId: string; actNodeId: string }
-  | { kind: "regen-outline"; novelId: string };
+  | { kind: "regen-outline"; novelId: string }
+  | { kind: "polish-character"; novelId: string; characterId?: string; formJson: string };
 
 function parseSession(argv: string[]): Session {
   if (argv.length === 0) return { kind: "create" };
-  const [mode, novelId, actNodeId] = argv;
-  if (mode === "plan-chapters" && argv.length === 3 && novelId && actNodeId) {
-    return { kind: "plan-chapters", novelId, actNodeId };
+  const [mode, novelId, arg3, arg4] = argv;
+  if (mode === "plan-chapters" && argv.length === 3 && novelId && arg3) {
+    return { kind: "plan-chapters", novelId, actNodeId: arg3 };
   }
   if (mode === "regen-outline" && argv.length === 2 && novelId) {
     return { kind: "regen-outline", novelId };
   }
+  if (mode === "polish-character" && novelId) {
+    // 无 characterId：`polish-character <novelId> <formJson>`；有：`polish-character <novelId> <characterId> <formJson>`
+    if (argv.length === 3 && arg3) {
+      return { kind: "polish-character", novelId, formJson: arg3 };
+    }
+    if (argv.length === 4 && arg3 && arg4) {
+      return { kind: "polish-character", novelId, characterId: arg3, formJson: arg4 };
+    }
+  }
   process.stderr.write(
-    `NOVEL_AGENT_FATAL: 无法识别的启动参数：${argv.join(" ")}（用法：headless.ts [plan-chapters <novelId> <actNodeId>] [regen-outline <novelId>]）\n`,
+    `NOVEL_AGENT_FATAL: 无法识别的启动参数：${argv.join(" ")}（用法：headless.ts [plan-chapters <novelId> <actNodeId>] [regen-outline <novelId>] [polish-character <novelId> [characterId] <formJson>]）\n`,
   );
   process.exit(1);
 }
 
-/** 执行会话并返回小说 ID（三种会话共用 run_finished 收尾） */
-async function runSession(session: Session, channel: ProtocolChannel): Promise<string> {
+/** 执行会话并返回小说 ID（四种会话共用 run_finished 收尾） */
+async function runSession(session: Session, channel: ProtocolChannel, send: (message: AgentMessage) => void): Promise<string> {
   switch (session.kind) {
     case "create":
       return (await createNovel({ channel })).id;
@@ -46,6 +58,25 @@ async function runSession(session: Session, channel: ProtocolChannel): Promise<s
       ).novelId;
     case "regen-outline":
       return (await regenerateOutline({ channel, novelId: session.novelId })).novelId;
+    case "polish-character": {
+      let form: Character;
+      try {
+        form = characterSchema.parse(JSON.parse(session.formJson));
+      } catch (error) {
+        throw new Error(
+          `润色入参（角色表单 JSON）不合法：${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+      }
+      const { character } = await polishCharacter({
+        channel,
+        novelId: session.novelId,
+        characterId: session.characterId,
+        form,
+      });
+      send({ type: "polish-result", character });
+      return session.novelId;
+    }
   }
 }
 
@@ -100,8 +131,9 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => process.exit(0));
 
   try {
-    // 三种会话共用同一收尾：run_finished 携带小说 ID（client 据此刷新书库/详情）
-    const novelId = await runSession(session, channel);
+    // 四种会话共用同一收尾：run_finished 携带小说 ID（client 据此刷新书库/详情）；
+    // 润色会话的业务结果经 polish-result 消息先行回传
+    const novelId = await runSession(session, channel, send);
     send({
       type: "run_finished",
       novelId,

@@ -7,14 +7,16 @@ export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 /**
  * 打开（必要时创建）数据库并完成建表。
  * 六张表主键均为应用层生成的 UUIDv7（时间有序，索引友好）：
  * - novels：小说信息（pinned / favorite 为书库管理标记；name 在大纲确认后回填），
  *   其余业务表经 novel_id 外键关联
- * - characters：角色卡，1:N（novel_id 索引）
+ * - characters：角色卡，1:N（novel_id 索引），version 为当前版本号（编辑提交递增）
+ * - character_versions：角色历史版本快照（编辑时旧卡整卡 JSON 归档），character_id 外键关联，
+ *   主行 id / novel_id 稳定不变，外部引用（如伏笔的服务角色 IDs）不因编辑换代失效
  * - worldviews：世界观，1:1（novel_id 唯一），taboos 数组存 JSON 文本
  * - outlines：大纲树（部/幕两级入库，章为写作期预留），parent_id 自引用外键，多版本行并存；
  *   内容随节点入库（summary 梗概，key_plot_points 关键情节点存 JSON 文本，仅幕节点携带）
@@ -58,6 +60,11 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       }
       // 6→7：新增 locations 表，无 ALTER——由下方 CREATE TABLE IF NOT EXISTS 幂等落地
       // 7→8：新增 foreshadows 表，同上
+      if (version <= 8) {
+        // 8→9：characters 增列 version（编辑版本管理），新列有 DEFAULT，旧数据无需回填；
+        // 历史快照表 character_versions 由下方 CREATE TABLE IF NOT EXISTS 幂等落地
+        db.exec("ALTER TABLE characters ADD COLUMN version INTEGER NOT NULL DEFAULT 1;");
+      }
     } else {
       // 开发期旧库（<4，无客户端投产数据）或异常版本（>8 的库被旧代码打开）：重建兜底
       db.exec("DROP TABLE IF EXISTS outlines;");
@@ -101,11 +108,25 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       trajectory TEXT,
       ending_direction TEXT NOT NULL,
       relationships TEXT,
+      version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
       created_at TEXT NOT NULL
     );
   `);
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_characters_novel_id ON characters(novel_id);",
+  );
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS character_versions (
+      id TEXT PRIMARY KEY,
+      character_id TEXT NOT NULL REFERENCES characters(id),
+      novel_id TEXT NOT NULL REFERENCES novels(id),
+      version INTEGER NOT NULL CHECK (version >= 1),
+      character TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_character_versions_character_id ON character_versions(character_id);",
   );
   db.exec(`
     CREATE TABLE IF NOT EXISTS worldviews (

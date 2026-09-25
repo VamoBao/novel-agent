@@ -1,5 +1,12 @@
 /// <reference types="vite/client" />
-import type { AgentMessage, AgentStartOptions, NovelDetail, NovelListItem } from "@novel/shared";
+import type {
+  AgentMessage,
+  AgentStartOptions,
+  Character,
+  CharacterEntry,
+  NovelDetail,
+  NovelListItem,
+} from "@novel/shared";
 
 declare global {
   interface Window {
@@ -15,6 +22,12 @@ declare global {
       setNovelPinned: (novelId: string, pinned: boolean) => Promise<NovelListItem>;
       setNovelFavorite: (novelId: string, favorite: boolean) => Promise<NovelListItem>;
       deleteNovel: (novelId: string) => Promise<{ deleted: string }>;
+      addCharacter: (novelId: string, character: Character) => Promise<CharacterEntry>;
+      updateCharacter: (
+        novelId: string,
+        characterId: string,
+        character: Character,
+      ) => Promise<CharacterEntry>;
       isAutostart: () => boolean;
       autoSelectNovelId: () => string | null;
     };
