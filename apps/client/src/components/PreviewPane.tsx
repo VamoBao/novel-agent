@@ -61,15 +61,6 @@ export function PreviewPane({ detail, loading, error, selection, onPlanChapters 
     );
   }
 
-  return (
-    <section className="preview">
-      {detail ? (
-        <h2 className="preview-title">
-          《{detail.novel.name ?? "未命名小说"}》
-          <span className="preview-id">{detail.novel.id.slice(0, 8)}</span>
-        </h2>
-      ) : null}
-      {body}
-    </section>
-  );
+  // 不再展示小说名标题行——左栏书库选中高亮已表明当前小说，右栏只留内容
+  return <section className="preview">{body}</section>;
 }

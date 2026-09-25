@@ -79,7 +79,7 @@ body {
 
 .preview-pane {
   overflow-y: auto;
-  padding: 16px 20px 32px;
+  padding: 10px 12px 20px;
 }
 
 /* 创作页：独立整页（不与浏览页三栏共存），CreationFlow 自带头部 + 滚动问答流 */
@@ -264,21 +264,6 @@ body {
 
 .tree-group-btn:hover {
   background: #eef0f3;
-}
-
-/* 右栏预览 */
-.preview-title {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin: 0 0 14px;
-  font-size: 18px;
-}
-
-.preview-title .preview-id {
-  font-size: 12px;
-  font-weight: 400;
-  color: #9aa1ab;
 }
 
 /* 右键菜单（fixed 定位，点击空白处关闭） */
@@ -507,16 +492,44 @@ button.danger {
   margin: 2px 0;
 }
 
-/* 幕卡「规划本幕章节」入口（旧数据幕禁用态沿用全局 button:disabled 样式） */
-.viewcard .act-actions {
-  margin-top: 10px;
-  padding-left: 16px;
+/* 大纲节点预览两卡（OutlineNodeCard 专用）：标签 + 正文，与 ViewCard 共用卡壳 */
+.viewcard .card-label {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6a737d;
 }
 
+.viewcard .outline-summary {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.viewcard .plot-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+}
+
+.viewcard .plot-list li {
+  margin: 3px 0;
+  line-height: 1.65;
+}
+
+/* ViewCard（创作流大纲/章节视图）情节点行——与 plot-list 独立 */
 .viewcard .plot {
   padding-left: 16px;
   color: #6a737d;
   font-size: 13px;
+}
+
+/* 幕预览「规划本幕章节」入口：两张卡片下方右对齐
+   （旧数据幕禁用态沿用全局 button:disabled 样式） */
+.act-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 
 .question {
