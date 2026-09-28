@@ -11,9 +11,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/deepseek": "^3.0.44",
+    "@ai-sdk/deepseek": "^3.0.54",
+    "@ai-sdk/openai-compatible": "^3.0.57",
+    "@ai-sdk/provider": "^4.0.14",
     "@novel/shared": "workspace:*",
-    "ai": "^7.0.99",
+    "ai": "^7.0.118",
     "zod": "^4.6.5"
   },
   "devDependencies": {

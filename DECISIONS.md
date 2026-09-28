@@ -1,3 +1,13 @@
+## 2026-09-28 写作模型 provider：官方 openai-compatible 包 + 惰性工厂，而非手写实现 / 常量导出
+
+- **背景**：用户要求为小说正文创作预接一个独立的「写作模型」（可与 Agent 会话模型不同），OpenAI 接口兼容、返回 `LanguageModelV4`，经三个新环境变量（模型名 / API Key / Base URL）配置。正文创作工作流尚未建设，本次仅落 provider 层地基。
+- **备选方案**：
+  1. **官方 `@ai-sdk/openai-compatible` + 惰性工厂函数 `getWritingModel()`**（选定）：包为 Vercel 官方、专为任意 OpenAI 兼容端点设计（`createOpenAICompatible({ name, baseURL, apiKey })`）；工厂内先校验三变量再创建实例——`baseURL` 是该包的必填设置项，模块级常量导出（deepseek.ts 形态）会在未配置时 import 即抛错，违背「无 Key 场景可安全导入」的项目惯例
+  2. 手写 `LanguageModelV4` 实现（`doGenerate` / `doStream` 自实现）：零新依赖，但需自行维护 SSE 解析、工具调用协议、usage 归一等数百行 HTTP 细节，长期跟随 AI SDK 规范升级的成本远高于一个官方包
+  3. 用 `@ai-sdk/openai` 的 `createOpenAI({ baseURL })`：可行但为官方 OpenAI 语义（strict 结构化输出等假设），对第三方兼容端点的宽容度不如 openai-compatible
+- **依赖统一（连带决策）**：引入 openai-compatible 3.0.57（锁 `@ai-sdk/provider` 4.0.18）后与 `ai` 7.0.99 / deepseek 3.0.44（均锁 4.0.14）形成双 provider 副本，`LanguageModelV4` 结构类型冲突（JSONObject 只读索引签名差异）。选择把 `ai` / `@ai-sdk/deepseek` 在既有 ^ 范围内 patch 升级（7.0.118 / 3.0.54，同锁 4.0.18）全树统一单副本，而非 root resolutions 强制覆写——不引入覆盖机制，升级路径常规。`@ai-sdk/provider` 增设为直接依赖（`ai` 导出的 `LanguageModel` 是 V2/V3/V4 联合类型，按需求标注精确的 `LanguageModelV4` 须从源头包导入）。
+- **结论**：`providers/writing-model.ts` 导出 `getWritingModel(): LanguageModelV4`，环境变量定名 `WRITING_MODEL_NAME` / `WRITING_MODEL_API_KEY` / `WRITING_MODEL_BASE_URL`（三项需同时配置，空串视为未配置，未配置抛可读错误指明缺失项）。真实端点生成调用待正文创作工作流接入后端到端复验。
+
 ## 2026-09-25 角色版本管理采用「主行不变 + character_versions 快照表」（而非照搬大纲的换行制）
 
 - **背景**：角色编辑需求要求「和大纲的类似」做 version 管理。大纲的机制是同表多版本行并存（新版本 = 新行新 ID + is_current_version 标记，旧行降级归档）；但角色与大纲树结构不同——角色没有父级层级，且角色 ID 已被别处引用（foreshadows.character_ids 服务角色 JSON 列，伏笔浏览/回收尚未建 UI 但数据层已投产），客户端选中态也以 characterId 为键。

@@ -26,7 +26,10 @@ apps/agent/src/
 │                         #   协议实现）/ FakeChannel 测试替身；
 │                         #   业务层（workflows/agents/tools）交互与输出的唯一出口
 ├── providers/
-│   └── deepseek.ts       # LLM 接入层：DeepSeek provider 实例与 model 导出
+│   ├── deepseek.ts       # LLM 接入层：DeepSeek provider 实例与 model 导出（Agent 会话模型）
+│   └── writing-model.ts  # 写作模型惰性工厂 getWritingModel(): LanguageModelV4——OpenAI 接口兼容
+│                         #   端点（@ai-sdk/openai-compatible），正文创作工作流接入后使用；
+│                         #   三变量齐才创建实例，未配置可安全导入、取用抛可读错误
 ├── agents/
 │   └── react.ts          # 通用 ReAct Agent 运行器（generateText + stopWhen 终态工具模式）
 ├── tools/
@@ -154,6 +157,7 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 - 环境变量（Bun 自动加载 `.env`，参考 `.env.example`）：
   - `DEEPSEEK_API_KEY`：必填，DeepSeek API Key
   - `DEEPSEEK_MODEL_NAME`：可选，默认 `deepseek-flash`
+  - `WRITING_MODEL_NAME` / `WRITING_MODEL_API_KEY` / `WRITING_MODEL_BASE_URL`：可选，写作模型（OpenAI 接口兼容端点，模型名 / Key / Base URL 三项需同时配置）——正文创作时使用，可与 Agent 会话模型不同；正文创作工作流尚未接入，未配置不影响既有功能
   - `NOVEL_DB_PATH`：可选，SQLite 路径，默认 `data/novel.db`
   - `NOVEL_OUTPUT_DIR`：可选，大纲输出目录，默认 `output`；协议模式下由宿主进程传绝对路径，`hello` 消息回显校验
 - SQLite：Bun 内置 `bun:sqlite`，各 store 共享默认连接（懒加载单例），`PRAGMA foreign_keys=ON` 按连接开启。**跨进程并发约定**（agent 会话写库 / 查询 CLI 子进程同时打开库）：所有连接统一 `PRAGMA busy_timeout=5000`（短锁冲突等待重试，而非默认 0 立即抛 database is locked）；`journal_mode` 与 `user_version` 的写入仅在真正需要时执行（幂等读检查 / 只在迁移分支内写）——版本匹配的纯浏览打开是零写操作，WAL 下读连接与写连接天然共存。七张表主键均为应用层生成的 **UUIDv7**（时间有序，索引友好）：`novels`（小说信息，1 的根，`pinned` / `favorite` 为书库管理标记，置顶优先排序、收藏星标不影响排序）；`characters` 与 characterSchema 对应（1:N，自增序 + `novel_id` 外键索引，`version` 为当前版本号），创作流确认后入库 version=1，浏览期编辑经 `updateCharacter` 版本化更新（单事务：旧卡整卡 JSON 快照归档 `character_versions`——`character_id` 外键关联，主行字段全量更新并 version+1；id / novel_id / created_at 稳定不变，伏笔 `character_ids` 引用与客户端选中态不因编辑换代失效）；`character_versions` 为角色历史版本快照表（`character_id` / `novel_id` 外键 + 索引，`version` 记编辑前版本号、`character` 存整卡 JSON 文本，历史版本浏览/回滚 UI 为后续需求）；`worldviews`（1:1，`novel_id` 唯一外键，upsert 覆盖更新，`taboos` 数组存 JSON 文本）；`outlines`（大纲树，`parent_id` 自引用外键 + `novel_id` 外键索引，`type` CHECK 部/幕/章——部/幕为大纲阶段两级，章为章节规划段在幕下批量创建；**内容随节点入库**：`summary` 为部/幕梗概与章剧情概述、`key_plot_points` 为幕级关键情节点（JSON 文本列，仅幕节点携带，schema refine 强约束），供写作期按幕内容生成章节、按章概述写正文；`status` CHECK 计划中/写作中/写作完成/已废弃，同节点多版本行并存 `version`+`is_current_version`，部分唯一表达式索引 `(novel_id, COALESCE(parent_id,''), sort) WHERE is_current_version=1` 保证同父级下当前版本 sort 唯一——根节点 parent 为 NULL，SQLite 唯一索引视 NULL 互异故 COALESCE 归一；大纲确认后经 `saveOutlineTree` 整树事务入库，重复保存被唯一索引拒绝；章节规划确认后经 `saveChapters` 幕下事务批量建章（父级须为幕且同小说，同一幕重复保存同样被唯一索引拒绝）；当前版本切换由调用方先降级旧版再提升新版，`document_id` 暂为可空裸列待 documents 表落地后补外键——预挂写作期章节正文，与大纲内容列职责分离）；`locations`（小说世界的地理位置，`parent_id` 自引用外键成层级（城市→大陆）+ `novel_id` 外键索引，坐标 `x`/`y` REAL、图层 `layer` 自由文本（天上/地面/地底等）、`population` 可空非负整数（无人/未设定 NULL）——数据层先行，创作流采集与客户端浏览后续接入）；`foreshadows`（伏笔，`novel_id` 外键索引：`surface_action` 表面行为 / `hidden_truth` 隐藏的真相必填，`attention_level` CHECK 1-10 读者注意度（1 易发现→10 难发现），`recovery_status` CHECK 枚举 unrecovered/partial/recovered 默认未回收，埋线方式 / 创作目的可选，`appear_chapter_id` 出现章节为可空裸列（chapter 节点写作期落地后补约束，先例 document_id），`recover_chapter_ids` 回收章节 / `character_ids` 服务角色存 JSON 文本多值——完整 CRUD 支持回收状态流转，服务角色应用层校验同小说——数据层先行，采集与浏览后续接入）。schema 变更用 `PRAGMA user_version` 版本号管理（当前 9）：**4→5 起 client 书库已投产，仅做保数据的 ALTER 增量迁移**（4→5 为 novels 增列 pinned / favorite；5→6 为 outlines 增列 summary / key_plot_points，旧行留 NULL 不回填；6→7 为纯新增 locations 表、7→8 为纯新增 foreshadows 表，均由 CREATE TABLE IF NOT EXISTS 幂等落地；8→9 为 characters 增列 version（ALTER，DEFAULT 1 旧行不回填）+ 新增 character_versions 快照表（CREATE IF NOT EXISTS 幂等落地）；迁移分支按版本链式逐级补列——每段以来源版本守卫（`version === 4` / `version <= 5`），已是目标形态的段不重放，否则重复 ALTER 报 duplicate column），DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底。NovelState 整体（status/params/outline）当前仍为内存态，SQLite 化为后续接入点；整本删除（书库管理）由 `deleteNovel` 单事务级联清七表（outlines / locations 自引用树单语句整删；character_versions 先于 characters 删除——character_id 外键约束）并由查询入口清理 `output/<id>.json` 产物

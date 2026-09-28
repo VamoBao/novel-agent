@@ -7,7 +7,7 @@
 - 运行时：Bun 1.4（`bun.lock` 锁定依赖，`bun install` 安装）
 - 仓库结构：Bun workspaces monorepo（根 `package.json` 编排 `apps/*` 与 `packages/*`，共享编译选项收敛于 `tsconfig.base.json`）
 - 语言：TypeScript 6（`tsconfig.json` 开启 `strict`、`noUncheckedIndexedAccess`、`noImplicitOverride` 等严格选项）
-- LLM 接入：Vercel AI SDK 7（`ai`）+ 官方 `@ai-sdk/deepseek` provider，工具参数 schema 用 zod 4
+- LLM 接入：Vercel AI SDK 7（`ai`）+ 官方 `@ai-sdk/deepseek` provider（Agent 会话模型）+ 官方 `@ai-sdk/openai-compatible`（写作模型，正文创作用，经环境变量指向任意 OpenAI 接口兼容端点），工具参数 schema 用 zod 4
 - 数据库：SQLite（Bun 内置 `bun:sqlite`，库文件 `data/novel.db`，路径可用 `NOVEL_DB_PATH` 覆盖）
 - 静态检查：ESLint 10 + typescript-eslint 8（`eslint.config.js` 扁平配置）
 - 测试：Bun 内置测试运行器（`bun:test`，测试文件命名为 `*.test.ts`）
@@ -34,7 +34,7 @@
   - `src/query.ts`：库查询与管理入口——一次性 CLI（查询：`list` 列小说 / `get <novelId>` 取世界观+角色+大纲节点资料——大纲读 outlines 表当前版本节点，不再读 output 产物；管理：`rename` / `pin` / `unpin` / `favorite` / `unfavorite` / `delete` / `add-character` 新增角色 / `update-character` 版本化编辑角色），stdout 单行 JSON（契约见 shared query.ts），即起即退
   - `src/cli/prompt.ts`：终端输入原语（TTY/管道双模式，EOF 优雅中止，并发读取串行化）
   - `src/ui/`：交互通道层——`channel.ts` UiChannel 接口 + `aborted.ts` 中止异常 + `cli-channel.ts` 终端实现（含角色卡/大纲等视图渲染）+ `protocol-channel.ts` stdio JSON 协议实现 + `fake-channel.ts` 测试替身；业务层交互与输出的唯一出口（ESLint 边界规则强制）
-  - `src/providers/`：LLM 接入层（`deepseek.ts`：Key 读 `DEEPSEEK_API_KEY`，模型读 `DEEPSEEK_MODEL_NAME`，默认 `deepseek-flash`）
+  - `src/providers/`：LLM 接入层（`deepseek.ts`：Key 读 `DEEPSEEK_API_KEY`，模型读 `DEEPSEEK_MODEL_NAME`，默认 `deepseek-flash`；`writing-model.ts`：写作模型惰性工厂 `getWritingModel(): LanguageModelV4`——OpenAI 接口兼容端点，读 `WRITING_MODEL_NAME` / `WRITING_MODEL_API_KEY` / `WRITING_MODEL_BASE_URL` 三变量，正文创作工作流接入后使用，未配置时可安全导入、取用抛可读错误）
   - `src/agents/react.ts`：通用 ReAct Agent 运行器（终态工具模式 + 未完成自动续跑）
   - `src/tools/`：提供给 LLM 使用的通用工具（`ask-user.ts` 工厂函数，按 Agent 标签生成），经 `tools/index.ts` 汇总导出；workflow 私有终态工具在对应 agent 文件内定义
   - `src/state/`：小说创作状态与持久化（`NovelStateStore` 接口 + 内存实现 + UUIDv7 生成；`db.ts` 建库建表（novels / characters / character_versions / worldviews / outlines / locations / foreshadows，外键关联），`novel-store.ts`/`character-store.ts`/`worldview-store.ts`/`outline-store.ts`/`location-store.ts`/`foreshadow-store.ts` 按 UUIDv7 创作 ID 落 SQLite——character-store 含 updateCharacter 版本化编辑（旧卡快照归档、version+1））
