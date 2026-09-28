@@ -1,3 +1,18 @@
+## 2026-09-28 正文存储改文件系统：小说名/部/章层级落盘 + 库内只留 file_path（而非 content 进库）
+
+- **背景**：上一条决策把正文整文存进 documents.content（本地 SQLite），用户指出不妥——正文是长文本（数千字/章），进库既撑大 SQLite 又不便直接阅读编辑。要求改为文件保存（客户端文件夹内、按「小说名-部-章节」层级组织），数据库经大纲章节点 document_id 与文件绑定。
+- **备选方案**：
+  1. **文件存层级目录 + documents 只留元数据（选定）**：`output/<小说名>/<部名>/<章名>.md`，人类在文件管理器里可直接读改；库内 file_path（相对 output 根）+ 字数；document_id → documents 行 → file_path 三级绑定，绑定点仍是章节点（保持既有协议/查询契约形态）
+  2. 文件名用 documentId（稳定、免清理），但用户要的「小说名-部-章节」层级不可见，浏览体验差
+  3. 全部派生路径（读时按现名重算，不存 file_path）：改名零联动，但历史版本/冲突后缀无法重现，文件挪动即失联
+- **设计要点**：
+  - **路径构造与冲突**：`sanitizePathSegment`（非法字符归一、压缩空白、去尾部点空格、截断 80、空名回退 ID 片段）+ 同名冲突 `-2…-N` 后缀（大纲重生成后新树复用章名、或孤儿残留时不覆盖既有文件）
+  - **先文件后库**：writeChapter 生成后先落文件、再单事务登记元数据并绑定章节点；库失败回滚删除文件，不留孤儿；反向（库成功文件丢）由查询读文件 null 占位兜底
+  - **生命周期联动**：deleteNovel 逐文件清理（不删整目录——同名小说共享文件夹边界）；小说 rename 逐文件迁移到新名首段 + updateFilePaths 单事务同步（同名小说共享文件夹时逐文件移动天然正确）；大纲重生成只降级归档章节点，正文行与文件保留
+  - **10→11 迁移无损**：存量 content 行在迁移内联落文件（SQL join 取小说/部/章名 + 同款 sanitize，state 层不反向依赖 output 层故本地复制小函数），file_path 回填后 DROP content 列；守卫 version===10，v10 以下库经 CREATE IF NOT EXISTS 直接得 11 形态
+  - **同名小说边界**：两本同名小说共享同一层级文件夹（按名组织固有的边界），冲突后缀保证文件不互覆；删除/改名按 documents 登记路径逐文件操作，互不波及
+- **结论**：document-writer.ts（output 层）+ documents 元数据化（SCHEMA_VERSION 11）+ writeChapter 落盘联动 + query get/delete/rename 文件联动 + 客户端路径展示。真实库实跑迁移 1 行 3094 字逐字无损；mock 写作端点 e2e 全过。
+
 ## 2026-09-28 章节正文生成：headless 会话 + 无确认门 + documents 一章一份（而非一次性 CLI / 确认门流 / 正文版本化）
 
 - **背景**：用户要求在章节预览页加入口，按章节概述用写作模型（OpenAI 接口兼容端点）生成正文，保存本地、预览展示并给章节点绑 document_id。设计时数据层已预留：outlines.document_id 为「待 documents 表落地」的裸列，status 枚举含 writing/completed——本次即该设计的落地点。

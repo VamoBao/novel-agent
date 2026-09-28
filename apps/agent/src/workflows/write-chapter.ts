@@ -7,6 +7,14 @@ import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-stor
 import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
 import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
 import { getDefaultDocumentStore, type DocumentStore } from "../state/document-store";
+import { OUTPUT_DIR } from "../output/outline-writer";
+import {
+  buildChapterDocumentPath,
+  countWords,
+  removeDocumentArtifact,
+  writeDocumentArtifact,
+} from "../output/document-writer";
+import type { Document } from "@novel/shared";
 
 export interface WriteChapterOptions {
   /** 交互通道（终端 / 协议 / 测试替身），业务交互的唯一出口 */
@@ -17,6 +25,8 @@ export interface WriteChapterOptions {
   chapterNodeId: string;
   /** 写作模型实例；缺省 getWritingModel()（OpenAI 接口兼容端点，环境变量配置，测试注入替身） */
   model?: LanguageModelV4;
+  /** 正文产物根目录；缺省 output（NOVEL_OUTPUT_DIR，协议模式下宿主传绝对路径），测试注入临时目录 */
+  outputDir?: string;
   novelStore?: NovelStore;
   outlineStore?: OutlineStore;
   worldviewStore?: WorldviewStore;
@@ -53,8 +63,10 @@ function characterDigestLine(character: {
  * 从库中校验并组装写作上下文（小说名/logline、世界观、角色摘要、所属部/幕
  * 梗概与关键情节点、本章概述、同幕前后章概述），交写作模型（OpenAI 接口
  * 兼容端点，与 Agent 会话模型解耦）单轮生成正文，无确认门——确认在客户端
- * （生成后展示，重写/修订流为后续需求）；生成结果经 saveChapterDocument
- * 单事务入库并绑定章节点 document_id。
+ * （生成后展示，重写/修订流为后续需求）。
+ * 正文**存文件系统**（`<output>/<小说名>/<部名>/<章名>.md`，人类可直接阅读），
+ * 先写文件、后经 saveChapterDocument 单事务登记元数据（file_path + 字数）
+ * 并绑定章节点 document_id；库失败时回滚删除已写文件，不留孤儿。
  * 校验失败（小说/章不存在、非章节点、缺概述、已有正文、世界观未确认、
  * 写作模型未配置）抛可读错误，由调用方（协议入口）转为 fatal error 消息。
  */
@@ -65,6 +77,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   const worldviewStore = options.worldviewStore ?? getDefaultWorldviewStore();
   const characterStore = options.characterStore ?? getDefaultCharacterStore();
   const documentStore = options.documentStore ?? getDefaultDocumentStore();
+  const outputDir = options.outputDir ?? OUTPUT_DIR;
 
   const novel = novelStore.getNovel(novelId);
   if (!novel) {
@@ -164,8 +177,29 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
     throw new Error("写作模型返回了空正文，请稍后重试");
   }
 
-  const document = documentStore.saveChapterDocument(novelId, chapterNodeId, content);
-  channel.notify(`✍️ 正文已入库：${chapter.node.name}（约 ${document.wordCount} 字）`);
+  // 正文落盘（小说名/部名/章名层级，同名冲突自动加后缀），库绑定失败时回滚删除文件
+  const relativePath = buildChapterDocumentPath(
+    {
+      novelName: novel.name ?? "未命名小说",
+      partName: part.node.name,
+      chapterName: chapter.node.name,
+    },
+    outputDir,
+  );
+  let document: Document;
+  try {
+    writeDocumentArtifact(relativePath, content, outputDir);
+    document = documentStore.saveChapterDocument(
+      novelId,
+      chapterNodeId,
+      relativePath,
+      countWords(content),
+    );
+  } catch (error) {
+    removeDocumentArtifact(relativePath, outputDir);
+    throw error;
+  }
+  channel.notify(`✍️ 正文已保存：${relativePath}（约 ${document.wordCount} 字）`);
   return {
     novelId,
     chapterNodeId,

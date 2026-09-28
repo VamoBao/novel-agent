@@ -154,9 +154,10 @@ describe("novelDetailSchema", () => {
     {
       id: "0199c0de-0000-7000-8000-00000000000a",
       chapterId: "0199c0de-0000-7000-8000-00000000000b",
-      content: "灵脉断绝的第九十九年，少年在市集的角落里睁开眼。",
+      filePath: "灵脉拾遗/第一部/第一章.md",
       wordCount: 22,
       updatedAt: "2026-09-28T00:00:00Z",
+      content: "灵脉断绝的第九十九年，少年在市集的角落里睁开眼。",
     },
   ];
 
@@ -178,6 +179,7 @@ describe("novelDetailSchema", () => {
     expect(detail.outlineNodes[1]?.keyPlotPoints).toHaveLength(2);
     expect(detail.documents).toHaveLength(1);
     expect(detail.documents[0]?.chapterId).toBe("0199c0de-0000-7000-8000-00000000000b");
+    expect(detail.documents[0]?.filePath).toBe("灵脉拾遗/第一部/第一章.md");
   });
 
   test("创作中途的小说：worldview 为 null、角色/大纲节点/正文为空数组仍通过", () => {
@@ -193,6 +195,18 @@ describe("novelDetailSchema", () => {
     expect(detail.documents).toHaveLength(0);
   });
 
+  test("正文文件缺失：content 为 null 仍通过（客户端占位提示）", () => {
+    const detail = novelDetailSchema.parse({
+      novel: validListItem,
+      worldview: null,
+      characters: [],
+      outlineNodes: [],
+      documents: [{ ...validDocuments[0], content: null }],
+    });
+    expect(detail.documents[0]?.content).toBeNull();
+    expect(detail.documents[0]?.wordCount).toBe(22);
+  });
+
   test("大纲节点条目非法（sort 为 0）被拒绝", () => {
     expect(() =>
       novelDetailSchema.parse({
@@ -205,14 +219,14 @@ describe("novelDetailSchema", () => {
     ).toThrow();
   });
 
-  test("正文条目非法（空 content / 负字数）被拒绝", () => {
+  test("正文条目非法（空 filePath / 负字数）被拒绝", () => {
     expect(() =>
       novelDetailSchema.parse({
         novel: validListItem,
         worldview: null,
         characters: [],
         outlineNodes: [],
-        documents: [{ ...validDocuments[0], content: "" }],
+        documents: [{ ...validDocuments[0], filePath: "" }],
       }),
     ).toThrow();
     expect(() =>

@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +16,8 @@ import type { Character, Worldview } from "@novel/shared";
 
 /**
  * writeChapter 集成测试：mock 掉 'ai' 模块（generateText 按脚本返回正文），
- * 交互经 FakeChannel 记录；持久化落在临时目录 SQLite 上——
+ * 交互经 FakeChannel 记录；持久化落在临时目录 SQLite 与临时 output 目录上——
+ * 正文按「小说名/部名/章名.md」层级落文件、库内只登记元数据；
  * 前置校验路径（小说 / 章节点 / 已有正文 / 世界观 / 写作模型未配置）不依赖 LLM。
  */
 
@@ -82,6 +84,7 @@ afterEach(() => {
 async function setupDb(options: { withWorldview?: boolean } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "novel-write-"));
   const db = openDatabase(join(dir, "test.db"));
+  const outputDir = join(dir, "output");
   const novelStore = new NovelStore(db);
   const outlineStore = new OutlineStore(db);
   const worldviewStore = new WorldviewStore(db);
@@ -109,6 +112,7 @@ async function setupDb(options: { withWorldview?: boolean } = {}) {
     worldviewStore,
     characterStore,
     documentStore,
+    outputDir,
     actNodeId: act!.id,
     chapterNodeId: chapters[0]!.id,
     secondChapterNodeId: chapters[1]!.id,
@@ -139,6 +143,11 @@ describe("writeChapter", () => {
       ...ctx,
     });
 
+    // 正文按「小说名/部名/章名.md」层级落文件，内容为生成文本
+    const artifact = join(ctx.outputDir, "灵脉拾遗", "第一部", "第一章.md");
+    expect(existsSync(artifact)).toBe(true);
+    expect(readFileSync(artifact, "utf8")).toBe(PROSE.trim());
+
     // LLM 只调用一轮 generateText；prompt 携带章名/概述/世界观/前后章衔接信息
     expect(generateTextCalls).toHaveLength(1);
     const prompt = generateTextCalls[0]!.prompt;
@@ -151,16 +160,17 @@ describe("writeChapter", () => {
     expect(prompt).toContain("宗门来人追查");
     expect(prompt).toContain("2000~3000 字");
 
-    // 入库绑定：章节点 documentId 回写 + 状态 completed，字数不计空白
+    // 库内只登记元数据：file_path 相对路径 + 字数；章节点 documentId 回写 + 状态 completed
     const chapter = ctx.outlineStore.getOutlineNode(ctx.chapterNodeId)!;
     expect(chapter.node.documentId).toBe(result.documentId);
     expect(chapter.node.status).toBe("completed");
     expect(result.wordCount).toBe(38);
-    expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(1);
+    const stored = ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!;
+    expect(stored.filePath).toBe(join("灵脉拾遗", "第一部", "第一章.md"));
 
-    // 通知：启动与入库统计
+    // 通知：启动与保存路径统计
     expect(channel.notifies.some((n) => n.includes("正文生成中"))).toBeTrue();
-    expect(channel.notifies.some((n) => n.includes("正文已入库"))).toBeTrue();
+    expect(channel.notifies.some((n) => n.includes("正文已保存"))).toBeTrue();
   });
 
   test("前置校验：小说不存在 / 章节不存在 / 非章节点 / 已有正文 / 世界观未确认均报可读错误", async () => {
@@ -184,7 +194,7 @@ describe("writeChapter", () => {
     ).rejects.toThrow("不是章");
 
     // 已有正文
-    ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "已存在的正文。");
+    ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "n/p/1.md", 8);
     await expect(
       writeChapter({ ...base, novelId: NOVEL_ID, chapterNodeId: ctx.chapterNodeId }),
     ).rejects.toThrow("已有正文");
@@ -212,6 +222,61 @@ describe("writeChapter", () => {
         ...ctx,
       }),
     ).rejects.toThrow("写作模型未配置");
+  });
+
+  test("同名正文文件已存在（大纲重生成复用章名）：自动加 -2 后缀不覆盖", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+
+    // 预置同名文件（模拟上一版大纲的同名章正文残留）
+    const legacy = join(ctx.outputDir, "灵脉拾遗", "第一部", "第一章.md");
+    await Bun.write(legacy, "旧版同名章的正文。");
+
+    const result = await writeChapter({
+      channel: new FakeChannel([]),
+      novelId: NOVEL_ID,
+      model: DUMMY_MODEL,
+      ...ctx,
+    });
+
+    // 旧文件原样保留，新正文落到 -2 后缀文件
+    expect(readFileSync(legacy, "utf8")).toBe("旧版同名章的正文。");
+    const newPath = join(ctx.outputDir, "灵脉拾遗", "第一部", "第一章-2.md");
+    expect(existsSync(newPath)).toBe(true);
+    expect(readFileSync(newPath, "utf8")).toBe(PROSE.trim());
+    expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.filePath).toBe(
+      join("灵脉拾遗", "第一部", "第一章-2.md"),
+    );
+    expect(result.documentId).toBeDefined();
+  });
+
+  test("库绑定失败：回滚删除已写文件，不留孤儿", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+
+    // store 替身：前置查重通过、登记时抛错（模拟库故障）
+    const failingStore = {
+      getDocumentByChapter: () => undefined,
+      saveChapterDocument: () => {
+        throw new Error("模拟库写入失败");
+      },
+    } as unknown as DocumentStore;
+
+    await expect(
+      writeChapter({
+        channel: new FakeChannel([]),
+        novelId: NOVEL_ID,
+        model: DUMMY_MODEL,
+        ...ctx,
+        documentStore: failingStore,
+      }),
+    ).rejects.toThrow("模拟库写入失败");
+    expect(existsSync(join(ctx.outputDir, "灵脉拾遗", "第一部", "第一章.md"))).toBe(false);
+    expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(0);
   });
 
   test("生成结果为空：抛可读错误且库中无残留", async () => {

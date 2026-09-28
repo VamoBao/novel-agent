@@ -5,10 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { CharacterStore } from "./state/character-store";
+import { DocumentStore } from "./state/document-store";
 import { openDatabase } from "./state/db";
 import { NovelStore } from "./state/novel-store";
 import { OutlineStore } from "./state/outline-store";
 import { WorldviewStore } from "./state/worldview-store";
+import { writeDocumentArtifact } from "./output/document-writer";
 import {
   buildNovelDetail,
   buildNovelList,
@@ -124,6 +126,34 @@ describe("query CLI（buildNovelList / buildNovelDetail）", () => {
     db.close();
   });
 
+  test("get 携带章节正文：文件在则拼 content，文件缺失为 null 不抛错", async () => {
+    const { db, outputDir } = await newFixture();
+    const id = "bbbbbbbb-0000-7000-8000-000000000003";
+    new NovelStore(db).createNovel({ id, name: "正文之书" });
+    new OutlineStore(db).saveOutlineTree(id, [
+      { name: "部一", summary: "梗概", acts: [{ name: "幕一", summary: "幕梗概", keyPlotPoints: ["点"] }] },
+    ]);
+    const actNode = new OutlineStore(db).listOutlineNodes(id, { currentOnly: true }).find((n) => n.node.type === "act")!;
+    const chapters = new OutlineStore(db).saveChapters(id, actNode.id, [
+      { name: "章一", summary: "概述" },
+      { name: "章二", summary: "概述" },
+    ]);
+    const documentStore = new DocumentStore(db);
+    documentStore.saveChapterDocument(id, chapters[0]!.id, "正文之书/部一/章一.md", 5);
+    await writeDocumentArtifact("正文之书/部一/章一.md", "章一正文全文。", outputDir);
+    // 章二登记了元数据但文件不存在（模拟被手动移动）
+    documentStore.saveChapterDocument(id, chapters[1]!.id, "正文之书/部一/章二.md", 6);
+
+    const detail = buildNovelDetail(db, id, outputDir);
+    expect(detail.documents).toHaveLength(2);
+    const first = detail.documents.find((d) => d.chapterId === chapters[0]!.id)!;
+    const second = detail.documents.find((d) => d.chapterId === chapters[1]!.id)!;
+    expect(first.content).toBe("章一正文全文。");
+    expect(first.filePath).toBe(join("正文之书", "部一", "章一.md"));
+    expect(second.content).toBeNull();
+    db.close();
+  });
+
   test("大纲未入库时 outlineNodes 为空数组（世界观 / 角色仍可见）", async () => {
     const { db } = await newFixture();
     const id = "cccccccc-0000-7000-8000-000000000001";
@@ -158,6 +188,31 @@ describe("query CLI 管理命令（rename / pin / favorite / delete）", () => {
     db.close();
   });
 
+  test("rename 连带迁移按小说名落盘的正文文件与 file_path", async () => {
+    const { db, outputDir } = await newFixture();
+    const id = "aaaaaaaa-0000-7000-8000-000000000016";
+    new NovelStore(db).createNovel({ id, name: "旧名" });
+    const documentStore = new DocumentStore(db);
+    // 种子：一章 + 正文文件（旧名首段）
+    new OutlineStore(db).saveOutlineTree(id, [
+      { name: "部一", summary: "梗概", acts: [{ name: "幕一", summary: "幕梗概", keyPlotPoints: ["点"] }] },
+    ]);
+    const actNode = new OutlineStore(db).listOutlineNodes(id, { currentOnly: true }).find((n) => n.node.type === "act")!;
+    const chapter = new OutlineStore(db).saveChapters(id, actNode.id, [{ name: "章一", summary: "概述" }])[0]!;
+    documentStore.saveChapterDocument(id, chapter.id, "旧名/部一/章一.md", 5);
+    await writeDocumentArtifact("旧名/部一/章一.md", "正文内容。", outputDir);
+
+    renameNovel(db, id, "新名", outputDir);
+
+    // 文件移动到新名首段，库内 file_path 同步，读取可达
+    expect(existsSync(join(outputDir, "旧名", "部一", "章一.md"))).toBe(false);
+    expect(existsSync(join(outputDir, "新名", "部一", "章一.md"))).toBe(true);
+    const detail = buildNovelDetail(db, id, outputDir);
+    expect(detail.documents[0]?.filePath).toBe(join("新名", "部一", "章一.md"));
+    expect(detail.documents[0]?.content).toBe("正文内容。");
+    db.close();
+  });
+
   test("pin / favorite 后 list 排序与标记生效", async () => {
     const { db } = await newFixture();
     const novels = new NovelStore(db);
@@ -181,9 +236,19 @@ describe("query CLI 管理命令（rename / pin / favorite / delete）", () => {
     const artifact = join(outputDir, `${id}.json`);
     await writeFile(artifact, "{}\n", { flag: "wx" });
 
+    // 章节正文文件随 delete 一并清理
+    new OutlineStore(db).saveOutlineTree(id, [
+      { name: "部一", summary: "梗概", acts: [{ name: "幕一", summary: "幕梗概", keyPlotPoints: ["点"] }] },
+    ]);
+    const actNode = new OutlineStore(db).listOutlineNodes(id, { currentOnly: true }).find((n) => n.node.type === "act")!;
+    const chapter = new OutlineStore(db).saveChapters(id, actNode.id, [{ name: "章一", summary: "概述" }])[0]!;
+    new DocumentStore(db).saveChapterDocument(id, chapter.id, "待删/部一/章一.md", 5);
+    await writeDocumentArtifact("待删/部一/章一.md", "随书删除的正文。", outputDir);
+
     const result = deleteNovel(db, id, outputDir);
     expect(result.deleted).toBe(id);
     expect(existsSync(artifact)).toBe(false);
+    expect(existsSync(join(outputDir, "待删", "部一", "章一.md"))).toBe(false);
     expect(new NovelStore(db).listNovels()).toHaveLength(0);
     // 产物本就不存在时再删一本也不报错
     new NovelStore(db).createNovel({ id: "aaaaaaaa-0000-7000-8000-000000000014" });

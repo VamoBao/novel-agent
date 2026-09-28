@@ -8,9 +8,9 @@ import { NovelStore } from "./novel-store";
 import { OutlineStore } from "./outline-store";
 
 /**
- * DocumentStore 单元测试：临时目录 SQLite 上验证保存绑定事务
- * （正文入库 + 章节点 document_id 回写 + status=completed）、
- * 一章一份 / 节点类型 / 归属校验与整本删除级联。
+ * DocumentStore 单元测试（元数据形态：正文内容存文件、库内只留 file_path 与字数）：
+ * 临时目录 SQLite 上验证保存绑定事务（元数据入库 + 章节点 document_id 回写 +
+ * status=completed）、一章一份 / 节点类型 / 归属校验、路径批量更新与整本删除级联。
  */
 
 const NOVEL_ID = "aaaaaaaa-0000-7000-8000-0000000000a0";
@@ -33,7 +33,7 @@ async function setupDb(): Promise<TestContext> {
   const novelStore = new NovelStore(db);
   const outlineStore = new OutlineStore(db);
   const documentStore = new DocumentStore(db);
-  novelStore.createNovel({ id: NOVEL_ID });
+  novelStore.createNovel({ id: NOVEL_ID, name: "灵脉拾遗" });
   novelStore.createNovel({ id: OTHER_NOVEL_ID });
   const [part, act] = outlineStore.saveOutlineTree(NOVEL_ID, [
     {
@@ -67,19 +67,21 @@ describe("DocumentStore", () => {
     await Promise.all(cleanups.map((fn) => fn()));
   });
 
-  test("保存正文：单事务入库 + 章节点绑定 document_id 并置 completed，字数不计空白", async () => {
+  test("保存元数据：单事务入库 + 章节点绑定 document_id 并置 completed", async () => {
     const ctx = await setupDb();
     cleanups.push(ctx.cleanup);
 
+    const filePath = join("灵脉拾遗", "第一部", "第一章.md");
     const document = ctx.documentStore.saveChapterDocument(
       NOVEL_ID,
       ctx.chapterNodeId,
-      "灵脉断绝的第九十九年。\n\n少年在市集的角落里睁开眼。",
+      filePath,
+      24,
     );
 
     expect(document.novelId).toBe(NOVEL_ID);
     expect(document.chapterId).toBe(ctx.chapterNodeId);
-    // 两句正文共 24 个汉字/标点，空白（换行）不计
+    expect(document.filePath).toBe(filePath);
     expect(document.wordCount).toBe(24);
 
     // 章节点回写：document_id 指向正文主键、状态计划中 → 写作完成
@@ -95,9 +97,9 @@ describe("DocumentStore", () => {
   test("一章一份：同章重复保存被拒绝（可读错误）", async () => {
     const ctx = await setupDb();
     cleanups.push(ctx.cleanup);
-    ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "第一次生成的正文。");
+    ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "a/b/c.md", 9);
     expect(() =>
-      ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "第二次生成的正文。"),
+      ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "a/b/c-2.md", 9),
     ).toThrow("已有正文");
   });
 
@@ -106,27 +108,25 @@ describe("DocumentStore", () => {
     cleanups.push(ctx.cleanup);
 
     expect(() =>
-      ctx.documentStore.saveChapterDocument(NOVEL_ID, "ffffffff-0000-7000-8000-0000000000f1", "正文"),
+      ctx.documentStore.saveChapterDocument(NOVEL_ID, "ffffffff-0000-7000-8000-0000000000f1", "a.md", 1),
     ).toThrow("章节节点不存在或不属于该小说");
 
     expect(() =>
-      ctx.documentStore.saveChapterDocument(OTHER_NOVEL_ID, ctx.chapterNodeId, "正文"),
+      ctx.documentStore.saveChapterDocument(OTHER_NOVEL_ID, ctx.chapterNodeId, "a.md", 1),
     ).toThrow("章节节点不存在或不属于该小说");
 
     expect(() =>
-      ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.actNodeId, "正文"),
+      ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.actNodeId, "a.md", 1),
     ).toThrow("不是章");
     expect(() =>
-      ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.partNodeId, "正文"),
+      ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.partNodeId, "a.md", 1),
     ).toThrow("不是章");
   });
 
-  test("空内容被 schema 拒绝（正文必须非空）", async () => {
+  test("空路径被 schema 拒绝（file_path 必须非空）", async () => {
     const ctx = await setupDb();
     cleanups.push(ctx.cleanup);
-    expect(() =>
-      ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, ""),
-    ).toThrow();
+    expect(() => ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "", 1)).toThrow();
     // 失败后章节点不残留绑定
     const chapter = ctx.outlineStore.getOutlineNode(ctx.chapterNodeId)!;
     expect(chapter.node.documentId).toBeNull();
@@ -136,20 +136,49 @@ describe("DocumentStore", () => {
   test("另一章可独立保存（幕下多章各自一份正文）", async () => {
     const ctx = await setupDb();
     cleanups.push(ctx.cleanup);
-    ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "第一章正文。");
+    ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "n/p/1.md", 6);
     const second = ctx.documentStore.saveChapterDocument(
       NOVEL_ID,
       ctx.secondChapterNodeId,
-      "第二章正文。",
+      "n/p/2.md",
+      6,
     );
     expect(second.chapterId).toBe(ctx.secondChapterNodeId);
     expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(2);
   });
 
-  test("整本删除级联清理正文（deleteNovel 单事务）", async () => {
+  test("updateFilePaths：批量更新路径（小说改名迁移联动），空路径被拒绝", async () => {
     const ctx = await setupDb();
     cleanups.push(ctx.cleanup);
-    ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "即将随小说删除的正文。");
+    const first = ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "旧名/部/章.md", 6);
+    const second = ctx.documentStore.saveChapterDocument(
+      NOVEL_ID,
+      ctx.secondChapterNodeId,
+      "旧名/部/章2.md",
+      6,
+    );
+
+    ctx.documentStore.updateFilePaths([
+      { id: first.id, filePath: "新名/部/章.md" },
+      { id: second.id, filePath: "新名/部/章2.md" },
+    ]);
+    const paths = ctx.documentStore
+      .listDocuments(NOVEL_ID)
+      .map((d) => d.filePath)
+      .sort();
+    expect(paths).toEqual(["新名/部/章.md", "新名/部/章2.md"].sort());
+
+    expect(() =>
+      ctx.documentStore.updateFilePaths([{ id: first.id, filePath: "" }]),
+    ).toThrow();
+    // 事务原子：非法项拒绝后，第一条路径不被部分更新
+    expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.filePath).toBe("新名/部/章.md");
+  });
+
+  test("整本删除级联清理正文元数据（deleteNovel 单事务）", async () => {
+    const ctx = await setupDb();
+    cleanups.push(ctx.cleanup);
+    ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "n/p/章.md", 8);
     ctx.novelStore.deleteNovel(NOVEL_ID);
     expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(0);
   });

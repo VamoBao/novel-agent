@@ -535,6 +535,14 @@ button.danger {
   word-break: break-word;
 }
 
+/* 正文卡内文件路径提示（小字灰） */
+.viewcard .doc-path {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #6a737d;
+  word-break: break-all;
+}
+
 /* ViewCard（创作流大纲/章节视图）情节点行——与 plot-list 独立 */
 .viewcard .plot {
   padding-left: 16px;

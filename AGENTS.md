@@ -1,6 +1,6 @@
 # novel-agent
 
-一个基于 Bun + TypeScript 构建的交互式小说创作 AI Agent 应用（Bun workspaces monorepo：CLI 应用 `apps/agent` + 共享 schema 包 `packages/shared`，Electron 客户端 `apps/client` 建设中）：通过类型/受众问答、世界观 / 角色 / 核心冲突的多轮收集确认、两级大纲（部→幕）生成确认入库，完成小说前期设定与写作准备，并按 UUIDv7 创作 ID 持久化到 SQLite 与 `output/` 落盘；大纲确认后会话即收尾，章节规划（章名 + 剧情概述，确认后幕下入库）不自动衔接，由幕节点「规划本幕章节」入口逐幕手动发起；章节正文经章节点「✍️ 生成本章正文」入口由写作模型（OpenAI 接口兼容端点，与 Agent 模型解耦）按章节概述单轮生成入库（documents 表，章节点绑定 document_id）并在章卡展示；已入库大纲可经「📖 大纲」刷新入口重新生成（新版本入库、旧版与旧章归档为历史版本）。CLI 入口 `apps/agent/src/index.ts`。
+一个基于 Bun + TypeScript 构建的交互式小说创作 AI Agent 应用（Bun workspaces monorepo：CLI 应用 `apps/agent` + 共享 schema 包 `packages/shared`，Electron 客户端 `apps/client` 建设中）：通过类型/受众问答、世界观 / 角色 / 核心冲突的多轮收集确认、两级大纲（部→幕）生成确认入库，完成小说前期设定与写作准备，并按 UUIDv7 创作 ID 持久化到 SQLite 与 `output/` 落盘；大纲确认后会话即收尾，章节规划（章名 + 剧情概述，确认后幕下入库）不自动衔接，由幕节点「规划本幕章节」入口逐幕手动发起；章节正文经章节点「✍️ 生成本章正文」入口由写作模型（OpenAI 接口兼容端点，与 Agent 模型解耦）按章节概述单轮生成，**内容存文件**（`output/<小说名>/<部名>/<章名>.md`，documents 表只留 file_path 元数据、章节点绑定 document_id）并在章卡展示；已入库大纲可经「📖 大纲」刷新入口重新生成（新版本入库、旧版与旧章归档为历史版本）。CLI 入口 `apps/agent/src/index.ts`。
 
 ## 技术栈
 
@@ -30,8 +30,8 @@
 
 - `apps/agent/`：`@novel/agent`——小说创作 CLI 应用（原 `src/` 整体迁入，内部分层与依赖边界不变）
   - `src/index.ts`：CLI 应用入口（Key 检查、触发主工作流，不承载业务逻辑）
-  - `src/headless.ts`：协议模式入口——stdio JSON 行协议（hello 握手、消息分发、EOF/SIGTERM 收尾），由 Electron 等宿主进程 spawn；argv 选会话模式（无参 = 新建小说全流程，`plan-chapters <novelId> <actNodeId>` = 单幕章节规划，`regen-outline <novelId>` = 大纲重新生成新版本入库，`polish-character <novelId> [characterId] <formJson>` = 角色 AI 润色——结果经 polish-result 协议消息回传，`write-chapter <novelId> <chapterNodeId>` = 章节正文生成——写作模型单轮生成入库并绑定 document_id，本会话不经 DeepSeek）
-  - `src/query.ts`：库查询与管理入口——一次性 CLI（查询：`list` 列小说 / `get <novelId>` 取世界观+角色+大纲节点+章节正文资料——大纲读 outlines 表当前版本节点、正文读 documents 表，不再读 output 产物；管理：`rename` / `pin` / `unpin` / `favorite` / `unfavorite` / `delete` / `add-character` 新增角色 / `update-character` 版本化编辑角色），stdout 单行 JSON（契约见 shared query.ts），即起即退
+  - `src/headless.ts`：协议模式入口——stdio JSON 行协议（hello 握手、消息分发、EOF/SIGTERM 收尾），由 Electron 等宿主进程 spawn；argv 选会话模式（无参 = 新建小说全流程，`plan-chapters <novelId> <actNodeId>` = 单幕章节规划，`regen-outline <novelId>` = 大纲重新生成新版本入库，`polish-character <novelId> [characterId] <formJson>` = 角色 AI 润色——结果经 polish-result 协议消息回传，`write-chapter <novelId> <chapterNodeId>` = 章节正文生成——写作模型单轮生成、正文落文件 + 元数据入库并绑定 document_id，本会话不经 DeepSeek）
+  - `src/query.ts`：库查询与管理入口——一次性 CLI（查询：`list` 列小说 / `get <novelId>` 取世界观+角色+大纲节点+章节正文资料——大纲读 outlines 表当前版本节点、正文读 documents 表并在查询时读文件拼 content；管理：`rename` / `pin` / `unpin` / `favorite` / `unfavorite` / `delete` / `add-character` 新增角色 / `update-character` 版本化编辑角色），stdout 单行 JSON（契约见 shared query.ts），即起即退
   - `src/cli/prompt.ts`：终端输入原语（TTY/管道双模式，EOF 优雅中止，并发读取串行化）
   - `src/ui/`：交互通道层——`channel.ts` UiChannel 接口 + `aborted.ts` 中止异常 + `cli-channel.ts` 终端实现（含角色卡/大纲等视图渲染）+ `protocol-channel.ts` stdio JSON 协议实现 + `fake-channel.ts` 测试替身；业务层交互与输出的唯一出口（ESLint 边界规则强制）
   - `src/providers/`：LLM 接入层（`deepseek.ts`：Key 读 `DEEPSEEK_API_KEY`，模型读 `DEEPSEEK_MODEL_NAME`，默认 `deepseek-flash`；`writing-model.ts`：写作模型惰性工厂 `getWritingModel(): LanguageModelV4`——OpenAI 接口兼容端点，读 `WRITING_MODEL_NAME` / `WRITING_MODEL_API_KEY` / `WRITING_MODEL_BASE_URL` 三变量，正文创作工作流接入后使用，未配置时可安全导入、取用抛可读错误）

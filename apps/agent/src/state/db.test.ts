@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -130,6 +131,46 @@ function tableColumns(db: Database, table: string): string[] {
   return (db.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
 }
 
+/** 手工构造 v10 形态的库：v9 形态 + documents 表（含 content 列，正文进库的旧形态），
+ *  幕与章节点及一行带正文的 documents 数据——10→11 迁移的目标数据 */
+function createV10Db(path: string): void {
+  createV9Db(path);
+  const legacy = new Database(path);
+  legacy.exec("PRAGMA foreign_keys = ON;");
+  legacy.exec(`
+    CREATE TABLE documents (
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL REFERENCES novels(id),
+      chapter_id TEXT NOT NULL UNIQUE REFERENCES outlines(id),
+      content TEXT NOT NULL,
+      word_count INTEGER NOT NULL CHECK (word_count >= 0),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  // createV9Db 只建了部节点，补幕与章两级，再挂一行正文
+  legacy
+    .prepare(
+      `INSERT INTO outlines (id, novel_id, parent_id, type, name, summary, sort, version, is_current_version, status, created_at, updated_at)
+       VALUES ('cccccccc-0000-7000-8000-000000000010', ?, 'bbbbbbbb-0000-7000-8000-000000000004', 'act', '第一幕·市集', '市集风波', 1, 1, 1, 'planned', ?, ?);`,
+    )
+    .run(NOVEL_ID, NOW, NOW);
+  legacy
+    .prepare(
+      `INSERT INTO outlines (id, novel_id, parent_id, type, name, summary, sort, version, is_current_version, status, document_id, created_at, updated_at)
+       VALUES ('cccccccc-0000-7000-8000-000000000011', ?, 'cccccccc-0000-7000-8000-000000000010', 'chapter', '第一章·碎片', '少年拾得碎片', 1, 1, 1, 'completed', 'dddddddd-0000-7000-8000-0000000000d1', ?, ?);`,
+    )
+    .run(NOVEL_ID, NOW, NOW);
+  legacy
+    .prepare(
+      `INSERT INTO documents (id, novel_id, chapter_id, content, word_count, created_at, updated_at)
+       VALUES ('dddddddd-0000-7000-8000-0000000000d1', ?, 'cccccccc-0000-7000-8000-000000000011', '旧形态入库的正文内容。', 11, ?, ?);`,
+    )
+    .run(NOVEL_ID, NOW, NOW);
+  legacy.exec("PRAGMA user_version = 10;");
+  legacy.close();
+}
+
 /** 手工构造 v9 形态的库（当前投产版本，缺 documents 表）：v7 形态 + foreshadows
  *  + character_versions + characters.version 列，写 user_version=9 */
 function createV9Db(path: string): void {
@@ -169,14 +210,14 @@ function createV9Db(path: string): void {
   legacy.close();
 }
 
-describe("openDatabase 迁移（SCHEMA_VERSION 10）", () => {
+describe("openDatabase 迁移（SCHEMA_VERSION 11）", () => {
   const tempDirs: string[] = [];
 
   afterAll(async () => {
     await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
   });
 
-  test("v5 库迁移：outlines 补内容列、数据无损、版本升 10", async () => {
+  test("v5 库迁移：outlines 补内容列、数据无损、版本升 11", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig5-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "v5.db");
@@ -213,11 +254,11 @@ describe("openDatabase 迁移（SCHEMA_VERSION 10）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(10);
+    ).toBe(11);
     db.close();
   });
 
-  test("v6 库迁移：locations 表落地、既有数据无损、版本升 10（5→6 段不重复执行）", async () => {
+  test("v6 库迁移：locations 表落地、既有数据无损、版本升 11（5→6 段不重复执行）", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig6-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "v6.db");
@@ -260,11 +301,11 @@ describe("openDatabase 迁移（SCHEMA_VERSION 10）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(10);
+    ).toBe(11);
     db.close();
   });
 
-  test("v7 库迁移：foreshadows 表落地、既有数据无损、版本升 10", async () => {
+  test("v7 库迁移：foreshadows 表落地、既有数据无损、版本升 11", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig7-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "v7.db");
@@ -310,23 +351,24 @@ describe("openDatabase 迁移（SCHEMA_VERSION 10）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(10);
+    ).toBe(11);
     db.close();
   });
 
-  test("v9 库迁移：documents 表落地、既有数据无损、版本升 10（真实投产库的升级路径）", async () => {
+  test("v9 库迁移：documents 表落地、既有数据无损、版本升 11（真实投产库的升级路径）", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig9-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "v9.db");
     createV9Db(dbPath);
 
-    // 9→10 为纯新增表迁移（同 6→7 模式）：幂等建 documents，不动既有七表
+    // 9→10→11 连续两段：幂等建 documents（10），随后 v10→11 段不重放（守卫 version === 10），
+    // 直接得到 11 形态——file_path 列、无 content 列
     const db = openDatabase(dbPath);
     expect(tableColumns(db, "documents")).toEqual([
       "id",
       "novel_id",
       "chapter_id",
-      "content",
+      "file_path",
       "word_count",
       "created_at",
       "updated_at",
@@ -351,7 +393,61 @@ describe("openDatabase 迁移（SCHEMA_VERSION 10）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(10);
+    ).toBe(11);
+    db.close();
+  });
+
+  test("v10 库迁移：存量正文按小说/部/章层级落文件、file_path 回填、content 列移除、版本升 11", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-db-mig10-"));
+    tempDirs.push(dir);
+    const dbPath = join(dir, "v10.db");
+    const outputDir = join(dir, "output");
+    createV10Db(dbPath);
+
+    const savedOutputDir = process.env.NOVEL_OUTPUT_DIR;
+    process.env.NOVEL_OUTPUT_DIR = outputDir;
+    let db: Database;
+    try {
+      db = openDatabase(dbPath);
+    } finally {
+      if (savedOutputDir === undefined) {
+        delete process.env.NOVEL_OUTPUT_DIR;
+      } else {
+        process.env.NOVEL_OUTPUT_DIR = savedOutputDir;
+      }
+    }
+
+    // 存量 content 已落文件：output/旧世界之书/第一部/第一章·碎片.md
+    const artifact = join(outputDir, "旧世界之书", "第一部", "第一章·碎片.md");
+    expect(existsSync(artifact)).toBe(true);
+    expect(readFileSync(artifact, "utf8")).toBe("旧形态入库的正文内容。");
+
+    // 表形态：file_path 回填相对路径、content 列移除
+    expect(tableColumns(db, "documents")).toEqual([
+      "id",
+      "novel_id",
+      "chapter_id",
+      "word_count",
+      "created_at",
+      "updated_at",
+      "file_path",
+    ]);
+    const row = db
+      .query("SELECT file_path, word_count FROM documents WHERE id = 'dddddddd-0000-7000-8000-0000000000d1'")
+      .get() as { file_path: string; word_count: number };
+    expect(row.file_path).toBe(join("旧世界之书", "第一部", "第一章·碎片.md"));
+    expect(row.word_count).toBe(11);
+
+    // 章节点绑定不受迁移影响
+    const chapter = db
+      .query("SELECT document_id, status FROM outlines WHERE id = 'cccccccc-0000-7000-8000-000000000011'")
+      .get() as { document_id: string; status: string };
+    expect(chapter.document_id).toBe("dddddddd-0000-7000-8000-0000000000d1");
+    expect(chapter.status).toBe("completed");
+
+    expect(
+      (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
+    ).toBe(11);
     db.close();
   });
 
@@ -377,11 +473,11 @@ describe("openDatabase 迁移（SCHEMA_VERSION 10）", () => {
     ).toBe(1);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(10);
+    ).toBe(11);
     db.close();
   });
 
-  test("全新库：建表即含内容列与 locations / foreshadows / documents 表、版本为 10", async () => {
+  test("全新库：建表即含内容列与 locations / foreshadows / documents（file_path）表、版本为 11", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-fresh-"));
     tempDirs.push(dir);
     const db = openDatabase(join(dir, "fresh.db"));
@@ -395,7 +491,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 10）", () => {
     expect(tableColumns(db, "documents")).toContain("word_count");
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(10);
+    ).toBe(11);
     db.close();
   });
 });

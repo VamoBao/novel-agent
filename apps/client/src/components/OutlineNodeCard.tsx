@@ -20,7 +20,8 @@ interface OutlineNodeCardProps {
  * 树为准（点击时已高亮），右栏不再重复；入口仅未规划过章节的幕显示，旧数
  * 据幕缺梗概/情节点（无规划种子内容），禁用并提示原因。
  * 章节点：无正文时同样右对齐显示「✍️ 生成本章正文」入口（写作模型生成，
- * write-chapter 会话）；已有正文则在梗概卡下追加正文卡（约 N 字 + 全文，
+ * write-chapter 会话）；已有正文则在梗概卡下追加正文卡（约 N 字 + 全文 +
+ * 落盘路径——内容存 output/<小说名>/<部名>/<章名>.md，库内只留元数据；
  * 重写/修订流为后续需求）。
  * 浏览路径专用，不进 shared 的 View 体系——
  * 避免浏览专用视图渗入创作流协议（protocol.ts 内嵌 viewSchema）。
@@ -66,7 +67,12 @@ export function OutlineNodeCard({
       {node.type === "chapter" && document ? (
         <section className="viewcard">
           <p className="card-label">正文 · 约 {document.wordCount} 字</p>
-          <div className="prose-content">{document.content}</div>
+          {document.content ? (
+            <div className="prose-content">{document.content}</div>
+          ) : (
+            <p className="dim">（正文文件缺失或已被移动）</p>
+          )}
+          <p className="doc-path">已保存至 output/{document.filePath}</p>
         </section>
       ) : null}
       {showEntry ? (

@@ -1,13 +1,13 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 
 /** 数据库文件路径（相对项目根；可用环境变量 NOVEL_DB_PATH 覆盖，测试用） */
 export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 /**
  * 打开（必要时创建）数据库并完成建表。
@@ -20,14 +20,75 @@ const SCHEMA_VERSION = 10;
  * - worldviews：世界观，1:1（novel_id 唯一），taboos 数组存 JSON 文本
  * - outlines：大纲树（部/幕两级入库，章为写作期预留），parent_id 自引用外键，多版本行并存；
  *   内容随节点入库（summary 梗概，key_plot_points 关键情节点存 JSON 文本，仅幕节点携带）
- * - documents：章节正文（一章一份，chapter_id 唯一外键挂 outlines 章节点；outlines.document_id
- *   为绑定回写列——同指一份数据，入库同事务维护），长文本与大纲内容列职责分离
+ * - documents：章节正文元数据（一章一份，chapter_id 唯一外键挂 outlines 章节点；
+ *   file_path 为正文文件相对路径——内容存文件系统 `<output>/<小说名>/<部名>/<章名>.md`，
+ *   与 outlines.document_id 绑定回写列同事务维护），长文本不进库
  * - locations：小说世界的地理位置（坐标/图层/人口），parent_id 自引用外键（城市→大陆层级），
  *   population 可空（无人/未设定）
  * - foreshadows：伏笔（表面行为/隐藏真相/读者注意度 1-10/回收状态枚举），
  *   出现章节 ID 为可空裸列（chapter 节点写作期落地后补约束，先例 document_id），
  *   回收章节 IDs 与服务角色 IDs 存 JSON 文本
  */
+/**
+ * 10→11 数据迁移：documents 表正文改文件存储。
+ * 存量行的 content 按「小说名/部名/章名.md」层级写入 output 根（NOVEL_OUTPUT_DIR，
+ * 与 outline-writer 同源默认 output/），回填 file_path 后 DROP content 列。
+ * 路径段清理规则与 output/document-writer 一致（此处为 state 层，不反向依赖
+ * output/ 层，本地保留同款小函数）；目标文件已存在时以文档 ID 作后缀防覆盖。
+ */
+function migrateDocumentsToFile(db: Database): void {
+  const outputRoot = process.env.NOVEL_OUTPUT_DIR ?? "output";
+  const sanitize = (name: string | null | undefined, fallback: string): string => {
+    const cleaned = (name ?? "")
+      // 文件名安全清理须覆盖控制字符，豁免 no-control-regex 检查
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/[.\s]+$/, "");
+    return cleaned.length > 0 ? cleaned.slice(0, 80) : fallback;
+  };
+  const rows = db
+    .prepare(
+      `SELECT d.id, d.content,
+              (SELECT name FROM novels WHERE id = d.novel_id) AS novel_name,
+              c.name AS chapter_name,
+              (SELECT name FROM outlines WHERE id = c.parent_id) AS act_name,
+              (SELECT name FROM outlines WHERE id = (SELECT parent_id FROM outlines WHERE id = c.parent_id)) AS part_name
+       FROM documents d JOIN outlines c ON c.id = d.chapter_id;`,
+    )
+    .all() as Array<{
+    id: string;
+    content: string;
+    novel_name: string | null;
+    chapter_name: string;
+    act_name: string | null;
+    part_name: string | null;
+  }>;
+  const paths = new Map<string, string>();
+  for (const row of rows) {
+    // 各级名称缺失（异常数据）时以文档 ID 片段兜底，保证路径段非空
+    const segments = [
+      sanitize(row.novel_name, `novel-${row.id.slice(0, 8)}`),
+      sanitize(row.part_name, `part-${row.id.slice(0, 8)}`),
+      sanitize(row.chapter_name, `chapter-${row.id.slice(0, 8)}`),
+    ];
+    const base = join(outputRoot, ...segments);
+    const target = existsSync(`${base}.md`)
+      ? `${base}-${row.id.slice(0, 8)}.md`
+      : `${base}.md`;
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, row.content);
+    paths.set(row.id, relative(outputRoot, target));
+  }
+  db.exec("ALTER TABLE documents ADD COLUMN file_path TEXT NOT NULL DEFAULT '';");
+  const update = db.prepare("UPDATE documents SET file_path = ? WHERE id = ?;");
+  for (const [id, filePath] of paths) {
+    update.run(filePath, id);
+  }
+  db.exec("ALTER TABLE documents DROP COLUMN content;");
+}
+
 export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
   mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path, { create: true });
@@ -67,9 +128,14 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
         // 历史快照表 character_versions 由下方 CREATE TABLE IF NOT EXISTS 幂等落地
         db.exec("ALTER TABLE characters ADD COLUMN version INTEGER NOT NULL DEFAULT 1;");
       }
-      // 9→10：新增 documents 表（章节正文），无 ALTER——由下方 CREATE TABLE IF NOT EXISTS 幂等落地
+      if (version === 10) {
+        // 10→11：正文改文件存储——documents 去 content 列、增 file_path；
+        // 存量行的 content 先按「小说名/部名/章名」层级落文件（保数据），见 migrateDocumentsToFile
+        migrateDocumentsToFile(db);
+      }
+      // 9→10：新增 documents 表，无 ALTER——由下方 CREATE TABLE IF NOT EXISTS 幂等落地
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>10 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>11 的库被旧代码打开）：重建兜底
       db.exec("DROP TABLE IF EXISTS documents;");
       db.exec("DROP TABLE IF EXISTS outlines;");
       db.exec("DROP TABLE IF EXISTS locations;");
@@ -180,7 +246,7 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       id TEXT PRIMARY KEY,
       novel_id TEXT NOT NULL REFERENCES novels(id),
       chapter_id TEXT NOT NULL UNIQUE REFERENCES outlines(id),
-      content TEXT NOT NULL,
+      file_path TEXT NOT NULL DEFAULT '',
       word_count INTEGER NOT NULL CHECK (word_count >= 0),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL

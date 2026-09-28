@@ -43,13 +43,18 @@ export const outlineNodeEntrySchema = z.object({
 });
 export type OutlineNodeEntry = z.infer<typeof outlineNodeEntrySchema>;
 
-/** 章节正文条目：章节点预览用（novelId 冗余于详情载荷，不重复携带） */
+/** 章节正文条目：章节点预览用（novelId 冗余于详情载荷，不重复携带）；
+ *  content 为查询时从文件读取的全文，文件缺失 / 被移动时为 null（客户端占位提示） */
 export const documentEntrySchema = z.object({
   id: z.string().min(1).describe("documents 表主键（UUIDv7）"),
   chapterId: z.string().min(1).describe("所属章（outlines 表 chapter 节点）ID"),
-  content: z.string().min(1).describe("正文全文（写作模型生成）"),
+  filePath: z.string().min(1).describe("正文文件相对路径（相对 output 根）"),
   wordCount: z.number().int().min(0).describe("正文字数（不含空白字符）"),
   updatedAt: z.string().describe("生成时间（ISO 8601）"),
+  content: z
+    .string()
+    .nullable()
+    .describe("正文全文（查询时读文件）；文件缺失或被移动为 null"),
 });
 export type DocumentEntry = z.infer<typeof documentEntrySchema>;
 

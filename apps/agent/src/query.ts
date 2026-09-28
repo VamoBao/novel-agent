@@ -1,4 +1,5 @@
 import { unlinkSync } from "node:fs";
+import { join } from "node:path";
 import {
   characterEntrySchema,
   characterSchema,
@@ -20,6 +21,12 @@ import { OutlineStore } from "./state/outline-store";
 import { WorldviewStore } from "./state/worldview-store";
 import { DocumentStore } from "./state/document-store";
 import { OUTPUT_DIR, outlineFilePath } from "./output/outline-writer";
+import {
+  moveDocumentArtifact,
+  readDocumentArtifact,
+  removeDocumentArtifact,
+  sanitizePathSegment,
+} from "./output/document-writer";
 
 /**
  * 库查询与管理入口（一次性 CLI）：Electron 客户端等宿主经
@@ -29,10 +36,11 @@ import { OUTPUT_DIR, outlineFilePath } from "./output/outline-writer";
  *
  * 命令一览：
  * - 查询：`list`（全部小说，置顶优先）/ `get <novelId>`（单本全量资料，
- *   大纲读 outlines 表当前版本节点、正文读 documents 表——output 产物仅供留存，
- *   不再决定浏览读取）
- * - 管理：`rename <novelId> <name>` / `pin|unpin <novelId>` / `favorite|unfavorite <novelId>`
- *   / `delete <novelId>`（级联删除关联数据并清理 output 产物）
+ *   大纲读 outlines 表当前版本节点、正文读 documents 表并在查询时读文件拼
+ *   content——output 产物仅供留存，不再决定浏览读取）
+ * - 管理：`rename <novelId> <name>`（连带迁移按小说名落盘的正文文件）/ `pin|unpin <novelId>`
+ *   / `favorite|unfavorite <novelId>` / `delete <novelId>`（级联删除关联数据并清理
+ *   output 产物——大纲 JSON 与正文文件）
  *   / `add-character <novelId> <角色卡JSON>`（新增角色，version=1）
  *   / `update-character <novelId> <characterId> <角色卡JSON>`（版本化编辑角色，旧卡快照归档）
  *
@@ -56,10 +64,12 @@ export function buildNovelList(db: ReturnType<typeof openDatabase>): NovelListIt
   return new NovelStore(db).listNovels().map(toListItem);
 }
 
-/** get 载荷：单本小说全量资料；小说不存在抛错 */
+/** get 载荷：单本小说全量资料；小说不存在抛错。章节正文的 content 在查询时
+ *  从 output 根读文件拼装（内容不进库），文件缺失 / 被移动为 null（客户端占位） */
 export function buildNovelDetail(
   db: ReturnType<typeof openDatabase>,
   novelId: string,
+  outputDir: string = OUTPUT_DIR,
 ): NovelDetail {
   const novel = new NovelStore(db).getNovel(novelId);
   if (!novel) {
@@ -82,12 +92,13 @@ export function buildNovelDetail(
     }));
   const documents: DocumentEntry[] = new DocumentStore(db)
     .listDocuments(novelId)
-    .map(({ id, chapterId, content, wordCount, updatedAt }) => ({
+    .map(({ id, chapterId, filePath, wordCount, updatedAt }) => ({
       id,
       chapterId,
-      content,
+      filePath,
       wordCount,
       updatedAt,
+      content: readDocumentArtifact(filePath, outputDir),
     }));
   return novelDetailSchema.parse({
     novel: toListItem(novel),
@@ -98,13 +109,38 @@ export function buildNovelDetail(
   });
 }
 
-/** rename 载荷：更新名称（trim 非空校验），返回更新后列表项 */
-export function renameNovel(db: ReturnType<typeof openDatabase>, novelId: string, name: string): NovelListItem {
+/** rename 载荷：更新名称（trim 非空校验），返回更新后列表项。
+ *  正文按小说名落盘层级存储，改名连带迁移该小说的全部正文文件
+ *  （逐文件移动到新名首段，库内 file_path 同步；文件缺失时只更新路径） */
+export function renameNovel(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  name: string,
+  outputDir: string = OUTPUT_DIR,
+): NovelListItem {
   const trimmed = name.trim();
   if (trimmed.length === 0) {
     throw new Error("小说名称不能为空");
   }
-  return toListItem(new NovelStore(db).updateNovel(novelId, { name: trimmed }));
+  const documentStore = new DocumentStore(db);
+  const documents = documentStore.listDocuments(novelId);
+  const updated = new NovelStore(db).updateNovel(novelId, { name: trimmed });
+  if (documents.length > 0) {
+    const newSegment = sanitizePathSegment(trimmed, "未命名小说");
+    const moves = documents
+      .map((document) => {
+        const segments = document.filePath.split(/[\\/]/);
+        if (segments.length < 2) return null;
+        const rest = segments.slice(1).join("/");
+        return { id: document.id, from: document.filePath, to: join(newSegment, rest) };
+      })
+      .filter((move): move is { id: string; from: string; to: string } => move !== null);
+    for (const move of moves) {
+      moveDocumentArtifact(move.from, move.to, outputDir);
+    }
+    documentStore.updateFilePaths(moves.map(({ id, to }) => ({ id, filePath: to })));
+  }
+  return toListItem(updated);
 }
 
 /** 置顶 / 收藏载荷：置位后返回更新后列表项 */
@@ -124,13 +160,18 @@ export function setNovelFavorite(
   return toListItem(new NovelStore(db).setNovelFavorite(novelId, favorite));
 }
 
-/** delete 载荷：级联删除四表关联数据 + best-effort 清理 output 产物 */
+/** delete 载荷：级联删除关联数据 + best-effort 清理 output 产物（大纲 JSON 与
+ *  章节正文文件——正文文件按 documents 登记的 file_path 逐一删除，缺失不报错） */
 export function deleteNovel(
   db: ReturnType<typeof openDatabase>,
   novelId: string,
   outputDir: string = OUTPUT_DIR,
 ): NovelDeletedResult {
+  const documents = new DocumentStore(db).listDocuments(novelId);
   new NovelStore(db).deleteNovel(novelId);
+  for (const document of documents) {
+    removeDocumentArtifact(document.filePath, outputDir);
+  }
   try {
     unlinkSync(outlineFilePath(novelId, outputDir));
   } catch {
