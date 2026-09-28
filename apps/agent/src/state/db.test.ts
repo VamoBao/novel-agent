@@ -417,8 +417,8 @@ describe("openDatabase 迁移（SCHEMA_VERSION 11）", () => {
       }
     }
 
-    // 存量 content 已落文件：output/旧世界之书/第一部/第一章·碎片.md
-    const artifact = join(outputDir, "旧世界之书", "第一部", "第一章·碎片.md");
+    // 存量 content 已落文件：output/旧世界之书-aaaaaaaa/第一部/第一章·碎片.md
+    const artifact = join(outputDir, "旧世界之书-aaaaaaaa", "第一部", "第一章·碎片.md");
     expect(existsSync(artifact)).toBe(true);
     expect(readFileSync(artifact, "utf8")).toBe("旧形态入库的正文内容。");
 
@@ -435,7 +435,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 11）", () => {
     const row = db
       .query("SELECT file_path, word_count FROM documents WHERE id = 'dddddddd-0000-7000-8000-0000000000d1'")
       .get() as { file_path: string; word_count: number };
-    expect(row.file_path).toBe(join("旧世界之书", "第一部", "第一章·碎片.md"));
+    expect(row.file_path).toBe(join("旧世界之书-aaaaaaaa", "第一部", "第一章·碎片.md"));
     expect(row.word_count).toBe(11);
 
     // 章节点绑定不受迁移影响

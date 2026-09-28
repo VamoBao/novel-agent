@@ -126,7 +126,7 @@ export function renameNovel(
   const documents = documentStore.listDocuments(novelId);
   const updated = new NovelStore(db).updateNovel(novelId, { name: trimmed });
   if (documents.length > 0) {
-    const newSegment = sanitizePathSegment(trimmed, "未命名小说");
+    const newSegment = `${sanitizePathSegment(trimmed, "未命名小说")}-${novelId.slice(0, 8)}`;
     const moves = documents
       .map((document) => {
         const segments = document.filePath.split(/[\\/]/);

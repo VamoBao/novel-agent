@@ -177,10 +177,11 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
     throw new Error("写作模型返回了空正文，请稍后重试");
   }
 
-  // 正文落盘（小说名/部名/章名层级，同名冲突自动加后缀），库绑定失败时回滚删除文件
+  // 正文落盘（小说名-<id前8位>/部名/章名层级，同名小说不共享文件夹），库绑定失败时回滚删除文件
   const relativePath = buildChapterDocumentPath(
     {
       novelName: novel.name ?? "未命名小说",
+      novelId,
       partName: part.node.name,
       chapterName: chapter.node.name,
     },

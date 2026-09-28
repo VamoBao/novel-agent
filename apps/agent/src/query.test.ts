@@ -206,9 +206,9 @@ describe("query CLI 管理命令（rename / pin / favorite / delete）", () => {
 
     // 文件移动到新名首段，库内 file_path 同步，读取可达
     expect(existsSync(join(outputDir, "旧名", "部一", "章一.md"))).toBe(false);
-    expect(existsSync(join(outputDir, "新名", "部一", "章一.md"))).toBe(true);
+    expect(existsSync(join(outputDir, "新名-aaaaaaaa", "部一", "章一.md"))).toBe(true);
     const detail = buildNovelDetail(db, id, outputDir);
-    expect(detail.documents[0]?.filePath).toBe(join("新名", "部一", "章一.md"));
+    expect(detail.documents[0]?.filePath).toBe(join("新名-aaaaaaaa", "部一", "章一.md"));
     expect(detail.documents[0]?.content).toBe("正文内容。");
     db.close();
   });

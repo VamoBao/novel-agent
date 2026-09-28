@@ -144,7 +144,7 @@ describe("writeChapter", () => {
     });
 
     // 正文按「小说名/部名/章名.md」层级落文件，内容为生成文本
-    const artifact = join(ctx.outputDir, "灵脉拾遗", "第一部", "第一章.md");
+    const artifact = join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
     expect(existsSync(artifact)).toBe(true);
     expect(readFileSync(artifact, "utf8")).toBe(PROSE.trim());
 
@@ -166,7 +166,7 @@ describe("writeChapter", () => {
     expect(chapter.node.status).toBe("completed");
     expect(result.wordCount).toBe(38);
     const stored = ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!;
-    expect(stored.filePath).toBe(join("灵脉拾遗", "第一部", "第一章.md"));
+    expect(stored.filePath).toBe(join("灵脉拾遗-eeeeeeee", "第一部", "第一章.md"));
 
     // 通知：启动与保存路径统计
     expect(channel.notifies.some((n) => n.includes("正文生成中"))).toBeTrue();
@@ -231,7 +231,7 @@ describe("writeChapter", () => {
     generateTextResult = PROSE;
 
     // 预置同名文件（模拟上一版大纲的同名章正文残留）
-    const legacy = join(ctx.outputDir, "灵脉拾遗", "第一部", "第一章.md");
+    const legacy = join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
     await Bun.write(legacy, "旧版同名章的正文。");
 
     const result = await writeChapter({
@@ -243,11 +243,11 @@ describe("writeChapter", () => {
 
     // 旧文件原样保留，新正文落到 -2 后缀文件
     expect(readFileSync(legacy, "utf8")).toBe("旧版同名章的正文。");
-    const newPath = join(ctx.outputDir, "灵脉拾遗", "第一部", "第一章-2.md");
+    const newPath = join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章-2.md");
     expect(existsSync(newPath)).toBe(true);
     expect(readFileSync(newPath, "utf8")).toBe(PROSE.trim());
     expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.filePath).toBe(
-      join("灵脉拾遗", "第一部", "第一章-2.md"),
+      join("灵脉拾遗-eeeeeeee", "第一部", "第一章-2.md"),
     );
     expect(result.documentId).toBeDefined();
   });
@@ -275,7 +275,7 @@ describe("writeChapter", () => {
         documentStore: failingStore,
       }),
     ).rejects.toThrow("模拟库写入失败");
-    expect(existsSync(join(ctx.outputDir, "灵脉拾遗", "第一部", "第一章.md"))).toBe(false);
+    expect(existsSync(join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md"))).toBe(false);
     expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(0);
   });
 

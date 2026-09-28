@@ -31,10 +31,11 @@ const SCHEMA_VERSION = 11;
  */
 /**
  * 10→11 数据迁移：documents 表正文改文件存储。
- * 存量行的 content 按「小说名/部名/章名.md」层级写入 output 根（NOVEL_OUTPUT_DIR，
- * 与 outline-writer 同源默认 output/），回填 file_path 后 DROP content 列。
- * 路径段清理规则与 output/document-writer 一致（此处为 state 层，不反向依赖
- * output/ 层，本地保留同款小函数）；目标文件已存在时以文档 ID 作后缀防覆盖。
+ * 存量行的 content 按「小说名-<创作ID前8位>/部名/章名.md」层级写入 output 根
+ * （NOVEL_OUTPUT_DIR，与 outline-writer 同源默认 output/），回填 file_path 后
+ * DROP content 列。路径段清理规则与 output/document-writer 一致（此处为 state
+ * 层，不反向依赖 output/ 层，本地保留同款小函数）；目标文件已存在时以文档
+ * ID 作后缀防覆盖。
  */
 function migrateDocumentsToFile(db: Database): void {
   const outputRoot = process.env.NOVEL_OUTPUT_DIR ?? "output";
@@ -50,7 +51,7 @@ function migrateDocumentsToFile(db: Database): void {
   };
   const rows = db
     .prepare(
-      `SELECT d.id, d.content,
+      `SELECT d.id, d.novel_id, d.content,
               (SELECT name FROM novels WHERE id = d.novel_id) AS novel_name,
               c.name AS chapter_name,
               (SELECT name FROM outlines WHERE id = c.parent_id) AS act_name,
@@ -59,6 +60,7 @@ function migrateDocumentsToFile(db: Database): void {
     )
     .all() as Array<{
     id: string;
+    novel_id: string;
     content: string;
     novel_name: string | null;
     chapter_name: string;
@@ -67,9 +69,10 @@ function migrateDocumentsToFile(db: Database): void {
   }>;
   const paths = new Map<string, string>();
   for (const row of rows) {
-    // 各级名称缺失（异常数据）时以文档 ID 片段兜底，保证路径段非空
+    // 各级名称缺失（异常数据）时以文档 ID 片段兜底，保证路径段非空；
+    // 顶层段带小说创作 ID 前 8 位——同名小说不共享文件夹（与 document-writer 同款约定）
     const segments = [
-      sanitize(row.novel_name, `novel-${row.id.slice(0, 8)}`),
+      `${sanitize(row.novel_name, "未命名小说")}-${row.novel_id.slice(0, 8)}`,
       sanitize(row.part_name, `part-${row.id.slice(0, 8)}`),
       sanitize(row.chapter_name, `chapter-${row.id.slice(0, 8)}`),
     ];

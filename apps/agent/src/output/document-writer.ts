@@ -22,15 +22,17 @@ export function sanitizePathSegment(name: string, fallback: string): string {
   return cleaned.length > 0 ? cleaned.slice(0, 80) : fallback;
 }
 
-/** 层级路径输入：小说名 / 所属部名 / 章名（部与章名来自 outlines 树） */
+/** 层级路径输入：小说名 / 小说创作 ID（顶层文件夹去重用）/ 所属部名 / 章名（部与章名来自 outlines 树） */
 export interface ChapterDocumentPathInput {
   novelName: string;
+  novelId: string;
   partName: string;
   chapterName: string;
 }
 
 /**
- * 构造本章正文的相对路径（含冲突规避）：`<小说名>/<部名>/<章名>.md`。
+ * 构造本章正文的相对路径（含冲突规避）：`<小说名>-<创作ID前8位>/<部名>/<章名>.md`。
+ * 顶层文件夹带 ID 后缀——同名小说天然分属不同文件夹，不共享、改名互不波及；
  * 目标文件已存在（同名章的历史正文——大纲重生成后新树复用章名、或残留孤儿
  * 文件）时追加 `-2`、`-3` … 后缀，绝不覆盖既有文件。
  */
@@ -38,7 +40,7 @@ export function buildChapterDocumentPath(
   input: ChapterDocumentPathInput,
   dir: string = OUTPUT_DIR,
 ): string {
-  const novel = sanitizePathSegment(input.novelName, "未命名小说");
+  const novel = `${sanitizePathSegment(input.novelName, "未命名小说")}-${input.novelId.slice(0, 8)}`;
   const part = sanitizePathSegment(input.partName, "未分部");
   const chapter = sanitizePathSegment(input.chapterName, "未命名章节");
   const relative = (name: string): string => join(novel, part, `${name}.md`);

@@ -25,7 +25,8 @@ apps/agent/src/workflows/
 ├── write-chapter.ts          # 章节正文生成编排 writeChapter：读库校验（小说/章节点/概述/无正文/
 │                             #   世界观）→ 库内组上下文（部/幕/前后章/角色摘要）→ 写作模型
 │                             #   getWritingModel() 单轮 generateText（无确认门）→ 正文落文件
-│                             #   （document-writer：output/<小说名>/<部名>/<章名>.md，冲突 -N 后缀）
+│                             #   （document-writer：output/<小说名>-<创作ID前8位>/<部名>/<章名>.md，
+│                             #   顶层带 ID 去重——同名小说不共享文件夹；章名冲突 -N 后缀）
 │                             #   → saveChapterDocument 元数据入库并绑定章节点 document_id；
 │                             #   客户端章节点「✍️ 生成本章正文」入口的会话（headless write-chapter 模式）
 └── agents/                   # 业务 subAgent（每个对应一个创作环节）
@@ -94,7 +95,7 @@ apps/agent/src/workflows/
 
 1. **前置校验**（可读错误，协议入口转 fatal error）：小说存在 → 章节点存在 / 同小说 / 类型 chapter → summary 非空（旧数据缺概述拒绝）→ 所属幕与部节点存在 → 该章尚无正文（documents 一章一份）→ worldviews 有记录（世界观已确认）
 2. **上下文组装（全取自库）**：书名 / logline + 世界观 JSON + 角色摘要行（名/定位/外貌/性格/渴望/恐惧）+ 部名与部梗概 + 幕名与幕梗概及关键情节点 + 本章名与概述 + 同幕前后章名与概述（衔接上文、给下文留空间）
-3. **生成与落盘**：`getWritingModel()`（OpenAI 接口兼容端点，环境变量 WRITING_MODEL_* 配置，未配置抛可读错误）单轮 `generateText`，写作要求含 2000~3000 字、只输出正文文本；空结果拒绝。正文经 document-writer 写 `output/<小说名>/<部名>/<章名>.md`（同名冲突 -N 后缀不覆盖），文件先落、库后入，库失败回滚删文件
+3. **生成与落盘**：`getWritingModel()`（OpenAI 接口兼容端点，环境变量 WRITING_MODEL_* 配置，未配置抛可读错误）单轮 `generateText`，写作要求含 2000~3000 字、只输出正文文本；空结果拒绝。正文经 document-writer 写 `output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`（顶层带 ID 去重；同名章冲突 -N 后缀不覆盖），文件先落、库后入，库失败回滚删文件
 4. **元数据入库绑定**：`saveChapterDocument` 单事务插 documents 元数据（file_path + 字数，内容不进库）+ 章节点回写 document_id 并置 status=completed → notify 保存路径与字数；run_finished 携带小说 ID 供客户端刷新详情
 
 ## 大纲重新生成数据流（regenerateOutline）
@@ -105,7 +106,7 @@ apps/agent/src/workflows/
 2. **数量表单**：`askInt` 幕数（3-20 默认 5）→ `askInt` 部数（1~幕数 默认 1）——「章节的数量由用户填写表单获取」的落点，各部幕数由模型分配
 3. **复用 `createOutline`**（入参仅 worldview + characters，不喂旧大纲；save_outline 确认门：预览-反馈-调整循环）→ `saveOutlineTreeNewVersion` 单事务版本切换（旧当前行含章全部降级归档、新树 max+1 当前）→ 覆盖 `output/<id>.json` → `novelStore.updateNovel` 回填 description（logline）；阶段通知 `outline`
 
-入库时机小结：novels 初始化即建（先于其余表）｜worldviews 确认后 upsert｜characters 每卡确认后增量｜outlines 大纲确认后整树事务入库——首版走 saveOutlineTree（version=1），重新生成走 saveOutlineTreeNewVersion（旧树与旧章降级归档、新树 max+1 当前；梗概与关键情节点随节点入列，keyPlotPoints 仅幕节点）＋大纲 JSON 落盘 output（产物仅供留存与 theme 读取，重生成后覆盖为最新版；客户端浏览已切换为读 outlines 表节点）｜chapters 章节规划确认后幕下事务批量入库（saveChapters，概述随节点入列；仅客户端单幕规划会话调用——新建小说流程不自动规划章节；随旧版降级归档）｜documents 章节正文由 writeChapter 会话生成后**先落文件**（output/<小说名>/<部名>/<章名>.md，人类可直接阅读编辑）**再登记元数据**（file_path + 字数）并绑定章节点（一章一份，重复生成被拒；随小说级联删除并清理文件；大纲重生成只降级归档章节点、正文行与文件保留——旧正文与归档章的关联留存）｜NovelState 仍为内存态。
+入库时机小结：novels 初始化即建（先于其余表）｜worldviews 确认后 upsert｜characters 每卡确认后增量｜outlines 大纲确认后整树事务入库——首版走 saveOutlineTree（version=1），重新生成走 saveOutlineTreeNewVersion（旧树与旧章降级归档、新树 max+1 当前；梗概与关键情节点随节点入列，keyPlotPoints 仅幕节点）＋大纲 JSON 落盘 output（产物仅供留存与 theme 读取，重生成后覆盖为最新版；客户端浏览已切换为读 outlines 表节点）｜chapters 章节规划确认后幕下事务批量入库（saveChapters，概述随节点入列；仅客户端单幕规划会话调用——新建小说流程不自动规划章节；随旧版降级归档）｜documents 章节正文由 writeChapter 会话生成后**先落文件**（output/<小说名>-<创作ID前8位>/<部名>/<章名>.md，人类可直接阅读编辑；顶层带 ID——同名小说不共享文件夹）**再登记元数据**（file_path + 字数）并绑定章节点（一章一份，重复生成被拒；随小说级联删除并清理文件；大纲重生成只降级归档章节点、正文行与文件保留——旧正文与归档章的关联留存）｜NovelState 仍为内存态。
 
 ## subAgent 协作协议（四 Agent 共性）
 
