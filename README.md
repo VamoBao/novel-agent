@@ -1,6 +1,6 @@
 # novel-agent
 
-基于 Bun + TypeScript 构建的交互式小说创作 AI Agent 应用：通过类型/受众问答、世界观 / 角色 / 核心冲突的多轮收集确认、两级大纲（部→幕）生成确认，完成小说前期设定，并按 UUIDv7 创作 ID 持久化到 SQLite 与 `output/` 落盘。
+基于 Bun + TypeScript 构建的交互式小说创作 AI Agent 应用：通过类型/受众问答、世界观 / 角色 / 核心冲突的多轮收集确认、两级大纲（部→幕）生成确认完成小说前期设定；章节规划（章名 + 剧情概述）由幕节点入口逐幕手动发起；章节正文经写作模型按概述单轮生成，内容按「小说名 / 部 / 章」层级落盘为 Markdown 文件，数据库只留元数据并经 `document_id` 与文件绑定。全程按 UUIDv7 创作 ID 持久化到 SQLite。
 
 项目为 Bun workspaces monorepo，包含三个工作区：
 
@@ -8,23 +8,28 @@
 | --- | --- | --- |
 | `apps/agent` | `@novel/agent` | 小说创作 CLI 应用（终端交互 + stdio JSON 协议模式 + 库查询管理入口） |
 | `packages/shared` | `@novel/shared` | 双端共享的纯 zod 层：领域 schema / 展示视图 / 协议消息 / 查询契约，零运行时依赖 |
-| `apps/client` | `@novel/client` | Electron 桌面客户端（electron-vite 三段式 + React，三栏浏览 + 独立创作页） |
+| `apps/client` | `@novel/client` | Electron 桌面客户端（electron-vite 三段式 + React，三栏浏览 + 会话创作页） |
 
 ## 功能特性
 
 - **多阶段创作工作流**：类型选择 → 受众推断（LLM 生成候选 + 用户多选）→ 世界观（ReAct Agent 多轮追问）→ 角色卡（逐字段「发散丰富 → 确认 → 保存」）→ 核心冲突 → 两级大纲（部→幕，结构强校验 + 确认循环）
-- **人机确认门**：世界观提交、角色卡整卡确认、大纲确认均设用户确认环节，拒绝后按反馈修订重提
-- **SQLite 持久化**：novels / characters / worldviews / outlines / locations / foreshadows 六表外键关联，主键均为应用层生成的 UUIDv7；schema 以 `PRAGMA user_version` 版本化增量迁移
-- **双运行模式**：终端交互模式（CLI）与 stdio JSON 行协议模式（`headless`，供 Electron 等宿主进程 spawn）
-- **库查询与管理**：一次性查询 CLI（`query.ts`）：`list` / `get` 查询 + `rename` / `pin` / `unpin` / `favorite` / `unfavorite` / `delete` 管理
-- **Electron 客户端**：三栏浏览主页（书库 / 结构树 / 预览，右键菜单管理，删除需输入小说名强确认）↔ 独立创作页（问答流）
-- **产物落盘**：大纲按创作 ID 保存为 `output/<id>.json`
+- **人机确认门**：世界观提交、角色卡整卡确认、大纲确认、章节规划确认均设用户确认环节，拒绝后按反馈修订重提
+- **章节规划**：大纲确认入库后会话即收尾，章节规划由客户端幕节点「规划本幕章节」入口逐幕手动发起（推荐章节数量与概述，确认后幕下入库）
+- **章节正文生成**：章节点「✍️ 生成本章正文」入口，由**写作模型**（OpenAI 接口兼容端点，与 Agent 会话模型解耦、可配置为任意第三方服务）结合世界观 / 角色 / 所属部幕梗概 / 同幕前后章概述单轮生成正文（无确认门，生成后即入库展示）
+- **正文文件存储**：正文内容不进数据库，按层级落盘 `output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`（可直接阅读编辑；同名小说经 ID 段去重不共享文件夹），SQLite `documents` 表只留 `file_path` 元数据与字数，章节点经 `document_id` 绑定；小说改名/删除联动迁移/清理文件
+- **大纲重生成**：「📖 大纲」组头刷新入口——幕数/部数表单 → 新版本大纲预览确认 → 版本切换入库（旧版与旧章归档为历史版本）
+- **角色管理**：浏览页编辑 / 新增角色（13 字段表单 + 必填校验 + AI 润色回填），编辑经版本化更新（旧卡快照归档 `character_versions`，主行 ID 稳定）
+- **SQLite 持久化**：novels / characters / character_versions / worldviews / outlines / documents / locations / foreshadows 八表外键关联，主键均为应用层生成的 UUIDv7；schema 以 `PRAGMA user_version` 版本化增量迁移（当前 11，4→5 起仅保数据增量迁移）
+- **双运行模式**：终端交互模式（CLI）与 stdio JSON 行协议模式（`headless`，五种会话模式：新建小说全流程 / 单幕章节规划 / 大纲重生成 / 角色润色 / 章节正文生成）
+- **库查询与管理**：一次性查询 CLI（`query.ts`）：`list` / `get`（含世界观 + 角色 + 大纲节点 + 章节正文）查询 + `rename` / `pin` / `unpin` / `favorite` / `unfavorite` / `delete` / `add-character` / `update-character` 管理
+- **Electron 客户端**：三栏浏览主页（书库 / 结构树 / 预览，右键菜单管理，删除需输入小说名强确认）↔ 独立创作页 / 章节规划页 / 大纲重生成页，正文与润色走内联会话
+- **产物落盘**：大纲按创作 ID 保存为 `output/<id>.json`（留存与 theme 读取）；章节正文为上述 Markdown 层级文件（人类可直接阅读编辑）
 
 ## 技术栈
 
 - 运行时：Bun 1.4（`bun.lock` 锁定依赖）
 - 语言：TypeScript 6（`strict`、`noUncheckedIndexedAccess` 等严格选项）
-- LLM 接入：Vercel AI SDK 7（`ai`）+ 官方 `@ai-sdk/deepseek` provider，工具参数 schema 用 zod 4
+- LLM 接入：Vercel AI SDK 7（`ai`）+ 官方 `@ai-sdk/deepseek`（Agent 会话模型）+ 官方 `@ai-sdk/openai-compatible`（写作模型），工具参数 schema 用 zod 4
 - 数据库：SQLite（Bun 内置 `bun:sqlite`）
 - 桌面端：Electron + electron-vite + React
 - 静态检查：ESLint 10 + typescript-eslint 8（扁平配置）
@@ -35,13 +40,15 @@
 ### 环境要求
 
 - [Bun](https://bun.com) 1.4+
-- DeepSeek API Key
+- DeepSeek API Key（Agent 会话：世界观 / 角色 / 大纲 / 章节规划）
+- 写作模型服务（可选，章节正文生成时才需要）：任意 OpenAI 接口兼容端点
 
 ### 安装与配置
 
 ```bash
 bun install
-cp .env.example .env   # 编辑 .env，填入 DEEPSEEK_API_KEY
+cp .env.example .env   # 编辑 .env，填入 DEEPSEEK_API_KEY；
+                       # 需要正文生成时再填 WRITING_MODEL_* 三项
 ```
 
 ### 运行
@@ -68,7 +75,7 @@ bun run dev:client
 | 类型检查 | `bun run typecheck` |
 | Lint 检查 | `bun run lint` |
 | 单元测试 | `bun run test` |
-| 库查询 / 管理 | `bun run apps/agent/src/query.ts list`（或 `get <novelId>` / `rename` / `pin` / `unpin` / `favorite` / `unfavorite` / `delete`，stdout 单行 JSON） |
+| 库查询 / 管理 | `bun run apps/agent/src/query.ts list`（或 `get <novelId>` / `rename` / `pin` / `unpin` / `favorite` / `unfavorite` / `delete` / `add-character` / `update-character`，stdout 单行 JSON） |
 
 ## 环境变量
 
@@ -76,15 +83,21 @@ Bun 自动加载根目录 `.env`（参考 `.env.example`）：
 
 | 变量 | 必填 | 说明 | 默认值 |
 | --- | --- | --- | --- |
-| `DEEPSEEK_API_KEY` | 是 | DeepSeek API Key | — |
-| `DEEPSEEK_MODEL_NAME` | 否 | 模型名 | `deepseek-flash` |
+| `DEEPSEEK_API_KEY` | 是 | DeepSeek API Key（Agent 会话模型；正文生成会话不需要） | — |
+| `DEEPSEEK_MODEL_NAME` | 否 | Agent 会话模型名 | `deepseek-flash` |
+| `WRITING_MODEL_NAME` | 否 | 写作模型名（正文生成专用，可与 Agent 模型不同） | — |
+| `WRITING_MODEL_API_KEY` | 否 | 写作模型 API Key | — |
+| `WRITING_MODEL_BASE_URL` | 否 | 写作模型接口 Base URL（OpenAI 接口兼容端点） | — |
 | `NOVEL_DB_PATH` | 否 | SQLite 库文件路径 | `data/novel.db` |
-| `NOVEL_OUTPUT_DIR` | 否 | 大纲产物输出目录 | `output` |
+| `NOVEL_OUTPUT_DIR` | 否 | 产物输出目录（大纲 JSON 与正文 Markdown） | `output` |
+
+> 写作模型三项需同时配置才生效；未配置时不影响其他功能，仅正文生成入口报可读错误。
 
 ## 数据存储
 
-- **SQLite**（默认 `data/novel.db`）：六张表按 UUIDv7 创作 ID 外键关联——`novels`（小说信息与置顶/收藏标记）、`worldviews`（1:1）、`characters`（1:N）、`outlines`（大纲树，部/幕两级、多版本、内容随节点入库）、`locations`（层级位置，数据层先行）、`foreshadows`（伏笔，完整 CRUD 与回收状态流转，数据层先行）
-- **产物落盘**：大纲 JSON 保存为 `output/<id>.json`，仅供留存
+- **SQLite**（默认 `data/novel.db`）：八张表按 UUIDv7 创作 ID 外键关联——`novels`（小说信息与置顶/收藏标记）、`worldviews`（1:1）、`characters`（1:N，版本化编辑）、`character_versions`（角色历史快照）、`outlines`（大纲树，部/幕/章三级、多版本、内容随节点入库，`document_id` 绑定正文）、`documents`（章节正文元数据：`file_path` + 字数，一章一份）、`locations`（层级位置，数据层先行）、`foreshadows`（伏笔，完整 CRUD 与回收状态流转，数据层先行）
+- **正文文件**：`output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`——人类可直接阅读编辑，客户端预览即读此文件；数据库经章节点 `document_id` → `documents.file_path` 与文件绑定
+- **大纲产物**：`output/<id>.json`（仅供留存与主题读取，浏览已切换为读 outlines 表）
 - **本地查库辅助**：`docker-compose.yaml` 提供 sqlite-web 网页查看 `data/novel.db`（宿主 8081 端口，非应用运行时依赖）：
 
   ```bash
