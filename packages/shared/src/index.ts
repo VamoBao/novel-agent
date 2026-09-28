@@ -21,6 +21,7 @@ export {
   type OutlineNode,
   type OutlineNodePatch,
 } from "./outline-node";
+export { documentSchema, type Document } from "./document";
 export { audienceSuggestionSchema, type AudienceSuggestion } from "./audience";
 export {
   fieldSummaryViewSchema,
@@ -54,11 +55,13 @@ export {
   novelListItemSchema,
   characterEntrySchema,
   outlineNodeEntrySchema,
+  documentEntrySchema,
   novelDetailSchema,
   novelDeletedResultSchema,
   type NovelListItem,
   type CharacterEntry,
   type OutlineNodeEntry,
+  type DocumentEntry,
   type NovelDetail,
   type NovelDeletedResult,
 } from "./query";

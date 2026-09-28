@@ -84,12 +84,14 @@ export class NovelStore {
     return this.updateFlag(id, "favorite", favorite);
   }
 
-  /** 整本删除：单事务级联清掉 outlines / locations（自引用树单语句整删）→ foreshadows → character_versions → characters → worldviews → novels */
+  /** 整本删除：单事务级联清掉 documents（章节正文）→ outlines / locations（自引用树单语句整删）→ foreshadows → character_versions → characters → worldviews → novels */
   deleteNovel(id: string): void {
     if (!this.getNovel(id)) {
       throw new Error(`小说不存在，无法删除：${id}`);
     }
     this.db.transaction(() => {
+      // 章节正文先于大纲节点删除（chapter_id 外键约束）
+      this.db.prepare("DELETE FROM documents WHERE novel_id = ?;").run(id);
       this.db.prepare("DELETE FROM outlines WHERE novel_id = ?;").run(id);
       this.db.prepare("DELETE FROM locations WHERE novel_id = ?;").run(id);
       this.db.prepare("DELETE FROM foreshadows WHERE novel_id = ?;").run(id);

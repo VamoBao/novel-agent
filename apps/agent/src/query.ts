@@ -7,6 +7,7 @@ import {
   novelListItemSchema,
   type Character,
   type CharacterEntry,
+  type DocumentEntry,
   type NovelDeletedResult,
   type NovelDetail,
   type NovelListItem,
@@ -17,6 +18,7 @@ import { openDatabase } from "./state/db";
 import { NovelStore, type NovelRecord } from "./state/novel-store";
 import { OutlineStore } from "./state/outline-store";
 import { WorldviewStore } from "./state/worldview-store";
+import { DocumentStore } from "./state/document-store";
 import { OUTPUT_DIR, outlineFilePath } from "./output/outline-writer";
 
 /**
@@ -27,7 +29,8 @@ import { OUTPUT_DIR, outlineFilePath } from "./output/outline-writer";
  *
  * 命令一览：
  * - 查询：`list`（全部小说，置顶优先）/ `get <novelId>`（单本全量资料，
- *   大纲读 outlines 表当前版本节点——output 产物仅供留存，不再决定浏览读取）
+ *   大纲读 outlines 表当前版本节点、正文读 documents 表——output 产物仅供留存，
+ *   不再决定浏览读取）
  * - 管理：`rename <novelId> <name>` / `pin|unpin <novelId>` / `favorite|unfavorite <novelId>`
  *   / `delete <novelId>`（级联删除关联数据并清理 output 产物）
  *   / `add-character <novelId> <角色卡JSON>`（新增角色，version=1）
@@ -77,11 +80,21 @@ export function buildNovelDetail(
       summary: stored.node.summary,
       keyPlotPoints: stored.node.keyPlotPoints,
     }));
+  const documents: DocumentEntry[] = new DocumentStore(db)
+    .listDocuments(novelId)
+    .map(({ id, chapterId, content, wordCount, updatedAt }) => ({
+      id,
+      chapterId,
+      content,
+      wordCount,
+      updatedAt,
+    }));
   return novelDetailSchema.parse({
     novel: toListItem(novel),
     worldview,
     characters,
     outlineNodes,
+    documents,
   });
 }
 

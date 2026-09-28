@@ -110,7 +110,8 @@ class AgentProcess {
     this.win = win;
     const repoRoot = resolveRepoRoot();
     // 会话模式映射为 headless argv（create → 无参；plan-chapters / regen-outline → 传 ID；
-    // polish-character → 表单 JSON 随 argv 传入，编辑流带角色 ID、新建流不带）
+    // polish-character → 表单 JSON 随 argv 传入，编辑流带角色 ID、新建流不带；
+    // write-chapter → 章节点正文生成，写作模型配置随根 .env 注入）
     const sessionArgs =
       options.mode === "plan-chapters"
         ? ["plan-chapters", options.novelId, options.actNodeId]
@@ -120,7 +121,9 @@ class AgentProcess {
             ? options.characterId !== undefined
               ? ["polish-character", options.novelId, options.characterId, options.formJson]
               : ["polish-character", options.novelId, options.formJson]
-            : [];
+            : options.mode === "write-chapter"
+              ? ["write-chapter", options.novelId, options.chapterNodeId]
+              : [];
     const child = spawn("bun", ["run", "apps/agent/src/headless.ts", ...sessionArgs], {
       cwd: repoRoot,
       env: childEnv(),

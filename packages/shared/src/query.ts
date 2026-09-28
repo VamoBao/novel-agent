@@ -43,6 +43,16 @@ export const outlineNodeEntrySchema = z.object({
 });
 export type OutlineNodeEntry = z.infer<typeof outlineNodeEntrySchema>;
 
+/** 章节正文条目：章节点预览用（novelId 冗余于详情载荷，不重复携带） */
+export const documentEntrySchema = z.object({
+  id: z.string().min(1).describe("documents 表主键（UUIDv7）"),
+  chapterId: z.string().min(1).describe("所属章（outlines 表 chapter 节点）ID"),
+  content: z.string().min(1).describe("正文全文（写作模型生成）"),
+  wordCount: z.number().int().min(0).describe("正文字数（不含空白字符）"),
+  updatedAt: z.string().describe("生成时间（ISO 8601）"),
+});
+export type DocumentEntry = z.infer<typeof documentEntrySchema>;
+
 /** 单本小说全量资料：三类结构数据均可缺失（对应创作中途尚未落库的部分） */
 export const novelDetailSchema = z.object({
   novel: novelListItemSchema,
@@ -51,6 +61,9 @@ export const novelDetailSchema = z.object({
   outlineNodes: z
     .array(outlineNodeEntrySchema)
     .describe("大纲节点（读 outlines 表当前版本，按父级分组 + sort 排序）；未生成为空数组"),
+  documents: z
+    .array(documentEntrySchema)
+    .describe("章节正文（一章一份，未生成为空数组；章节点预览按 chapterId 取用）"),
 });
 export type NovelDetail = z.infer<typeof novelDetailSchema>;
 

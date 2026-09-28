@@ -94,10 +94,13 @@ export type ClientMessage = z.infer<typeof clientMessageSchema>;
  * create → 无参（新建小说全流程）；plan-chapters → `plan-chapters <novelId> <actNodeId>`；
  * regen-outline → `regen-outline <novelId>`（大纲重新生成，新版本入库旧版本归档）；
  * polish-character → `polish-character <novelId> [characterId] <formJson>`（角色 AI 润色：
- * characterId 缺省 = 新建流润色（库中尚无此角色），formJson 为表单当前值的角色卡 JSON）。
+ * characterId 缺省 = 新建流润色（库中尚无此角色），formJson 为表单当前值的角色卡 JSON）；
+ * write-chapter → `write-chapter <novelId> <chapterNodeId>`（章节正文生成：写作模型按
+ * 章节剧情概述生成正文并入库，章节点绑定 document_id，无确认门）。
  */
 export type AgentStartOptions =
   | { mode: "create" }
   | { mode: "plan-chapters"; novelId: string; actNodeId: string }
   | { mode: "regen-outline"; novelId: string }
-  | { mode: "polish-character"; novelId: string; characterId?: string; formJson: string };
+  | { mode: "polish-character"; novelId: string; characterId?: string; formJson: string }
+  | { mode: "write-chapter"; novelId: string; chapterNodeId: string };

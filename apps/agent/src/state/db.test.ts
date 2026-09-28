@@ -130,14 +130,53 @@ function tableColumns(db: Database, table: string): string[] {
   return (db.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
 }
 
-describe("openDatabase 迁移（SCHEMA_VERSION 9）", () => {
+/** 手工构造 v9 形态的库（当前投产版本，缺 documents 表）：v7 形态 + foreshadows
+ *  + character_versions + characters.version 列，写 user_version=9 */
+function createV9Db(path: string): void {
+  createLegacyDb(path, 7);
+  const legacy = new Database(path);
+  legacy.exec("PRAGMA foreign_keys = ON;");
+  legacy.exec(`
+    CREATE TABLE foreshadows (
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL REFERENCES novels(id),
+      surface_action TEXT NOT NULL,
+      hidden_truth TEXT NOT NULL,
+      attention_level INTEGER NOT NULL CHECK (attention_level BETWEEN 1 AND 10),
+      recovery_status TEXT NOT NULL DEFAULT 'unrecovered'
+        CHECK (recovery_status IN ('unrecovered', 'partial', 'recovered')),
+      planting_method TEXT,
+      purpose TEXT,
+      appear_chapter_id TEXT,
+      recover_chapter_ids TEXT,
+      character_ids TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  legacy.exec(`
+    CREATE TABLE character_versions (
+      id TEXT PRIMARY KEY,
+      character_id TEXT NOT NULL REFERENCES characters(id),
+      novel_id TEXT NOT NULL REFERENCES novels(id),
+      version INTEGER NOT NULL CHECK (version >= 1),
+      character TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+  legacy.exec("ALTER TABLE characters ADD COLUMN version INTEGER NOT NULL DEFAULT 1;");
+  legacy.exec("PRAGMA user_version = 9;");
+  legacy.close();
+}
+
+describe("openDatabase 迁移（SCHEMA_VERSION 10）", () => {
   const tempDirs: string[] = [];
 
   afterAll(async () => {
     await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
   });
 
-  test("v5 库迁移：outlines 补内容列、数据无损、版本升 9", async () => {
+  test("v5 库迁移：outlines 补内容列、数据无损、版本升 10", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig5-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "v5.db");
@@ -174,11 +213,11 @@ describe("openDatabase 迁移（SCHEMA_VERSION 9）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(9);
+    ).toBe(10);
     db.close();
   });
 
-  test("v6 库迁移：locations 表落地、既有数据无损、版本升 9（5→6 段不重复执行）", async () => {
+  test("v6 库迁移：locations 表落地、既有数据无损、版本升 10（5→6 段不重复执行）", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig6-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "v6.db");
@@ -221,11 +260,11 @@ describe("openDatabase 迁移（SCHEMA_VERSION 9）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(9);
+    ).toBe(10);
     db.close();
   });
 
-  test("v7 库迁移：foreshadows 表落地、既有数据无损、版本升 9", async () => {
+  test("v7 库迁移：foreshadows 表落地、既有数据无损、版本升 10", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig7-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "v7.db");
@@ -271,7 +310,48 @@ describe("openDatabase 迁移（SCHEMA_VERSION 9）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(9);
+    ).toBe(10);
+    db.close();
+  });
+
+  test("v9 库迁移：documents 表落地、既有数据无损、版本升 10（真实投产库的升级路径）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-db-mig9-"));
+    tempDirs.push(dir);
+    const dbPath = join(dir, "v9.db");
+    createV9Db(dbPath);
+
+    // 9→10 为纯新增表迁移（同 6→7 模式）：幂等建 documents，不动既有七表
+    const db = openDatabase(dbPath);
+    expect(tableColumns(db, "documents")).toEqual([
+      "id",
+      "novel_id",
+      "chapter_id",
+      "content",
+      "word_count",
+      "created_at",
+      "updated_at",
+    ]);
+    // chapter_id 唯一索引与 novel_id 普通索引随建表落地
+    const indexes = (
+      db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'documents'").all()
+    ).map((r) => (r as { name: string }).name);
+    expect(indexes).toContain("sqlite_autoindex_documents_1");
+    expect(indexes).toContain("idx_documents_novel_id");
+
+    // v9 已入库的大纲 / 角色 / 位置数据不受迁移影响
+    const outline = db
+      .query(
+        "SELECT summary FROM outlines WHERE id = 'bbbbbbbb-0000-7000-8000-000000000004'",
+      )
+      .get() as { summary: string | null };
+    expect(outline.summary).toBe("旧部梗概留存");
+    expect(
+      (db.query("SELECT COUNT(*) AS c FROM characters").get() as { c: number }).c,
+    ).toBe(1);
+
+    expect(
+      (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
+    ).toBe(10);
     db.close();
   });
 
@@ -297,11 +377,11 @@ describe("openDatabase 迁移（SCHEMA_VERSION 9）", () => {
     ).toBe(1);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(9);
+    ).toBe(10);
     db.close();
   });
 
-  test("全新库：建表即含内容列与 locations / foreshadows 表、版本为 9", async () => {
+  test("全新库：建表即含内容列与 locations / foreshadows / documents 表、版本为 10", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-fresh-"));
     tempDirs.push(dir);
     const db = openDatabase(join(dir, "fresh.db"));
@@ -312,9 +392,10 @@ describe("openDatabase 迁移（SCHEMA_VERSION 9）", () => {
     expect(tableColumns(db, "foreshadows")).toContain("recovery_status");
     expect(tableColumns(db, "characters")).toContain("version");
     expect(tableColumns(db, "character_versions")).toContain("character");
+    expect(tableColumns(db, "documents")).toContain("word_count");
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(9);
+    ).toBe(10);
     db.close();
   });
 });

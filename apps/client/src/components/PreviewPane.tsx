@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { CharacterEntry, NovelDetail, OutlineNodeEntry, View } from "@novel/shared";
 import { CharacterEditForm } from "./CharacterEditForm";
@@ -20,6 +20,8 @@ interface PreviewPaneProps {
   onCreateCharacterCancelled?: () => void;
   /** 角色编辑提交成功后刷新详情（角色 id 稳定，选中不失效） */
   onCharacterSaved?: () => void;
+  /** 章节正文生成完成（run_finished）后刷新详情（章节点 id 稳定，选中保持） */
+  onDocumentSaved?: () => void;
 }
 
 /** worldview 选中项 → 只读视图（角色预览带编辑入口自成一节；大纲节点不经此处） */
@@ -64,7 +66,12 @@ function CharacterPreview({
   );
 }
 
-/** 右栏内容预览：结构树选中节点的只读视图 / 角色编辑表单 / 新建角色表单 */
+/**
+ * 右栏内容预览：结构树选中节点的只读视图 / 角色编辑表单 / 新建角色表单。
+ * 章节正文生成会话（write-chapter）由本组件收口：目标章节点 id 记录生成态，
+ * run_finished 后回调刷新详情（正文随 documents 到达，章节点 id 稳定选中保持）；
+ * 生成中用户切换选中不打断会话，卸载（离开浏览页）时中止。
+ */
 export function PreviewPane({
   detail,
   loading,
@@ -75,7 +82,52 @@ export function PreviewPane({
   onCreateCharacterSubmitted,
   onCreateCharacterCancelled,
   onCharacterSaved,
+  onDocumentSaved,
 }: PreviewPaneProps) {
+  /** 正文生成中的章节点 ID（null = 空闲）；agent 会话单例，进行中禁用各章入口 */
+  const [writingNodeId, setWritingNodeId] = useState<string | null>(null);
+  const [writeError, setWriteError] = useState<string | null>(null);
+
+  // 正文生成会话消息订阅（对齐 CharacterEditForm 润色订阅模式）：
+  // run_finished → 清生成态并刷新详情；error → 展示错误；exit 兜底复位
+  useEffect(() => {
+    const offMessage = window.agent.onMessage((message) => {
+      if (writingNodeId === null) return;
+      if (message.type === "run_finished") {
+        setWritingNodeId(null);
+        setWriteError(null);
+        onDocumentSaved?.();
+      } else if (message.type === "error") {
+        setWritingNodeId(null);
+        setWriteError(message.message);
+        // 收尾兜底：确保单例 agent 空闲（对已退出进程是空操作）
+        void window.agent.stop();
+      }
+    });
+    const offExit = window.agent.onExit(() => setWritingNodeId(null));
+    return () => {
+      offMessage();
+      offExit();
+    };
+  }, [writingNodeId, onDocumentSaved]);
+
+  // 卸载时若生成仍在进行（离开浏览页 / 切换小说）：中止会话
+  const writingRef = useRef(writingNodeId);
+  writingRef.current = writingNodeId;
+  useEffect(
+    () => () => {
+      if (writingRef.current !== null) void window.agent.stop();
+    },
+    [],
+  );
+
+  /** 发起本章正文生成（write-chapter 会话，写作模型单轮生成入库） */
+  const startWriteChapter = (novelId: string, chapterNodeId: string): void => {
+    setWritingNodeId(chapterNodeId);
+    setWriteError(null);
+    void window.agent.start({ mode: "write-chapter", novelId, chapterNodeId });
+  };
+
   let body: ReactElement;
   if (!detail) {
     body = (
@@ -97,13 +149,23 @@ export function PreviewPane({
   } else if (selection.kind === "outline") {
     const node = detail.outlineNodes.find((n) => n.id === selection.outlineNodeId);
     body = node ? (
-      <OutlineNodeCard
-        node={node}
-        hasChapters={detail.outlineNodes.some(
-          (n) => n.parentId === node.id && n.type === "chapter",
-        )}
-        onPlanChapters={onPlanChapters ? () => onPlanChapters(node) : undefined}
-      />
+      <>
+        {writeError ? <p className="pane-error">{writeError}</p> : null}
+        <OutlineNodeCard
+          node={node}
+          hasChapters={detail.outlineNodes.some(
+            (n) => n.parentId === node.id && n.type === "chapter",
+          )}
+          onPlanChapters={onPlanChapters ? () => onPlanChapters(node) : undefined}
+          document={detail.documents.find((d) => d.chapterId === node.id)}
+          writing={writingNodeId !== null}
+          onWriteChapter={
+            node.type === "chapter"
+              ? () => startWriteChapter(detail.novel.id, node.id)
+              : undefined
+          }
+        />
+      </>
     ) : (
       <p className="pane-error">该节点内容未能加载（数据缺失）。</p>
     );

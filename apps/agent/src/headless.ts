@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { characterSchema, PROTOCOL_VERSION, type AgentMessage, type Character } from "@novel/shared";
-import { createNovel, planActChapters, polishCharacter, regenerateOutline } from "./workflows";
+import { createNovel, planActChapters, polishCharacter, regenerateOutline, writeChapter } from "./workflows";
 import { UserAbortedError } from "./ui/aborted";
 import { ProtocolChannel } from "./ui/protocol-channel";
 import { OUTPUT_DIR } from "./output/outline-writer";
@@ -13,7 +13,9 @@ import { OUTPUT_DIR } from "./output/outline-writer";
  * 无参 = 新建小说全流程；`plan-chapters <novelId> <actNodeId>` = 既有小说单幕章节规划；
  * `regen-outline <novelId>` = 既有小说大纲重新生成（新版本入库，旧版本归档）；
  * `polish-character <novelId> [characterId] <formJson>` = 角色 AI 润色（编辑流传角色 ID，
- * 新建流缺省；formJson 为表单当前值 JSON——argv 传参，结果经 polish-result 消息回传）。
+ * 新建流缺省；formJson 为表单当前值 JSON——argv 传参，结果经 polish-result 消息回传）；
+ * `write-chapter <novelId> <chapterNodeId>` = 章节正文生成（写作模型单轮生成入库，
+ * 章节点绑定 document_id；本会话不经 DeepSeek，写作模型环境变量缺失时 fatal error）。
  */
 
 /** 会话模式：与 client 侧 AgentStartOptions（@novel/shared）一一对应 */
@@ -21,7 +23,8 @@ type Session =
   | { kind: "create" }
   | { kind: "plan-chapters"; novelId: string; actNodeId: string }
   | { kind: "regen-outline"; novelId: string }
-  | { kind: "polish-character"; novelId: string; characterId?: string; formJson: string };
+  | { kind: "polish-character"; novelId: string; characterId?: string; formJson: string }
+  | { kind: "write-chapter"; novelId: string; chapterNodeId: string };
 
 function parseSession(argv: string[]): Session {
   if (argv.length === 0) return { kind: "create" };
@@ -41,13 +44,16 @@ function parseSession(argv: string[]): Session {
       return { kind: "polish-character", novelId, characterId: arg3, formJson: arg4 };
     }
   }
+  if (mode === "write-chapter" && argv.length === 3 && novelId && arg3) {
+    return { kind: "write-chapter", novelId, chapterNodeId: arg3 };
+  }
   process.stderr.write(
-    `NOVEL_AGENT_FATAL: 无法识别的启动参数：${argv.join(" ")}（用法：headless.ts [plan-chapters <novelId> <actNodeId>] [regen-outline <novelId>] [polish-character <novelId> [characterId] <formJson>]）\n`,
+    `NOVEL_AGENT_FATAL: 无法识别的启动参数：${argv.join(" ")}（用法：headless.ts [plan-chapters <novelId> <actNodeId>] [regen-outline <novelId>] [polish-character <novelId> [characterId] <formJson>] [write-chapter <novelId> <chapterNodeId>]）\n`,
   );
   process.exit(1);
 }
 
-/** 执行会话并返回小说 ID（四种会话共用 run_finished 收尾） */
+/** 执行会话并返回小说 ID（五种会话共用 run_finished 收尾） */
 async function runSession(session: Session, channel: ProtocolChannel, send: (message: AgentMessage) => void): Promise<string> {
   switch (session.kind) {
     case "create":
@@ -77,16 +83,25 @@ async function runSession(session: Session, channel: ProtocolChannel, send: (mes
       send({ type: "polish-result", character });
       return session.novelId;
     }
+    case "write-chapter":
+      return (
+        await writeChapter({
+          channel,
+          novelId: session.novelId,
+          chapterNodeId: session.chapterNodeId,
+        })
+      ).novelId;
   }
 }
 
 async function main(): Promise<void> {
-  if (!process.env.DEEPSEEK_API_KEY) {
+  const session = parseSession(process.argv.slice(2));
+  // DeepSeek Key 为 Agent 会话模型（四个 ReAct 会话）所需；正文生成会话只经写作模型
+  // （WRITING_MODEL_*），其配置缺失由 writeChapter 校验报可读错误
+  if (session.kind !== "write-chapter" && !process.env.DEEPSEEK_API_KEY) {
     process.stderr.write("NOVEL_AGENT_FATAL: 未设置 DEEPSEEK_API_KEY\n");
     process.exit(1);
   }
-
-  const session = parseSession(process.argv.slice(2));
   const dbPath = path.resolve(process.env.NOVEL_DB_PATH ?? "data/novel.db");
   const outputDir = path.resolve(OUTPUT_DIR);
 
@@ -131,7 +146,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => process.exit(0));
 
   try {
-    // 四种会话共用同一收尾：run_finished 携带小说 ID（client 据此刷新书库/详情）；
+    // 五种会话共用同一收尾：run_finished 携带小说 ID（client 据此刷新书库/详情）；
     // 润色会话的业务结果经 polish-result 消息先行回传
     const novelId = await runSession(session, channel, send);
     send({

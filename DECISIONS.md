@@ -1,3 +1,17 @@
+## 2026-09-28 章节正文生成：headless 会话 + 无确认门 + documents 一章一份（而非一次性 CLI / 确认门流 / 正文版本化）
+
+- **背景**：用户要求在章节预览页加入口，按章节概述用写作模型（OpenAI 接口兼容端点）生成正文，保存本地、预览展示并给章节点绑 document_id。设计时数据层已预留：outlines.document_id 为「待 documents 表落地」的裸列，status 枚举含 writing/completed——本次即该设计的落地点。
+- **备选方案**：
+  1. **headless 第五会话模式 `write-chapter <novelId> <chapterNodeId>` + 内联入口（无整页会话）**（选定）：LLM 生成正文是数十秒级长调用，library 查询 CLI 的 8s 超时不可用（与 polish-character 决策同理）；但与润色一样是单轮无问答流程，不值得整页会话页——入口按钮 + PreviewPane 内联收口（目标章生成态、run_finished 刷新详情、卸载 agent:stop），对齐角色编辑表单的润色订阅模式
+  2. 生成前预览确认门（对齐章节规划流）：正文数千字预览确认交互成本高，且生成结果不满意时「确认门拒绝→重新生成」与直接重新生成的效果相同；v1 无确认门，入库后展示即确认，重写/修订流为后续需求
+  3. 正文版本化（对齐角色 character_versions）：写作期迭代确实会发生，但 v1 一章一份（chapter_id 唯一索引拒绝重复保存）先锁最小闭环，版本化待真实使用反馈再定形态
+- **设计要点**：
+  - **documents 表与双向绑定**：documents（id/novel_id/chapter_id 唯一外键/content/word_count）+ outlines.document_id 回写列，`saveChapterDocument` 单事务「插正文 + 回写 document_id + 章节点 status=completed」——两处同指针向一份数据，列上外键因 SQLite 不支持 ALTER 补加，一致性由事务与 chapter_id 外键保证；word_count 取不含空白字符的近似口径
+  - **一章一份与生命周期**：重复生成前置拒绝（省一次 LLM 调用）；deleteNovel 级联先于 outlines 删 documents；大纲重生成只降级归档章节点（行不删），documents 保留——旧正文与归档章的关联留存，历史回溯不吃 schema 变更
+  - **写作模型会话不经 DeepSeek**：writeChapter 只调 getWritingModel()，headless 的 DEEPSEEK_API_KEY 启动检查对该模式跳过；模型未配置在库校验之后抛可读错误（客户端错误视图直接呈现缺失变量名）
+  - **上下文全取自库**：世界观 JSON + 角色摘要行（六字段压缩，控 prompt 体积）+ 部/幕梗概与情节点 + 本章概述 + 同幕前后章概述（衔接上文、给下文留空间）；2000~3000 字与「只输出正文」写入 prompt 约束，空结果拒绝且库零残留
+- **结论**：write-chapter.ts + DocumentStore + documents 表（SCHEMA_VERSION 9→10 纯新增迁移）+ 客户端章卡入口/正文卡。验证以 mock 写作端点协议级端到端替代真实 LLM（无真实端点 Key）；GUI 观感与真实写作模型生成质量待用户复验。
+
 ## 2026-09-28 写作模型 provider：官方 openai-compatible 包 + 惰性工厂，而非手写实现 / 常量导出
 
 - **背景**：用户要求为小说正文创作预接一个独立的「写作模型」（可与 Agent 会话模型不同），OpenAI 接口兼容、返回 `LanguageModelV4`，经三个新环境变量（模型名 / API Key / Base URL）配置。正文创作工作流尚未建设，本次仅落 provider 层地基。

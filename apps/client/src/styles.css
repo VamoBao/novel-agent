@@ -525,6 +525,16 @@ button.danger {
   line-height: 1.65;
 }
 
+/* 章节正文卡（OutlineNodeCard 章节点）：预览栏内滚动阅读，保留模型输出的段落换行 */
+.viewcard .prose-content {
+  max-height: 420px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ViewCard（创作流大纲/章节视图）情节点行——与 plot-list 独立 */
 .viewcard .plot {
   padding-left: 16px;

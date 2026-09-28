@@ -134,6 +134,11 @@ export function App() {
     if (selectedId) void reloadDetail(selectedId);
   };
 
+  /** 章节正文生成完成：刷新详情（章节点 id 稳定，选中保持，正文随 documents 到达） */
+  const handleDocumentSaved = (): void => {
+    if (selectedId) void reloadDetail(selectedId);
+  };
+
   /** 创作完成：回浏览页 → 刷新书库 → 自动选中新作（列表已含新作时） */
   const handleFinished = (novelId: string): void => {
     setCreating(false);
@@ -333,6 +338,7 @@ export function App() {
             onCreateCharacterSubmitted={handleCharacterCreated}
             onCreateCharacterCancelled={() => setCreatingCharacter(false)}
             onCharacterSaved={handleCharacterSaved}
+            onDocumentSaved={handleDocumentSaved}
           />
         </main>
       </div>

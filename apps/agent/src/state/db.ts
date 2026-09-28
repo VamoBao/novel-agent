@@ -7,11 +7,11 @@ export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 /**
  * 打开（必要时创建）数据库并完成建表。
- * 六张表主键均为应用层生成的 UUIDv7（时间有序，索引友好）：
+ * 主键均为应用层生成的 UUIDv7（时间有序，索引友好）：
  * - novels：小说信息（pinned / favorite 为书库管理标记；name 在大纲确认后回填），
  *   其余业务表经 novel_id 外键关联
  * - characters：角色卡，1:N（novel_id 索引），version 为当前版本号（编辑提交递增）
@@ -20,6 +20,8 @@ const SCHEMA_VERSION = 9;
  * - worldviews：世界观，1:1（novel_id 唯一），taboos 数组存 JSON 文本
  * - outlines：大纲树（部/幕两级入库，章为写作期预留），parent_id 自引用外键，多版本行并存；
  *   内容随节点入库（summary 梗概，key_plot_points 关键情节点存 JSON 文本，仅幕节点携带）
+ * - documents：章节正文（一章一份，chapter_id 唯一外键挂 outlines 章节点；outlines.document_id
+ *   为绑定回写列——同指一份数据，入库同事务维护），长文本与大纲内容列职责分离
  * - locations：小说世界的地理位置（坐标/图层/人口），parent_id 自引用外键（城市→大陆层级），
  *   population 可空（无人/未设定）
  * - foreshadows：伏笔（表面行为/隐藏真相/读者注意度 1-10/回收状态枚举），
@@ -65,8 +67,10 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
         // 历史快照表 character_versions 由下方 CREATE TABLE IF NOT EXISTS 幂等落地
         db.exec("ALTER TABLE characters ADD COLUMN version INTEGER NOT NULL DEFAULT 1;");
       }
+      // 9→10：新增 documents 表（章节正文），无 ALTER——由下方 CREATE TABLE IF NOT EXISTS 幂等落地
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>8 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>10 的库被旧代码打开）：重建兜底
+      db.exec("DROP TABLE IF EXISTS documents;");
       db.exec("DROP TABLE IF EXISTS outlines;");
       db.exec("DROP TABLE IF EXISTS locations;");
       db.exec("DROP TABLE IF EXISTS foreshadows;");
@@ -171,6 +175,20 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
     ON outlines(novel_id, COALESCE(parent_id, ''), sort)
     WHERE is_current_version = 1;
   `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS documents (
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL REFERENCES novels(id),
+      chapter_id TEXT NOT NULL UNIQUE REFERENCES outlines(id),
+      content TEXT NOT NULL,
+      word_count INTEGER NOT NULL CHECK (word_count >= 0),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_documents_novel_id ON documents(novel_id);",
+  );
   db.exec(`
     CREATE TABLE IF NOT EXISTS locations (
       id TEXT PRIMARY KEY,

@@ -150,7 +150,17 @@ describe("outlineNodeEntrySchema", () => {
 });
 
 describe("novelDetailSchema", () => {
-  test("三类数据齐全的完整 detail 通过校验", () => {
+  const validDocuments = [
+    {
+      id: "0199c0de-0000-7000-8000-00000000000a",
+      chapterId: "0199c0de-0000-7000-8000-00000000000b",
+      content: "灵脉断绝的第九十九年，少年在市集的角落里睁开眼。",
+      wordCount: 22,
+      updatedAt: "2026-09-28T00:00:00Z",
+    },
+  ];
+
+  test("三类结构数据与章节正文齐全的完整 detail 通过校验", () => {
     const detail = novelDetailSchema.parse({
       novel: validListItem,
       worldview: {
@@ -161,21 +171,26 @@ describe("novelDetailSchema", () => {
         { ...validCharacter, id: "0199c0de-0000-7000-8000-000000000002", version: 3 },
       ],
       outlineNodes: validOutlineNodes,
+      documents: validDocuments,
     });
     expect(detail.characters).toHaveLength(1);
     expect(detail.outlineNodes).toHaveLength(2);
     expect(detail.outlineNodes[1]?.keyPlotPoints).toHaveLength(2);
+    expect(detail.documents).toHaveLength(1);
+    expect(detail.documents[0]?.chapterId).toBe("0199c0de-0000-7000-8000-00000000000b");
   });
 
-  test("创作中途的小说：worldview 为 null、角色与大纲节点为空数组仍通过", () => {
+  test("创作中途的小说：worldview 为 null、角色/大纲节点/正文为空数组仍通过", () => {
     const detail = novelDetailSchema.parse({
       novel: { ...validListItem, name: null },
       worldview: null,
       characters: [],
       outlineNodes: [],
+      documents: [],
     });
     expect(detail.worldview).toBeNull();
     expect(detail.outlineNodes).toHaveLength(0);
+    expect(detail.documents).toHaveLength(0);
   });
 
   test("大纲节点条目非法（sort 为 0）被拒绝", () => {
@@ -185,6 +200,28 @@ describe("novelDetailSchema", () => {
         worldview: null,
         characters: [],
         outlineNodes: [{ ...validOutlineNodes[0], sort: 0 }],
+        documents: [],
+      }),
+    ).toThrow();
+  });
+
+  test("正文条目非法（空 content / 负字数）被拒绝", () => {
+    expect(() =>
+      novelDetailSchema.parse({
+        novel: validListItem,
+        worldview: null,
+        characters: [],
+        outlineNodes: [],
+        documents: [{ ...validDocuments[0], content: "" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      novelDetailSchema.parse({
+        novel: validListItem,
+        worldview: null,
+        characters: [],
+        outlineNodes: [],
+        documents: [{ ...validDocuments[0], wordCount: -1 }],
       }),
     ).toThrow();
   });
