@@ -1,3 +1,12 @@
+## 2026-09-28 写作模型未配置回落 Agent 会话模型（用户决策，修订「未配置抛错」）
+
+- **背景**：「写作模型 provider」决策原定未配置 `WRITING_MODEL_*` 时抛可读错误——对已配齐两项模型（Agent + 写作）的用户合理，但意味着每个用户必须再申请一个第三方服务 Key 才能用正文生成，抬高门槛。用户要求：未配置时回落主 Agent 模型（DeepSeek）。
+- **取舍**：
+  1. **整体回落（选定）**：任一变量缺失/空串即回落 `deepseek.ts` 的 `model` 实例——与世界观/大纲等工作流共用同一 DeepSeek 会话模型，正文生成开箱即用；部分配置不拼凑（半配置会在请求期产生 401 类难排查错误，宁可整体回落语义清晰）
+  2. 按「部分配置的变量拼凑」继续走 openai-compatible（如仅 baseURL 缺失时默认官方端点）：猜测行为不可预期，放弃
+- **联动**：headless 启动 Key 检查由「write-chapter 一律免检」改为「仅 write-chapter 且 `isWritingModelConfigured()` 为真免检」——回落路径经 DeepSeek，Key 必需；`getWritingModel` 返回类型保持 `LanguageModelV4`（deepseek chat model 同为 V4 实现），工作流零改动。
+- **结论**：`getWritingModel` 回落 + `isWritingModelConfigured` 导出 + headless 检查联动；`.env.example` 与各级文档同步。原「未配置抛可读错误」行为废止。
+
 ## 2026-09-28 正文顶层文件夹改「小说名-<创作 ID 前 8 位>」（用户决策，规避同名小说共享文件夹）
 
 - **背景**：上一条「正文存储改文件系统」按纯小说名组织顶层文件夹，存在边界——两本同名小说共享同一文件夹，删除/改名须逐文件操作避免波及对方。用户给出方案：小说名 + ID 组合命名顶层文件夹，从根上规避共享。

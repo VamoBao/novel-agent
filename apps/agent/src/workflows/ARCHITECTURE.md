@@ -24,7 +24,8 @@ apps/agent/src/workflows/
 │                             #   客户端「📖 大纲」组头刷新按钮的会话（headless regen-outline 模式）
 ├── write-chapter.ts          # 章节正文生成编排 writeChapter：读库校验（小说/章节点/概述/无正文/
 │                             #   世界观）→ 库内组上下文（部/幕/前后章/角色摘要）→ 写作模型
-│                             #   getWritingModel() 单轮 generateText（无确认门）→ 正文落文件
+│                             #   getWritingModel() 单轮 generateText（无确认门；WRITING_MODEL_*
+│                             #   未配置回落 deepseek）→ 正文落文件
 │                             #   （document-writer：output/<小说名>-<创作ID前8位>/<部名>/<章名>.md，
 │                             #   顶层带 ID 去重——同名小说不共享文件夹；章名冲突 -N 后缀）
 │                             #   → saveChapterDocument 元数据入库并绑定章节点 document_id；
@@ -95,7 +96,7 @@ apps/agent/src/workflows/
 
 1. **前置校验**（可读错误，协议入口转 fatal error）：小说存在 → 章节点存在 / 同小说 / 类型 chapter → summary 非空（旧数据缺概述拒绝）→ 所属幕与部节点存在 → 该章尚无正文（documents 一章一份）→ worldviews 有记录（世界观已确认）
 2. **上下文组装（全取自库）**：书名 / logline + 世界观 JSON + 角色摘要行（名/定位/外貌/性格/渴望/恐惧）+ 部名与部梗概 + 幕名与幕梗概及关键情节点 + 本章名与概述 + 同幕前后章名与概述（衔接上文、给下文留空间）
-3. **生成与落盘**：`getWritingModel()`（OpenAI 接口兼容端点，环境变量 WRITING_MODEL_* 配置，未配置抛可读错误）单轮 `generateText`，写作要求含 2000~3000 字、只输出正文文本；空结果拒绝。正文经 document-writer 写 `output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`（顶层带 ID 去重；同名章冲突 -N 后缀不覆盖），文件先落、库后入，库失败回滚删文件
+3. **生成与落盘**：`getWritingModel()`（OpenAI 接口兼容端点，环境变量 WRITING_MODEL_* 配置，任一未配置回落 Agent 会话模型 deepseek）单轮 `generateText`，写作要求含 2000~3000 字、只输出正文文本；空结果拒绝。正文经 document-writer 写 `output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`（顶层带 ID 去重；同名章冲突 -N 后缀不覆盖），文件先落、库后入，库失败回滚删文件
 4. **元数据入库绑定**：`saveChapterDocument` 单事务插 documents 元数据（file_path + 字数，内容不进库）+ 章节点回写 document_id 并置 status=completed → notify 保存路径与字数；run_finished 携带小说 ID 供客户端刷新详情
 
 ## 大纲重新生成数据流（regenerateOutline）
@@ -120,4 +121,4 @@ apps/agent/src/workflows/
 
 ## 测试
 
-模块内测试两层：单测聚焦**可脱离 LLM 的纯函数**——字段协议（`FIELD_SPECS` 完整性、`missingRequiredFields`、`assembleCharacter` 过 schema）与大纲结构校验（`outlineSchemaFor` 恰好 M 部共 N 幕）；`create-novel.test.ts` / `plan-act-chapters.test.ts` / `regen-outline.test.ts` / `polish-character.test.ts` / `write-chapter.test.ts` 为**全流程 / 会话集成测试**——mock `ai` 模块（generateObject 返回 fixture、generateText 按脚本逐轮执行工具 execute）+ `FakeChannel` 脚本化应答 + 临时 SQLite，不依赖真实 LLM 验证全链路：create-novel 至 save_outline 止（章节规划已不在新建流程内）；plan-act-chapters 含五类前置校验与确认门中止；regen-outline 断言新版本入库（旧树旧章降级归档 / 产物覆盖 / description 回填）、确认循环（拒绝→反馈→再确认）与三类前置校验；write-chapter 断言文件落盘层级与内容（临时 output 目录注入）、元数据绑定（document_id 回写 + status=completed）、同名冲突后缀 / 库失败回滚删文件 / prompt 上下文与前置校验 / 写作模型未配置 / 空正文拒绝。真实 LLM 端到端验证记录见 PROGRESS。
+模块内测试两层：单测聚焦**可脱离 LLM 的纯函数**——字段协议（`FIELD_SPECS` 完整性、`missingRequiredFields`、`assembleCharacter` 过 schema）与大纲结构校验（`outlineSchemaFor` 恰好 M 部共 N 幕）；`create-novel.test.ts` / `plan-act-chapters.test.ts` / `regen-outline.test.ts` / `polish-character.test.ts` / `write-chapter.test.ts` 为**全流程 / 会话集成测试**——mock `ai` 模块（generateObject 返回 fixture、generateText 按脚本逐轮执行工具 execute）+ `FakeChannel` 脚本化应答 + 临时 SQLite，不依赖真实 LLM 验证全链路：create-novel 至 save_outline 止（章节规划已不在新建流程内）；plan-act-chapters 含五类前置校验与确认门中止；regen-outline 断言新版本入库（旧树旧章降级归档 / 产物覆盖 / description 回填）、确认循环（拒绝→反馈→再确认）与三类前置校验；write-chapter 断言文件落盘层级与内容（临时 output 目录注入）、元数据绑定（document_id 回写 + status=completed）、同名冲突后缀 / 库失败回滚删文件 / prompt 上下文与前置校验 / 写作模型未配置回落 deepseek / 空正文拒绝。真实 LLM 端到端验证记录见 PROGRESS。

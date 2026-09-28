@@ -1,5 +1,15 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
+import { model as agentModel } from "./deepseek";
+
+/** 写作模型三项环境变量是否配置齐全（空串视为未配置）；headless 启动检查与回落判定共用 */
+export function isWritingModelConfigured(): boolean {
+  return Boolean(
+    process.env.WRITING_MODEL_NAME &&
+      process.env.WRITING_MODEL_API_KEY &&
+      process.env.WRITING_MODEL_BASE_URL,
+  );
+}
 
 /**
  * 写作模型（OpenAI 接口兼容端点）：小说正文创作专用，可与 Agent 会话模型
@@ -11,24 +21,17 @@ import type { LanguageModelV4 } from "@ai-sdk/provider";
  * - `WRITING_MODEL_API_KEY`：API Key
  * - `WRITING_MODEL_BASE_URL`：接口 Base URL（如 https://api.example.com/v1）
  *
- * provider 实例在 `getWritingModel()` 调用时才创建：三项均未配置时本模块
- * 仍可安全导入（不影响既有 Agent 流程），取用时才抛可读错误指明缺哪些变量。
+ * **任一未配置（含空串）时回落 Agent 会话模型**（deepseek.ts 的 `model`，
+ * 与世界观/大纲等工作流共用同一 DeepSeek 实例）——正文生成开箱即用，
+ * 部分配置也整体回落，避免半配置产生难排查的请求错误；配置齐三项则用
+ * 独立写作模型。provider 实例在调用时才创建，本模块导入零副作用。
  */
 export function getWritingModel(): LanguageModelV4 {
   const name = process.env.WRITING_MODEL_NAME;
   const apiKey = process.env.WRITING_MODEL_API_KEY;
   const baseURL = process.env.WRITING_MODEL_BASE_URL;
   if (!name || !apiKey || !baseURL) {
-    const missing = [
-      !name && "WRITING_MODEL_NAME",
-      !apiKey && "WRITING_MODEL_API_KEY",
-      !baseURL && "WRITING_MODEL_BASE_URL",
-    ]
-      .filter(Boolean)
-      .join("、");
-    throw new Error(
-      `写作模型未配置：缺少环境变量 ${missing}（请在 .env 中设置，参考 .env.example）`,
-    );
+    return agentModel;
   }
   return createOpenAICompatible({
     name: "novel-writing",

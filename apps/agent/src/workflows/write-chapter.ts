@@ -62,13 +62,15 @@ function characterDigestLine(character: {
  * 章节正文生成工作流（客户端章节点「✍️ 生成本章正文」入口）：
  * 从库中校验并组装写作上下文（小说名/logline、世界观、角色摘要、所属部/幕
  * 梗概与关键情节点、本章概述、同幕前后章概述），交写作模型（OpenAI 接口
- * 兼容端点，与 Agent 会话模型解耦）单轮生成正文，无确认门——确认在客户端
+ * 兼容端点，与 Agent 会话模型解耦；WRITING_MODEL_* 未配置时回落 Agent
+ * 会话模型 deepseek）单轮生成正文，无确认门——确认在客户端
  * （生成后展示，重写/修订流为后续需求）。
- * 正文**存文件系统**（`<output>/<小说名>/<部名>/<章名>.md`，人类可直接阅读），
- * 先写文件、后经 saveChapterDocument 单事务登记元数据（file_path + 字数）
- * 并绑定章节点 document_id；库失败时回滚删除已写文件，不留孤儿。
- * 校验失败（小说/章不存在、非章节点、缺概述、已有正文、世界观未确认、
- * 写作模型未配置）抛可读错误，由调用方（协议入口）转为 fatal error 消息。
+ * 正文**存文件系统**（`<output>/<小说名>-<创作ID前8位>/<部名>/<章名>.md`，
+ * 人类可直接阅读），先写文件、后经 saveChapterDocument 单事务登记元数据
+ * （file_path + 字数）并绑定章节点 document_id；库失败时回滚删除已写文件，
+ * 不留孤儿。
+ * 校验失败（小说/章不存在、非章节点、缺概述、已有正文、世界观未确认）
+ * 抛可读错误，由调用方（协议入口）转为 fatal error 消息。
  */
 export async function writeChapter(options: WriteChapterOptions): Promise<WriteChapterResult> {
   const { channel, novelId, chapterNodeId } = options;
