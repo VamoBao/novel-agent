@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { AppSettings } from "./settings";
 import type {
   AgentMessage,
   AgentStartOptions,
@@ -47,6 +48,11 @@ contextBridge.exposeInMainWorld("agent", {
     ipcRenderer.invoke("library:addCharacter", novelId, character),
   updateCharacter: (novelId: string, characterId: string, character: Character): Promise<CharacterEntry> =>
     ipcRenderer.invoke("library:updateCharacter", novelId, characterId, character),
+  /** 模型设置读写（设置弹窗）：明文 JSON 于 userData（优先级 设置 > .env > 继承环境变量） */
+  getSettings: (): Promise<{ settings: AppSettings; filePath: string }> =>
+    ipcRenderer.invoke("settings:get"),
+  saveSettings: (settings: AppSettings): Promise<{ settings: AppSettings; filePath: string }> =>
+    ipcRenderer.invoke("settings:save", settings),
   /** 诊断钩子：无头冒烟自动打开创作覆盖层（preload 沙箱关闭，可直接读环境变量） */
   isAutostart: (): boolean => process.env.NOVEL_CLIENT_AUTOSTART === "1",
   /** 诊断钩子：无头冒烟自动选中小说并预览首个可用节点 */

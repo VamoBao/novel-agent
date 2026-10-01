@@ -22,7 +22,7 @@
 - **SQLite 持久化**：novels / characters / character_versions / worldviews / outlines / documents / locations / foreshadows 八表外键关联，主键均为应用层生成的 UUIDv7；schema 以 `PRAGMA user_version` 版本化增量迁移（当前 11，4→5 起仅保数据增量迁移）
 - **双运行模式**：终端交互模式（CLI）与 stdio JSON 行协议模式（`headless`，五种会话模式：新建小说全流程 / 单幕章节规划 / 大纲重生成 / 角色润色 / 章节正文生成）
 - **库查询与管理**：一次性查询 CLI（`query.ts`）：`list` / `get`（含世界观 + 角色 + 大纲节点 + 章节正文）查询 + `rename` / `pin` / `unpin` / `favorite` / `unfavorite` / `delete` / `add-character` / `update-character` 管理
-- **Electron 客户端**：三栏浏览主页（书库 / 结构树 / 预览，右键菜单管理，删除需输入小说名强确认）↔ 独立创作页 / 章节规划页 / 大纲重生成页，正文与润色走内联会话
+- **Electron 客户端**：三栏浏览主页（书库 / 结构树 / 预览，右键菜单管理，删除需输入小说名强确认）↔ 独立创作页 / 章节规划页 / 大纲重生成页，正文与润色走内联会话；「⚙️ 模型设置」弹窗配置两族模型（Agent / 写作模型），存 userData 明文 JSON、优先级高于 `.env`，保存后下一次会话生效（agent 子进程仍经环境变量注入读取，零协议改动）
 - **产物落盘**：大纲按创作 ID 保存为 `output/<id>.json`（留存与 theme 读取）；章节正文为上述 Markdown 层级文件（人类可直接阅读编辑）
 
 ## 技术栈
@@ -79,11 +79,13 @@ bun run dev:client
 
 ## 环境变量
 
-Bun 自动加载根目录 `.env`（参考 `.env.example`）：
+模型配置有三个来源，优先级：客户端设置（`userData/settings.json`，⚙️ 弹窗维护）> 根目录 `.env` > 继承的环境变量。`.env` 与环境变量字段如下（参考 `.env.example`）：
 
 | 变量 | 必填 | 说明 | 默认值 |
 | --- | --- | --- | --- |
-| `DEEPSEEK_API_KEY` | 是 | DeepSeek API Key（Agent 会话模型；正文生成会话不需要） | — |
+| `DEEPSEEK_API_KEY` | 是* | DeepSeek API Key（Agent 会话模型；正文生成会话不需要） | — |
+
+\* 三处来源任一配置即可；客户端设置弹窗配置后可不留 `.env`。
 | `DEEPSEEK_MODEL_NAME` | 否 | Agent 会话模型名 | `deepseek-flash` |
 | `WRITING_MODEL_NAME` | 否 | 写作模型名（正文生成专用，可与 Agent 模型不同） | — |
 | `WRITING_MODEL_API_KEY` | 否 | 写作模型 API Key | — |

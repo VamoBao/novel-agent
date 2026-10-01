@@ -15,10 +15,21 @@ import {
   type NovelDetail,
   type NovelListItem,
 } from "@novel/shared";
+import {
+  readSettingsFile,
+  resolveModelEnv,
+  writeSettingsFile,
+  type AppSettings,
+} from "./settings";
 
 /** 仓库根（dev：app 路径为 apps/client，上两级即根；打包分发形态 v2 再调整） */
 function resolveRepoRoot(): string {
   return path.resolve(app.getAppPath(), "..", "..");
+}
+
+/** 模型设置文件（VS Code 式明文 JSON；userData 目录不进仓库，见 electron/settings.ts） */
+function settingsFilePath(): string {
+  return path.join(app.getPath("userData"), "settings.json");
 }
 
 /** 极简 .env 解析（KEY=VALUE 行，# 注释）：Electron 不自动加载根 .env，agent 子进程需要 API Key */
@@ -40,15 +51,27 @@ function loadEnvFile(file: string): Record<string, string> {
   }
 }
 
-/** agent / 查询 CLI 子进程共用环境：数据路径传绝对路径（相对路径会随 spawn cwd 漂移） */
+/** agent / 查询 CLI 子进程共用环境：数据路径传绝对路径（相对路径会随 spawn cwd 漂移）。
+ *  模型配置经 resolveModelEnv 三级优先级注入（设置文件 > .env > 继承环境变量），
+ *  空串键删除——provider 侧据此走「未配置回落」与默认值逻辑 */
 function childEnv(): NodeJS.ProcessEnv {
   const repoRoot = resolveRepoRoot();
-  return {
+  const dotenv = loadEnvFile(path.join(repoRoot, ".env"));
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
-    ...loadEnvFile(path.join(repoRoot, ".env")),
+    ...dotenv,
     NOVEL_DB_PATH: path.join(repoRoot, "data", "novel.db"),
     NOVEL_OUTPUT_DIR: path.join(repoRoot, "output"),
   };
+  const resolved = resolveModelEnv(readSettingsFile(settingsFilePath()), dotenv, process.env);
+  for (const [key, value] of Object.entries(resolved)) {
+    if (value.length > 0) {
+      env[key] = value;
+    } else {
+      delete env[key];
+    }
+  }
+  return env;
 }
 
 /**
@@ -277,6 +300,17 @@ ipcMain.handle("agent:respond", (_event, id: number, answer: string | string[] |
 ipcMain.handle("agent:stop", () => {
   agentProcess.kill();
 });
+
+/** 模型设置读写（设置弹窗）：明文 JSON 于 userData，保存结果原样回传（含规范化后的值） */
+ipcMain.handle("settings:get", (): { settings: AppSettings; filePath: string } => ({
+  settings: readSettingsFile(settingsFilePath()),
+  filePath: settingsFilePath(),
+}));
+
+ipcMain.handle("settings:save", (_event, settings: AppSettings): { settings: AppSettings; filePath: string } => ({
+  settings: writeSettingsFile(settingsFilePath(), settings),
+  filePath: settingsFilePath(),
+}));
 
 ipcMain.handle("library:list", async (): Promise<NovelListItem[]> => {
   const result = novelListItemSchema.array().safeParse(await runLibraryQuery(["list"]));

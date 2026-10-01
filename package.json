@@ -11,7 +11,7 @@
     "dev": "bun run apps/agent/src/index.ts",
     "dev:client": "bun run --cwd apps/client dev",
     "headless": "bun run apps/agent/src/headless.ts",
-    "test": "bun test apps/agent packages/shared",
+    "test": "bun test apps/agent packages/shared apps/client",
     "lint": "eslint .",
     "typecheck": "tsc -p apps/agent/tsconfig.json && tsc -p packages/shared/tsconfig.json && tsc -p apps/client/tsconfig.json"
   },

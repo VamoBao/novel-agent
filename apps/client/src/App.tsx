@@ -6,6 +6,7 @@ import { NovelListPanel } from "./components/NovelListPanel";
 import { OutlineRegenDialog } from "./components/OutlineRegenDialog";
 import { OutlineRegenFlow } from "./components/OutlineRegenFlow";
 import { PreviewPane } from "./components/PreviewPane";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { StructureTreePanel, type Selection } from "./components/StructureTreePanel";
 
 function errorMessage(error: unknown): string {
@@ -40,6 +41,8 @@ export function App() {
   /** 弹框确认中的重生成目标（非 null 时渲染 OutlineRegenDialog） */
   const [regenConfirm, setRegenConfirm] = useState<OutlineRegenTarget | null>(null);
   const [outlineRegen, setOutlineRegen] = useState<OutlineRegenTarget | null>(null);
+  /** 模型设置弹窗（非 null 时渲染 SettingsDialog） */
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   /** null = 列表加载中 */
   const [novels, setNovels] = useState<NovelListItem[] | null>(null);
@@ -297,9 +300,14 @@ export function App() {
           </button>
           <h1>📖 novel-agent</h1>
         </div>
-        <button className="primary" onClick={() => setCreating(true)}>
-          ＋ 新建小说
-        </button>
+        <div className="header-actions">
+          <button className="icon-btn" onClick={() => setSettingsOpen(true)} title="模型设置">
+            ⚙️
+          </button>
+          <button className="primary" onClick={() => setCreating(true)}>
+            ＋ 新建小说
+          </button>
+        </div>
       </header>
 
       <div className={`workspace${sidebarCollapsed ? " collapsed" : ""}`}>
@@ -350,6 +358,8 @@ export function App() {
           onConfirm={handleRegenConfirmed}
         />
       ) : null}
+
+      {settingsOpen ? <SettingsDialog onClose={() => setSettingsOpen(false)} /> : null}
     </div>
   );
 }

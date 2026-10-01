@@ -714,3 +714,53 @@ button.ghost {
   color: #6a737d;
   font-size: 13px;
 }
+
+/* 头部动作区（设置入口 + 新建按钮） */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 模型设置弹窗（SettingsDialog）：两组模型字段，Key 走 password 输入 */
+.settings-dialog {
+  width: 480px;
+  max-width: calc(100vw - 48px);
+}
+
+.settings-group {
+  margin: 10px 0 14px;
+}
+
+.settings-group-label {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6a737d;
+}
+
+.settings-dialog .field {
+  margin-bottom: 8px;
+}
+
+.settings-dialog .field label {
+  display: block;
+  font-size: 12px;
+  color: #6a737d;
+  margin-bottom: 2px;
+}
+
+.settings-dialog .field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid #d5dae1;
+  border-radius: 6px;
+}
+
+.settings-hint {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #8a929c;
+}

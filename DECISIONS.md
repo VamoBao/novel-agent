@@ -1,3 +1,17 @@
+## 2026-09-28 模型配置迁移客户端：VS Code 式明文 JSON + 主进程经环境变量注入（用户决策）
+
+- **背景**：模型 Key / 模型名原经根 `.env` 配置，对只用客户端的用户不友好（要手工编辑文件）。讨论中给出三条路线：明文 JSON（VS Code 水位）、`safeStorage`/OS 密钥链加密（Windows DPAPI 等）、自制加密——用户选定明文 JSON；同时确认隐藏原生菜单暂不做。
+- **备选方案**：
+  1. **userData/settings.json 明文 + 设置弹窗 + childEnv 三级优先级注入（选定）**：与 `.env` 同安全水位（明文、本机、git 不可见——userData 不在仓库内），换来零依赖与人类可直接编辑；`.env` 与继承环境变量保留为兜底来源，老用户无感
+  2. safeStorage 加密密文存 settings.json：本机离线文件更安全，但 WSL2（本项目实际运行环境）下桌面密钥服务常不可用，需明文回退双路径，复杂度不成比例——用户明确选择不做，未来可无痛升级（settings.ts 收口读写，单点替换）
+  3. agent 直接读配置文件 / argv 传参 / 协议下发：分别破坏进程边界、比 env 更易泄露（/proc 全局可见 argv）、过度设计——均放弃
+- **设计要点**：
+  - **agent 侧零改动**：配置解析收在 main 进程 `childEnv()`（`resolveModelEnv`：设置 > `.env` > 继承环境变量，逐字段下探、空串视为未配置并删除键），注入后子进程照旧读 `process.env`——providers 的回落与默认值逻辑原样生效
+  - **`electron/settings.ts` 不 import electron**（路径由调用方传入），保持 bun:test 可测；client 首批单测（此前 client 无测试），根 test 脚本纳入 apps/client
+  - **Key 在弹窗中用 password 输入**防旁窥；设置保存即刻落盘、对子进程在下一次 spawn 生效（会话均短生命周期，无热更新问题）
+  - 写作模型三项留空 = 回落 Agent 模型的语义在弹窗内明示
+- **结论**：settings.ts + settings:get/save IPC + SettingsDialog（⚙️ 入口）+ childEnv 注入；GUI 弹窗交互待人工验收。
+
 ## 2026-09-28 写作模型未配置回落 Agent 会话模型（用户决策，修订「未配置抛错」）
 
 - **背景**：「写作模型 provider」决策原定未配置 `WRITING_MODEL_*` 时抛可读错误——对已配齐两项模型（Agent + 写作）的用户合理，但意味着每个用户必须再申请一个第三方服务 Key 才能用正文生成，抬高门槛。用户要求：未配置时回落主 Agent 模型（DeepSeek）。

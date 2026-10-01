@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import type { AppSettings } from "../electron/settings";
 import type {
   AgentMessage,
   AgentStartOptions,
@@ -28,6 +29,8 @@ declare global {
         characterId: string,
         character: Character,
       ) => Promise<CharacterEntry>;
+      getSettings: () => Promise<{ settings: AppSettings; filePath: string }>;
+      saveSettings: (settings: AppSettings) => Promise<{ settings: AppSettings; filePath: string }>;
       isAutostart: () => boolean;
       autoSelectNovelId: () => string | null;
     };
