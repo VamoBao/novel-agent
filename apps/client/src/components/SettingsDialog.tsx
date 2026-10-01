@@ -33,7 +33,6 @@ interface SettingsDialogProps {
  */
 export function SettingsDialog({ onClose }: SettingsDialogProps) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [filePath, setFilePath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +41,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
     let cancelled = false;
     window.agent
       .getSettings()
-      .then(({ settings, filePath: path }) => {
+      .then(({ settings }) => {
         if (cancelled) return;
         setForm({
           deepseekApiKey: settings.deepseek.apiKey,
@@ -51,7 +50,6 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           writingModelApiKey: settings.writingModel.apiKey,
           writingModelBaseUrl: settings.writingModel.baseUrl,
         });
-        setFilePath(path);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -157,10 +155,6 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
                 取消
               </button>
             </div>
-            <p className="dialog-hint">
-              明文存储于 {filePath ?? "（加载失败）"}（不进仓库）；优先级：此处设置 &gt; .env &gt;
-              环境变量；保存后自下一次会话生效。
-            </p>
           </>
         )}
       </div>
