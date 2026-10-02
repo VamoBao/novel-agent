@@ -25,57 +25,70 @@
   - 启动时读设置，`nativeTheme.themeSource = settings.theme`（`"system" | "light" | "dark"` 与 Electron 原生三态枚举一一对应，零转换）
   - `settings:save` IPC 保存成功后重新应用 `themeSource`——**保存即生效**（Chromium 立即重算媒体查询，无需重启、无需 renderer 参与）
   - 防启动白闪：`createWindow` 按 `nativeTheme.shouldUseDarkColors` 传 `backgroundColor`（暗 `#0d1117` / 亮 `#f6f7f9`）；`nativeTheme.on("updated")` 时同步 `win.setBackgroundColor`——主题为「跟随系统」时系统运行中切换，窗口底色与页面同步跟随
-- **CSS**（`src/styles.css`）：`:root` 声明全部颜色变量与 `color-scheme: light dark`；`@media (prefers-color-scheme: dark)` 内整组覆盖暗色值（`color-scheme` 随之切换，滚动条与原生表单控件自动适配）
+- **CSS**（`src/styles.css`）：`:root` 声明全部颜色变量与 `color-scheme: light`；`@media (prefers-color-scheme: dark)` 内整组覆盖暗色值并将 `color-scheme` 切为 `dark`（滚动条与原生表单控件随媒体查询自动适配）
 - **renderer**：零新增逻辑（SettingsDialog 仅读写既有 getSettings/saveSettings IPC；preload / env.d.ts 零改动）
 
 ## CSS 变量化映射表
 
-27 种硬编码色 + 3 处 rgba 阴影/遮罩归并为 28 个语义变量（27 种 hex 归并掉 2 个近似色后剩 25 个，加 3 个阴影/遮罩变量）。浅色列为现状值（逐像素保持）；暗色列以 GitHub Primer Dark 为基准映射（现有浅色即 GitHub Light 风格，深浅同源观感协调）。视觉微调允许在验收轮进行，以目测通过为准。
+27 种硬编码色 + 3 处 rgba 阴影/遮罩归并为 31 个语义变量（浅色列取现状值——个别变量浅色同值异名，是**暗色分化**的伏笔：按钮填充蓝/红与文字蓝/红在暗色下深浅分家，白字对填充底需保对比度）。暗色列以 GitHub Primer Dark 为基准映射（现有浅色即 GitHub Light 风格，深浅同源观感协调）。视觉微调允许在验收轮进行，以目测通过为准。
 
-### 背景（11）
+### 背景（10）
 
 | 变量 | 浅色 | 暗色 | 用途 |
 | --- | --- | --- | --- |
 | `--bg-app` | `#f6f7f9` | `#0d1117` | body 全局底色 |
-| `--bg-panel` | `#fff` | `#151b23` | 卡片/面板/弹窗白底 |
+| `--bg-panel` | `#fff` | `#151b23` | 卡片/面板/弹窗/按钮白底 |
 | `--bg-sidebar` | `#fbfbfc` | `#10151c` | 左栏书库底色 |
 | `--bg-subtle` | `#eef0f3` | `#21262d` | 悬停底、标签片、选项底 |
-| `--bg-button-hover` | `#f3f4f6` | `#21262d` | 次级按钮悬停 |
+| `--bg-button-hover` | `#f3f4f6` | `#262c36` | 次级按钮悬停 |
 | `--bg-accent-subtle` | `#e8effd` | `#121d2f` | 选中项/当前阶段蓝底 |
-| `--bg-disabled` | `#d5d9df` | `#21262d` | 禁用态底 |
-| `--bg-success-subtle` | `#dcfce7` | `#0f2417` | 成功提示底 |
+| `--bg-success-subtle` | `#dcfce7` | `#12261e` | 成功提示底 |
 | `--bg-danger-subtle` | `#fef3f2` | `#25171c` | 危险警示底 |
 | `--bg-danger-soft` | `#fee4e2` | `#312229` | 危险文字按钮悬停 |
-| `--bg-warning-subtle` | `#fffbeb` | `#272115` | 警告提示底 |
+| `--bg-warning-subtle` | `#fffbeb` | `#272115` | 警示提问框底 |
 
-### 边框（5）
+### 边框（4）
 
 | 变量 | 浅色 | 暗色 | 用途 |
 | --- | --- | --- | --- |
 | `--border-default` | `#e4e7eb` | `#3d444d` | 常规边框/分隔线 |
-| `--border-strong` | `#d0d7de` | `#4b535e` | 输入框/复选框边框（#d5dae1 并入） |
-| `--border-disabled` | `#b6bcc4` | `#2a3138` | 禁用态边框 |
+| `--border-strong` | `#d0d7de` | `#4b535e` | 输入框/按钮/组头钮边框（#d5dae1、#d5d9df 并入） |
 | `--border-danger` | `#fecdca` | `#931c2e` | 危险警示边框 |
-| `--border-warning` | `#fde68a` | `#9e6a03` | 警告提示边框 |
+| `--border-warning` | `#fde68a` | `#9e6a03` | 警示提问框边框 |
 
-### 文字（4）
+### 文字（6）
 
 | 变量 | 浅色 | 暗色 | 用途 |
 | --- | --- | --- | --- |
 | `--fg-default` | `#1f2328` | `#f0f3f6` | 主文字 |
 | `--fg-muted` | `#6a737d` | `#9198a1` | 次要文字/标签 |
 | `--fg-subtle` | `#9aa1ab` | `#656c76` | 占位/提示文字（#8a929c 并入） |
+| `--fg-disabled` | `#b6bcc4` | `#484f58` | 禁用文字（三角钮禁用态） |
 | `--fg-notify` | `#424a53` | `#d1d7de` | 会话通知文字 |
+| `--fg-on-emphasis` | `#fff` | `#fff` | 强调填充上的文字（主按钮/危险按钮/活动阶段，深浅均白） |
 
-### 语义色（5）
+### 强调蓝（3）
 
 | 变量 | 浅色 | 暗色 | 用途 |
 | --- | --- | --- | --- |
-| `--accent` | `#2563eb` | `#4493f8` | 主色（按钮/选中/徽标） |
-| `--accent-strong` | `#1d4ed8` | `#388bfd` | 主色悬停/链接 |
-| `--danger` | `#b42318` | `#f85149` | 危险文字/主按钮 |
-| `--danger-strong` | `#912018` | `#da3633` | 危险按钮悬停 |
-| `--success` | `#15803d` | `#3fb950` | 成功文字 |
+| `--accent` | `#2563eb` | `#4493f8` | 强调文字/选中标记（inset 高亮条） |
+| `--accent-emphasis` | `#2563eb` | `#1f6feb` | 强调填充（主按钮/活动阶段底，暗色比文字蓝深以保白字对比） |
+| `--accent-strong` | `#1d4ed8` | `#388bfd` | 强调悬停/链接/选中项文字 |
+
+### 危险红（4）
+
+| 变量 | 浅色 | 暗色 | 用途 |
+| --- | --- | --- | --- |
+| `--danger` | `#b42318` | `#f85149` | 危险文字（必填星号/错误/右键危险项） |
+| `--danger-strong` | `#912018` | `#ff8182` | 警示框强文字（删除确认 code 片段） |
+| `--danger-emphasis` | `#b42318` | `#b62324` | 危险填充（删除按钮底） |
+| `--danger-hover` | `#912018` | `#da3633` | 危险按钮悬停底（暗色变亮而非变暗） |
+
+### 成功绿（1）
+
+| 变量 | 浅色 | 暗色 | 用途 |
+| --- | --- | --- | --- |
+| `--success` | `#15803d` | `#3fb950` | 成功文字（已完成阶段） |
 
 ### 层级（3）
 
@@ -85,7 +98,7 @@
 | `--shadow-popover` | `0 6px 20px rgba(31,35,40,0.14)` | `0 6px 20px rgba(1,4,9,0.4)` | 浮层阴影 |
 | `--shadow-modal` | `0 12px 32px rgba(31,35,40,0.22)` | `0 12px 32px rgba(1,4,9,0.5)` | 模态阴影 |
 
-归并说明：#d5dae1（设置输入框边框）并入 `--border-strong`；#8a929c（提示文字）并入 `--fg-subtle`；#eef0f3 与 #f3f4f6 职责不同（通用悬停底 / 次级按钮悬停）保留两变量。深浅两套值同处一个文件（`:root` + 一个媒体查询块），颜色只此两处，不再有第三份。
+归并说明：#d5dae1（设置输入框边框）与 #d5d9df（组头钮边框）并入 `--border-strong`；#8a929c（提示文字）并入 `--fg-subtle`（色差肉眼不可辨）；#eef0f3 与 #f3f4f6 职责不同（通用悬停底 / 次级按钮悬停）保留两变量。深浅两套值同处一个文件（`:root` + 一个媒体查询块），颜色只此两处，不再有第三份。
 
 ## 设置弹窗 UI
 
