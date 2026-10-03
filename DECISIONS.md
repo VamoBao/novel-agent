@@ -1,3 +1,17 @@
+## 2026-10-02 客户端暗黑模式：nativeTheme.themeSource + prefers-color-scheme 媒体查询（renderer 零主题 JS）
+
+- **背景**：客户端界面需要暗黑模式——默认跟随系统，设置弹窗可手动三选（跟随系统 / 浅色 / 深色），主题机制在三个方案间对比选型。
+- **备选方案**：
+  1. **main 侧 `nativeTheme.themeSource` + CSS `prefers-color-scheme` 媒体查询**（选定）：设置枚举 system / light / dark 与 Electron 原生主题三态一一对应（零转换），themeSource 一变 renderer 的媒体查询即时重算——renderer 零主题 JS、零 IPC、零双源状态合并；浅色值抽为 31 个语义 CSS 变量（`:root` 基准），暗色块只覆盖变量值
+  2. renderer data-theme 属性方案（JS 读设置挂根节点属性 + matchMedia 监听系统切换）：启动时属性未及挂载会白闪；「手动设置」与「跟随系统」两个来源需 matchMedia + IPC 双套逻辑合并——否决
+  3. 媒体查询内逐条硬覆盖（不抽变量，暗色块按选择器逐条重写颜色）：同一颜色维护两处，每加一条规则都要双份色值、行数翻倍——否决
+- **设计要点**：
+  - **强调填充与文字色暗色分化**：`--accent-emphasis` / `--danger-emphasis` / `--danger-hover` / `--fg-on-emphasis` 四变量——暗色下按钮填充蓝/红与文字蓝/红深浅分家（填充 `#1f6feb` vs 文字 `#4493f8`），白字对比度保住；浅色下四者同值异名（填充与文字同色）纯为暗色分化预留伏笔，浅色观感零回归
+  - **窗口底色随主题**：`backgroundColor` 取 `nativeTheme.shouldUseDarkColors`（值与 `--bg-app` 一致），`updated` 监听在「跟随系统」下运行中切系统主题时同步底色——防启动白闪与切题闪帧
+  - **`NOVEL_CLIENT_THEME=system|light|dark` 诊断钩子**：settings.json 在 userData 目录、无法按次启动覆盖，无头双主题截图验证需要显式主题注入；applyTheme 内仅显式设置（合法三值）时生效，否则回落设置文件——与既有 `NOVEL_CLIENT_*` 诊断家族同款语义
+- **实现期发现与裁定（对后续开发有约束力）**：**renderer 不得运行时 import `electron/settings`**——该模块基于 `node:fs`，被浏览器化的 renderer 加载即崩（node:fs 无浏览器实现）；类型需求一律经 `import type` 引用（编译期擦除），运行时取值走 preload IPC。
+- **结论**：settings.theme（normalizeTheme 非法值归 system）+ main 侧 applyTheme（启动与 settings:save 后各调一次，主题保存即生效；模型配置仍为下一次会话生效，两者语义不同）+ styles.css 31 变量化 + 暗色媒体查询（GitHub Primer Dark 基准）+ SettingsDialog「外观」分组。AC：typecheck / lint / 218 用例全过（settings 新增 3 用例）；`NOVEL_CLIENT_THEME=light/dark` 无头截图目测通过，系统运行中切换等交互列入人工验收。
+
 ## 2026-09-28 模型配置迁移客户端：VS Code 式明文 JSON + 主进程经环境变量注入（用户决策）
 
 - **背景**：模型 Key / 模型名原经根 `.env` 配置，对只用客户端的用户不友好（要手工编辑文件）。讨论中给出三条路线：明文 JSON（VS Code 水位）、`safeStorage`/OS 密钥链加密（Windows DPAPI 等）、自制加密——用户选定明文 JSON；同时确认隐藏原生菜单暂不做。

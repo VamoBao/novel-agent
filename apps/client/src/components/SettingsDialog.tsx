@@ -1,8 +1,22 @@
 import { useEffect, useState } from "react";
-import type { AppSettings } from "../../electron/settings";
+import type { AppSettings, ThemeSetting } from "../../electron/settings";
 
-/** 表单态：五个字段一一对应的扁平字符串（空串 = 未配置） */
+/** 外观主题三选展示文案（Record 键穷尽：THEMES 扩值时此处编译报错，不会静默漏项） */
+const THEME_LABELS: Record<ThemeSetting, string> = {
+  system: "跟随系统",
+  light: "浅色",
+  dark: "深色",
+};
+
+/** 外观主题三选（键序即展示顺序） */
+const THEME_OPTIONS = (Object.keys(THEME_LABELS) as ThemeSetting[]).map((value) => ({
+  value,
+  label: THEME_LABELS[value],
+}));
+
+/** 表单态：五个模型字段 + 主题（theme 即持久化值，非字符串表单字段） */
 interface FormState {
+  theme: ThemeSetting;
   deepseekApiKey: string;
   deepseekModelName: string;
   writingModelName: string;
@@ -11,6 +25,7 @@ interface FormState {
 }
 
 const EMPTY_FORM: FormState = {
+  theme: "system",
   deepseekApiKey: "",
   deepseekModelName: "",
   writingModelName: "",
@@ -44,6 +59,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
       .then(({ settings }) => {
         if (cancelled) return;
         setForm({
+          theme: settings.theme,
           deepseekApiKey: settings.deepseek.apiKey,
           deepseekModelName: settings.deepseek.modelName,
           writingModelName: settings.writingModel.modelName,
@@ -70,6 +86,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
     setSaving(true);
     setError(null);
     const settings: AppSettings = {
+      theme: form.theme,
       deepseek: { apiKey: form.deepseekApiKey, modelName: form.deepseekModelName },
       writingModel: {
         modelName: form.writingModelName,
@@ -94,6 +111,24 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           <p className="dialog-lead">加载中…</p>
         ) : (
           <>
+            <div className="settings-group">
+              <p className="settings-group-label">外观</p>
+              <div className="theme-options" role="group" aria-label="主题">
+                {THEME_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={form.theme === option.value ? "selected" : undefined}
+                    aria-pressed={form.theme === option.value}
+                    disabled={saving}
+                    onClick={() => setField("theme", option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <p className="settings-hint">主题保存后立即生效，「跟随系统」随系统浅色/深色自动切换；模型配置仍为下一次会话生效。</p>
+            </div>
             <div className="settings-group">
               <p className="settings-group-label">Agent 会话模型（DeepSeek）——世界观 / 角色 / 大纲 / 章节规划</p>
               <div className="field">

@@ -4,9 +4,10 @@ import { dirname } from "node:path";
 /**
  * 客户端模型配置（主进程持有，agent 子进程经环境变量注入读取）：
  * VS Code 式**明文 JSON**（用户决策）存于 Electron userData 目录
- * （settings.json，不进仓库、不入 git），两族字段——Agent 会话模型
- * （DeepSeek：Key + 模型名）与写作模型（OpenAI 接口兼容：模型名 + Key +
- * Base URL，三项需同时配置，留空回落 Agent 模型）。
+ * （settings.json，不进仓库、不入 git），外观主题 + 两族模型字段——
+ * 外观主题（system / light / dark，main 侧 applyTheme 设 nativeTheme.themeSource）、
+ * Agent 会话模型（DeepSeek：Key + 模型名）与写作模型（OpenAI 接口兼容：
+ * 模型名 + Key + Base URL，三项需同时配置，留空回落 Agent 模型）。
  *
  * 优先级（resolveModelEnv）：设置文件 > 根目录 `.env` > 继承的环境变量；
  * 解析结果仍以 `DEEPSEEK_API_KEY` / `WRITING_MODEL_*` 环境变量注入子进程
@@ -16,7 +17,13 @@ import { dirname } from "node:path";
  * bun:test 下直接导入测试。
  */
 
+/** 主题三态：与 Electron nativeTheme.themeSource 原生枚举一一对应，零转换 */
+export const THEMES = ["system", "light", "dark"] as const;
+export type ThemeSetting = (typeof THEMES)[number];
+
 export interface AppSettings {
+  /** 外观主题：跟随系统（默认）/ 浅色 / 深色；main 侧经 applyTheme 设 nativeTheme.themeSource */
+  theme: ThemeSetting;
   /** Agent 会话模型（DeepSeek）：世界观 / 角色 / 大纲 / 章节规划等工作流共用 */
   deepseek: {
     apiKey: string;
@@ -31,6 +38,7 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  theme: "system",
   deepseek: { apiKey: "", modelName: "" },
   writingModel: { modelName: "", apiKey: "", baseUrl: "" },
 };
@@ -50,10 +58,18 @@ function normalizeGroup<K extends string>(raw: unknown, keys: readonly K[]): Rec
   return result;
 }
 
-/** 还原为合法设置对象：未知字段忽略（前向兼容手工编辑）、非字符串归空串 */
+/** 主题枚举还原：非三合法值（缺省 / 手改 settings.json 写错）一律回「跟随系统」 */
+function normalizeTheme(value: unknown): ThemeSetting {
+  return typeof value === "string" && (THEMES as readonly string[]).includes(value)
+    ? (value as ThemeSetting)
+    : "system";
+}
+
+/** 还原为合法设置对象：未知字段忽略（前向兼容手工编辑）、字符串 trim / 非字符串归空串、theme 枚举非法归 system */
 export function normalizeSettings(raw: unknown): AppSettings {
   const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return {
+    theme: normalizeTheme(source.theme),
     deepseek: normalizeGroup(source.deepseek, ["apiKey", "modelName"]),
     writingModel: normalizeGroup(source.writingModel, ["modelName", "apiKey", "baseUrl"]),
   };
@@ -64,7 +80,7 @@ export function readSettingsFile(filePath: string): AppSettings {
   try {
     return normalizeSettings(JSON.parse(readFileSync(filePath, "utf8")));
   } catch {
-    return { deepseek: { ...DEFAULT_SETTINGS.deepseek }, writingModel: { ...DEFAULT_SETTINGS.writingModel } };
+    return normalizeSettings(null);
   }
 }
 

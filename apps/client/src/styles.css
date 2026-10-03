@@ -1,6 +1,84 @@
 :root {
   color-scheme: light;
+  /* 背景 */
+  --bg-app: #f6f7f9; /* 与 main.ts windowBackgroundColor 亮色同值，改色需双侧同步 */
+  --bg-panel: #fff;
+  --bg-sidebar: #fbfbfc;
+  --bg-subtle: #eef0f3;
+  --bg-button-hover: #f3f4f6;
+  --bg-accent-subtle: #e8effd;
+  --bg-success-subtle: #dcfce7;
+  --bg-danger-subtle: #fef3f2;
+  --bg-danger-soft: #fee4e2;
+  --bg-warning-subtle: #fffbeb;
+  /* 边框 */
+  --border-default: #e4e7eb;
+  --border-strong: #d0d7de;
+  --border-danger: #fecdca;
+  --border-warning: #fde68a;
+  /* 文字 */
+  --fg-default: #1f2328;
+  --fg-muted: #6a737d;
+  --fg-subtle: #9aa1ab;
+  --fg-disabled: #b6bcc4;
+  --fg-notify: #424a53;
+  --fg-on-emphasis: #fff;
+  /* 强调蓝（emphasis 为填充底，暗色比文字蓝深以保白字对比） */
+  --accent: #2563eb;
+  --accent-emphasis: #2563eb;
+  --accent-strong: #1d4ed8;
+  /* 危险红（hover 暗色变亮而非变暗） */
+  --danger: #b42318;
+  --danger-strong: #912018;
+  --danger-emphasis: #b42318;
+  --danger-hover: #912018;
+  /* 成功绿 */
+  --success: #15803d;
+  /* 层级 */
+  --overlay: rgba(31, 35, 40, 0.45);
+  --shadow-popover: 0 6px 20px rgba(31, 35, 40, 0.14);
+  --shadow-modal: 0 12px 32px rgba(31, 35, 40, 0.22);
+
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+/* 暗黑主题：值以 GitHub Primer Dark 为基准（规格映射表 docs/superpowers/specs/2026-10-02-client-dark-mode-design.md）。
+   nativeTheme.themeSource 会覆盖这里的媒体查询判定——手动三选与跟随系统同走此路径 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg-app: #0d1117; /* 与 main.ts windowBackgroundColor 暗色同值，改色需双侧同步 */
+    --bg-panel: #151b23;
+    --bg-sidebar: #10151c;
+    --bg-subtle: #21262d;
+    --bg-button-hover: #262c36;
+    --bg-accent-subtle: #121d2f;
+    --bg-success-subtle: #12261e;
+    --bg-danger-subtle: #25171c;
+    --bg-danger-soft: #312229;
+    --bg-warning-subtle: #272115;
+    --border-default: #3d444d;
+    --border-strong: #4b535e;
+    --border-danger: #931c2e;
+    --border-warning: #9e6a03;
+    --fg-default: #f0f3f6;
+    --fg-muted: #9198a1;
+    --fg-subtle: #656c76;
+    --fg-disabled: #484f58;
+    --fg-notify: #d1d7de;
+    --fg-on-emphasis: #fff;
+    --accent: #4493f8;
+    --accent-emphasis: #1f6feb;
+    --accent-strong: #388bfd;
+    --danger: #f85149;
+    --danger-strong: #ff8182;
+    --danger-emphasis: #b62324;
+    --danger-hover: #da3633;
+    --success: #3fb950;
+    --overlay: rgba(1, 4, 9, 0.6);
+    --shadow-popover: 0 6px 20px rgba(1, 4, 9, 0.4);
+    --shadow-modal: 0 12px 32px rgba(1, 4, 9, 0.5);
+  }
 }
 
 * {
@@ -9,8 +87,8 @@
 
 body {
   margin: 0;
-  background: #f6f7f9;
-  color: #1f2328;
+  background: var(--bg-app);
+  color: var(--fg-default);
 }
 
 .app {
@@ -24,8 +102,8 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 10px 20px;
-  background: #fff;
-  border-bottom: 1px solid #e4e7eb;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .header h1 {
@@ -65,15 +143,15 @@ body {
 }
 
 .sidebar {
-  border-right: 1px solid #e4e7eb;
-  background: #fbfbfc;
+  border-right: 1px solid var(--border-default);
+  background: var(--bg-sidebar);
   overflow: hidden;
   white-space: nowrap;
 }
 
 .tree-pane {
-  border-right: 1px solid #e4e7eb;
-  background: #fff;
+  border-right: 1px solid var(--border-default);
+  background: var(--bg-panel);
   overflow-y: auto;
 }
 
@@ -94,8 +172,8 @@ body {
   align-items: center;
   gap: 14px;
   padding: 10px 20px;
-  background: #fff;
-  border-bottom: 1px solid #e4e7eb;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .row.center {
@@ -117,14 +195,14 @@ body {
 }
 
 .pane-hint {
-  color: #6a737d;
+  color: var(--fg-muted);
   font-size: 13px;
   padding: 0 12px;
   line-height: 1.6;
 }
 
 .pane-error {
-  color: #b42318;
+  color: var(--danger);
   font-size: 13px;
   padding: 0 12px;
   line-height: 1.6;
@@ -155,12 +233,12 @@ body {
 }
 
 .novel-item:hover:not(:disabled) {
-  background: #eef0f3;
+  background: var(--bg-subtle);
 }
 
 .novel-item.active {
-  background: #e8effd;
-  box-shadow: inset 3px 0 0 #2563eb;
+  background: var(--bg-accent-subtle);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .novel-item .novel-name {
@@ -173,7 +251,7 @@ body {
 .novel-item .novel-id {
   display: block;
   font-size: 11px;
-  color: #9aa1ab;
+  color: var(--fg-subtle);
 }
 
 .tree-node {
@@ -193,16 +271,16 @@ body {
 }
 
 .tree-node:hover:not(.muted) {
-  background: #eef0f3;
+  background: var(--bg-subtle);
 }
 
 .tree-node.active {
-  background: #e8effd;
-  color: #1d4ed8;
+  background: var(--bg-accent-subtle);
+  color: var(--accent-strong);
 }
 
 .tree-node.muted {
-  color: #9aa1ab;
+  color: var(--fg-subtle);
   cursor: default;
 }
 
@@ -225,19 +303,19 @@ body {
   padding: 0;
   border: none;
   background: transparent;
-  color: #6a737d;
+  color: var(--fg-muted);
   font-size: 11px;
   line-height: 1;
   cursor: pointer;
 }
 
 .tree-toggle:hover:not(:disabled) {
-  color: #1d4ed8;
+  color: var(--accent-strong);
 }
 
 .tree-toggle:disabled {
   cursor: default;
-  color: #b6bcc4;
+  color: var(--fg-disabled);
 }
 
 /* 组头整组收起切换（大纲分组）：沿用三角语汇，紧凑尺寸贴近组头行高 */
@@ -255,7 +333,7 @@ body {
   padding: 10px 12px 3px;
   font-size: 12px;
   font-weight: 600;
-  color: #6a737d;
+  color: var(--fg-muted);
 }
 
 /* 组头动作按钮（大纲刷新入口）：小号描边图标钮 */
@@ -263,15 +341,15 @@ body {
   margin-left: auto;
   padding: 1px 7px;
   font-size: 12px;
-  border: 1px solid #d5d9df;
+  border: 1px solid var(--border-strong);
   background: transparent;
   border-radius: 6px;
-  color: #6a737d;
+  color: var(--fg-muted);
   cursor: pointer;
 }
 
 .tree-group-btn:hover {
-  background: #eef0f3;
+  background: var(--bg-subtle);
 }
 
 /* 右键菜单（fixed 定位，点击空白处关闭） */
@@ -282,10 +360,10 @@ body {
   flex-direction: column;
   min-width: 150px;
   padding: 4px;
-  background: #fff;
-  border: 1px solid #e4e7eb;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
   border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(31, 35, 40, 0.14);
+  box-shadow: var(--shadow-popover);
 }
 
 .context-menu button {
@@ -298,16 +376,16 @@ body {
 }
 
 .context-menu button:hover {
-  background: #eef0f3;
+  background: var(--bg-subtle);
 }
 
 .context-menu button.danger,
 button.danger {
-  color: #b42318;
+  color: var(--danger);
 }
 
 .context-menu button.danger:hover {
-  background: #fee4e2;
+  background: var(--bg-danger-soft);
 }
 
 /* 内联重命名 */
@@ -329,17 +407,17 @@ button.danger {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(31, 35, 40, 0.45);
+  background: var(--overlay);
 }
 
 .dialog {
   width: 420px;
   max-width: calc(100vw - 48px);
   padding: 18px 20px;
-  background: #fff;
-  border: 1px solid #e4e7eb;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
   border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(31, 35, 40, 0.22);
+  box-shadow: var(--shadow-modal);
 }
 
 .dialog h3 {
@@ -348,7 +426,7 @@ button.danger {
 }
 
 .dialog-danger h3 {
-  color: #b42318;
+  color: var(--danger);
 }
 
 .dialog-lead {
@@ -364,10 +442,10 @@ button.danger {
 
 .dialog-hint code {
   padding: 1px 6px;
-  background: #fef3f2;
-  border: 1px solid #fecdca;
+  background: var(--bg-danger-subtle);
+  border: 1px solid var(--border-danger);
   border-radius: 5px;
-  color: #912018;
+  color: var(--danger-strong);
 }
 
 .dialog input {
@@ -389,13 +467,13 @@ button.danger {
 }
 
 .dialog-actions .danger-filled {
-  background: #b42318;
-  border-color: #b42318;
-  color: #fff;
+  background: var(--danger-emphasis);
+  border-color: var(--danger-emphasis);
+  color: var(--fg-on-emphasis);
 }
 
 .dialog-actions .danger-filled:hover:not(:disabled) {
-  background: #912018;
+  background: var(--danger-hover);
 }
 
 .dialog-actions .danger-filled:disabled {
@@ -415,18 +493,18 @@ button.danger {
   font-size: 12px;
   padding: 3px 10px;
   border-radius: 999px;
-  background: #eef0f3;
-  color: #6a737d;
+  background: var(--bg-subtle);
+  color: var(--fg-muted);
 }
 
 .stage.active {
-  background: #2563eb;
-  color: #fff;
+  background: var(--accent-emphasis);
+  color: var(--fg-on-emphasis);
 }
 
 .stage.done {
-  background: #dcfce7;
-  color: #15803d;
+  background: var(--bg-success-subtle);
+  color: var(--success);
 }
 
 .flow {
@@ -438,7 +516,7 @@ button.danger {
 .notify {
   white-space: pre-wrap;
   margin: 6px 0;
-  color: #424a53;
+  color: var(--fg-notify);
 }
 
 .idle,
@@ -449,8 +527,8 @@ button.danger {
 }
 
 .viewcard {
-  background: #fff;
-  border: 1px solid #e4e7eb;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
   border-radius: 10px;
   padding: 12px 16px;
   margin: 10px 0;
@@ -469,7 +547,7 @@ button.danger {
 }
 
 .viewcard dt {
-  color: #6a737d;
+  color: var(--fg-muted);
   font-size: 13px;
 }
 
@@ -484,7 +562,7 @@ button.danger {
 }
 
 .viewcard .dim {
-  color: #6a737d;
+  color: var(--fg-muted);
 }
 
 .viewcard .part-name {
@@ -505,7 +583,7 @@ button.danger {
   margin: 0 0 6px;
   font-size: 12px;
   font-weight: 600;
-  color: #6a737d;
+  color: var(--fg-muted);
 }
 
 .viewcard .outline-summary {
@@ -539,21 +617,21 @@ button.danger {
 .viewcard .doc-path {
   margin: 8px 0 0;
   font-size: 12px;
-  color: #6a737d;
+  color: var(--fg-muted);
   word-break: break-all;
 }
 
 /* ViewCard（创作流大纲/章节视图）情节点行——与 plot-list 独立 */
 .viewcard .plot {
   padding-left: 16px;
-  color: #6a737d;
+  color: var(--fg-muted);
   font-size: 13px;
 }
 
 /* 角色编辑 / 新建表单（CharacterEditForm，编辑与新建共用） */
 .character-form {
-  background: #fff;
-  border: 1px solid #e4e7eb;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
   border-radius: 10px;
   padding: 12px 16px;
   margin: 10px 0;
@@ -572,16 +650,16 @@ button.danger {
 .character-form .field label {
   display: block;
   font-size: 12px;
-  color: #6a737d;
+  color: var(--fg-muted);
   margin-bottom: 2px;
 }
 
 .character-form .field .req {
-  color: #b42318;
+  color: var(--danger);
 }
 
 .character-form .field.invalid label {
-  color: #b42318;
+  color: var(--danger);
 }
 
 /* 字段选择器带 .field 前缀提高特异性，压过全局 input:not([type]) 规则 */
@@ -589,7 +667,7 @@ button.danger {
 .character-form .field textarea {
   width: 100%;
   padding: 6px 10px;
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   font-size: 13px;
   font-family: inherit;
@@ -602,7 +680,7 @@ button.danger {
 
 .character-form .form-error {
   margin: 8px 0 0;
-  color: #b42318;
+  color: var(--danger);
   font-size: 12px;
 }
 
@@ -639,8 +717,8 @@ button.danger {
 }
 
 .question {
-  background: #fffbeb;
-  border: 1px solid #fde68a;
+  background: var(--bg-warning-subtle);
+  border: 1px solid var(--border-warning);
   border-radius: 10px;
   padding: 12px 16px;
   margin: 14px 0;
@@ -673,32 +751,32 @@ input[type="text"],
 input:not([type]) {
   flex: 1;
   padding: 8px 10px;
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   font-size: 14px;
 }
 
 button {
   padding: 8px 14px;
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
-  background: #fff;
+  background: var(--bg-panel);
   font-size: 14px;
   cursor: pointer;
 }
 
 button:hover:not(:disabled) {
-  background: #f3f4f6;
+  background: var(--bg-button-hover);
 }
 
 button.primary {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #fff;
+  background: var(--accent-emphasis);
+  border-color: var(--accent-emphasis);
+  color: var(--fg-on-emphasis);
 }
 
 button.primary:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: var(--accent-strong);
 }
 
 button:disabled {
@@ -711,7 +789,7 @@ button.ghost {
 }
 
 .hint {
-  color: #6a737d;
+  color: var(--fg-muted);
   font-size: 13px;
 }
 
@@ -736,7 +814,7 @@ button.ghost {
   margin: 0 0 6px;
   font-size: 12px;
   font-weight: 600;
-  color: #6a737d;
+  color: var(--fg-muted);
 }
 
 .settings-dialog .field {
@@ -746,7 +824,7 @@ button.ghost {
 .settings-dialog .field label {
   display: block;
   font-size: 12px;
-  color: #6a737d;
+  color: var(--fg-muted);
   margin-bottom: 2px;
 }
 
@@ -755,12 +833,29 @@ button.ghost {
   box-sizing: border-box;
   padding: 6px 8px;
   font-size: 13px;
-  border: 1px solid #d5dae1;
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
 }
 
 .settings-hint {
   margin: 2px 0 0;
   font-size: 12px;
-  color: #8a929c;
+  color: var(--fg-subtle);
+}
+
+/* 设置弹窗「外观」主题分段三选（SettingsDialog）：选中态复用主按钮填充语汇 */
+.theme-options {
+  display: flex;
+  gap: 6px;
+}
+
+.theme-options button {
+  padding: 5px 12px;
+  font-size: 13px;
+}
+
+.theme-options button.selected {
+  background: var(--accent-emphasis);
+  border-color: var(--accent-emphasis);
+  color: var(--fg-on-emphasis);
 }

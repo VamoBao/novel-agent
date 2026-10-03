@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, nativeTheme } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -30,6 +30,23 @@ function resolveRepoRoot(): string {
 /** 模型设置文件（VS Code 式明文 JSON；userData 目录不进仓库，见 electron/settings.ts） */
 function settingsFilePath(): string {
   return path.join(app.getPath("userData"), "settings.json");
+}
+
+/** 窗口底色随主题（防启动白闪与切题闪帧；值与 styles.css 的 --bg-app 保持一致） */
+function windowBackgroundColor(): string {
+  return nativeTheme.shouldUseDarkColors ? "#0d1117" : "#f6f7f9";
+}
+
+/** 应用主题设置到 nativeTheme：theme 三值与原生三态一一对应。
+ *  themeSource 一变，renderer 的 prefers-color-scheme 媒体查询即时重算——主题保存即生效。
+ *  诊断钩子 NOVEL_CLIENT_THEME=system|light|dark 强制覆盖（与 NOVEL_CLIENT_* 家族同款，
+ *  仅显式设置时生效，双主题无头截图验证用） */
+function applyTheme(): void {
+  const override = process.env.NOVEL_CLIENT_THEME;
+  nativeTheme.themeSource =
+    override === "system" || override === "light" || override === "dark"
+      ? override
+      : readSettingsFile(settingsFilePath()).theme;
 }
 
 /** 极简 .env 解析（KEY=VALUE 行，# 注释）：Electron 不自动加载根 .env，agent 子进程需要 API Key */
@@ -228,6 +245,7 @@ app.commandLine.appendSwitch("in-process-gpu");
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
+    backgroundColor: windowBackgroundColor(),
     width: 1100,
     height: 820,
     title: "novel-agent",
@@ -307,10 +325,11 @@ ipcMain.handle("settings:get", (): { settings: AppSettings; filePath: string } =
   filePath: settingsFilePath(),
 }));
 
-ipcMain.handle("settings:save", (_event, settings: AppSettings): { settings: AppSettings; filePath: string } => ({
-  settings: writeSettingsFile(settingsFilePath(), settings),
-  filePath: settingsFilePath(),
-}));
+ipcMain.handle("settings:save", (_event, settings: AppSettings): { settings: AppSettings; filePath: string } => {
+  const saved = writeSettingsFile(settingsFilePath(), settings);
+  applyTheme(); // 主题保存即生效（模型配置仍为下一次会话生效，两者语义不同）
+  return { settings: saved, filePath: settingsFilePath() };
+});
 
 ipcMain.handle("library:list", async (): Promise<NovelListItem[]> => {
   const result = novelListItemSchema.array().safeParse(await runLibraryQuery(["list"]));
@@ -383,6 +402,13 @@ ipcMain.handle(
 );
 
 app.whenReady().then(() => {
+  applyTheme();
+  // 「跟随系统」模式：系统运行中切换主题时同步窗口底色（CSS 媒体查询由 Chromium 自动重算）
+  nativeTheme.on("updated", () => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.setBackgroundColor(windowBackgroundColor());
+    }
+  });
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

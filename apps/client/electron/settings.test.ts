@@ -48,6 +48,7 @@ describe("settings 文件读写", () => {
     const filePath = join(dir, "nested", "settings.json");
 
     const saved = writeSettingsFile(filePath, {
+      theme: "system",
       deepseek: { apiKey: " sk-main ", modelName: "" },
       writingModel: { modelName: "m", apiKey: "k", baseUrl: "https://x/v1" },
     });
@@ -71,6 +72,7 @@ describe("resolveModelEnv 三级优先级", () => {
   test("设置文件 > .env > 继承环境变量；上层为空串时逐级下探", () => {
     const env = resolveModelEnv(
       {
+        theme: "system",
         deepseek: { apiKey: "sk-settings", modelName: "" },
         writingModel: { modelName: "", apiKey: "", baseUrl: "" },
       },
@@ -95,5 +97,32 @@ describe("resolveModelEnv 三级优先级", () => {
     );
     expect(env.DEEPSEEK_API_KEY).toBe("sk-inherited");
     expect(env.WRITING_MODEL_NAME).toBe("");
+  });
+});
+
+describe("normalizeSettings theme", () => {
+  test("缺省 / 非法值归 system（旧 settings.json 前向兼容、手改文件容错）", () => {
+    expect(normalizeSettings(null).theme).toBe("system");
+    expect(normalizeSettings({}).theme).toBe("system");
+    expect(normalizeSettings({ theme: "blue" }).theme).toBe("system");
+    expect(normalizeSettings({ theme: 123 }).theme).toBe("system");
+  });
+
+  test("三个合法值透传", () => {
+    expect(normalizeSettings({ theme: "system" }).theme).toBe("system");
+    expect(normalizeSettings({ theme: "light" }).theme).toBe("light");
+    expect(normalizeSettings({ theme: "dark" }).theme).toBe("dark");
+  });
+
+  test("写后读往返保留 theme", () => {
+    const dir = mkdtempSync(join(tmpdir(), "novel-settings-"));
+    tempDirs.push(dir);
+    const filePath = join(dir, "settings.json");
+    writeSettingsFile(filePath, {
+      theme: "dark",
+      deepseek: { apiKey: "", modelName: "" },
+      writingModel: { modelName: "", apiKey: "", baseUrl: "" },
+    });
+    expect(readSettingsFile(filePath).theme).toBe("dark");
   });
 });
