@@ -29,3 +29,15 @@ export const outlineSchema = z.object({
 });
 
 export type Outline = z.infer<typeof outlineSchema>;
+
+/**
+ * 大纲结构化输出的「新增角色清单」项：大纲中登场、但角色库中没有的角色。
+ * name 照抄角色名；role 为该角色在大纲中的一句话定位（如「反派·血宗宗主」），
+ * 供确认门展示与角色自动创建 Agent 作种子。
+ */
+export const newCharacterSchema = z.object({
+  name: z.string().min(1).describe("角色名"),
+  role: z.string().min(1).describe("该角色在大纲中的一句话定位，如：反派·血宗宗主"),
+});
+
+export type NewCharacterOutline = z.infer<typeof newCharacterSchema>;

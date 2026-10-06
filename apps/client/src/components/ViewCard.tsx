@@ -68,6 +68,17 @@ export function ViewCard({ view }: { view: View }) {
               ))}
             </div>
           ))}
+          {/* 清单仅在大纲确认视图渲染（对齐 CLI renderView：full 视图不展示，避免误读「确认后自动入库」文案） */}
+          {view.detail === "confirm" && view.newCharacters && view.newCharacters.length > 0 ? (
+            <>
+              <p className="part-name">✨ 本次大纲新增角色（确认后自动入库）</p>
+              {view.newCharacters.map((c) => (
+                <p key={c.name} className="act">
+                  · {c.name}——{c.role}
+                </p>
+              ))}
+            </>
+          ) : null}
         </section>
       );
     case "chapter-plan":

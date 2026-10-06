@@ -55,6 +55,20 @@ describe("renderView", () => {
     expect(full).toContain("情节点A：灵眼被夺");
   });
 
+  test("outline confirm：携带 newCharacters 时渲染新增角色清单，缺失或为空不渲染", () => {
+    const withNew = renderView({
+      kind: "outline",
+      detail: "confirm",
+      outline,
+      newCharacters: [{ name: "萧无咎", role: "反派·血宗宗主" }],
+    });
+    expect(withNew).toContain("本次大纲新增角色");
+    expect(withNew).toContain("萧无咎——反派·血宗宗主");
+    // full 视图与空清单确认视图不渲染清单区块
+    expect(renderView({ kind: "outline", detail: "full", outline, newCharacters: [] })).not.toContain("新增角色");
+    expect(renderView({ kind: "outline", detail: "confirm", outline })).not.toContain("新增角色");
+  });
+
   test("chapter-plan：幕梗概、情节点与章节列表齐全", () => {
     const text = renderView({
       kind: "chapter-plan",

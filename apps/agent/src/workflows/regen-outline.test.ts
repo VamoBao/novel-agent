@@ -11,7 +11,7 @@ import { WorldviewStore } from "../state/worldview-store";
 import { CharacterStore } from "../state/character-store";
 import { OutlineStore } from "../state/outline-store";
 import { FakeChannel } from "../ui/fake-channel";
-import type { Character, Worldview } from "@novel/shared";
+import type { Character, NewCharacterOutline, Worldview } from "@novel/shared";
 
 /**
  * regenerateOutline 集成测试：mock 掉 'ai' 模块（大纲 Agent 的 generateText
@@ -72,14 +72,29 @@ const oldTree = [
   },
 ];
 
+/** 自动创建 Agent 入库「萧无咎」用的完整角色卡（过 characterSchema） */
+const autoCard = {
+  basicInfo: { name: "萧无咎", gender: "男" },
+  core: { desire: "掌控九州灵脉", fear: "宗门基业毁于己手", narrativeRole: "反派" },
+  background: "血宗宗主，靠垄断灵脉崛起",
+  creationPurpose: "作为主要反派逼出主角的成长",
+  endingDirection: "被主角击败，宗门垄断瓦解",
+};
+
 /** 新大纲 fixture：恰好 partCount 部、共 actCount 幕（save_outline 入参 schema 强校验） */
-function newOutlineFixture(partCount: number, actCount: number, title = "灵脉遗孤·新版") {
+function newOutlineFixture(
+  partCount: number,
+  actCount: number,
+  title = "灵脉遗孤·新版",
+  newCharacters: NewCharacterOutline[] = [],
+) {
   const perPart = Math.floor(actCount / partCount);
   const remainder = actCount - perPart * partCount;
   return {
     title,
     logline: "散修少年重夺灵脉的新版故事线",
     theme: "破而后立",
+    newCharacters,
     parts: Array.from({ length: partCount }, (_, i) => ({
       name: `新${i + 1}部`,
       summary: `新${i + 1}部梗概`,
@@ -152,7 +167,11 @@ function optionsFor(world: Seeded, channel: FakeChannel) {
 describe("regenerateOutline（FakeChannel + mock LLM 集成）", () => {
   test("确认后新版本入库：旧树旧章降级归档，产物覆盖，description 回填", async () => {
     const world = await seed();
-    textScript = [[[{ tool: "save_outline", args: newOutlineFixture(1, 5) }]]];
+    // LLM 脚本：大纲 Agent 一次 save_outline（携带新增角色清单）；auto-character Agent 一轮入库萧无咎
+    textScript = [
+      [[{ tool: "save_outline", args: newOutlineFixture(1, 5, "灵脉遗孤·新版", [{ name: "萧无咎", role: "反派·血宗宗主" }]) }]],
+      [[{ tool: "save_character", args: autoCard }]],
+    ];
     const channel = new FakeChannel([5, 1, true]);
 
     const result = await regenerateOutline(optionsFor(world, channel));
@@ -177,6 +196,13 @@ describe("regenerateOutline（FakeChannel + mock LLM 集成）", () => {
     // 产物覆盖与 description 回填
     expect(existsSync(join(world.dir, "output", `${NOVEL_ID}.json`))).toBe(true);
     expect(world.novelStore.getNovel(NOVEL_ID)?.description).toBe("散修少年重夺灵脉的新版故事线");
+
+    // 新版本大纲的新增角色自动入库；确认循环用例（拒绝→再确认）清单为空、无自动创建轮
+    const characterStore = new CharacterStore(world.db);
+    expect(
+      characterStore.listCharacters(NOVEL_ID).map((c) => c.character.basicInfo.name),
+    ).toContain("萧无咎");
+    expect(channel.notifies.some((n) => n.includes("新增 1 个角色已自动入库"))).toBe(true);
   });
 
   test("确认循环：用户拒绝并给反馈 → Agent 修订后再次提交才入库", async () => {

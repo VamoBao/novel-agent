@@ -7,9 +7,11 @@ import {
   foreshadowPatchSchema,
   foreshadowSchema,
   locationSchema,
+  newCharacterSchema,
   outlineNodePatchSchema,
   outlineNodeSchema,
   outlineSchema,
+  outlineViewSchema,
   worldviewSchema,
 } from "./index";
 
@@ -336,5 +338,44 @@ describe("audienceSuggestionSchema", () => {
     expect(() =>
       audienceSuggestionSchema.parse({ options: [{ label: "a", description: "b" }] }),
     ).toThrow();
+  });
+});
+
+describe("newCharacterSchema", () => {
+  test("完整新增角色项通过校验", () => {
+    const c = newCharacterSchema.parse({ name: "萧无咎", role: "反派·血宗宗主" });
+    expect(c.name).toBe("萧无咎");
+    expect(c.role).toBe("反派·血宗宗主");
+  });
+
+  test("缺名字 / 名字空串 / 定位空串被拒绝", () => {
+    expect(() => newCharacterSchema.parse({ role: "反派" })).toThrow();
+    expect(() => newCharacterSchema.parse({ name: "", role: "反派" })).toThrow();
+    expect(() => newCharacterSchema.parse({ name: "萧无咎", role: "" })).toThrow();
+  });
+});
+
+describe("outlineViewSchema 的 newCharacters 可选字段", () => {
+  const baseOutline = {
+    title: "灵脉遗孤",
+    logline: "散修少年夺回被宗门垄断的灵脉",
+    parts: [
+      { name: "第一部", summary: "概述", acts: [{ name: "第一幕", summary: "梗概", keyPlotPoints: ["情节点"] }] },
+    ],
+  };
+
+  test("携带 newCharacters 的确认视图通过校验", () => {
+    const view = outlineViewSchema.parse({
+      kind: "outline",
+      detail: "confirm",
+      outline: baseOutline,
+      newCharacters: [{ name: "萧无咎", role: "反派·血宗宗主" }],
+    });
+    expect(view.newCharacters).toHaveLength(1);
+  });
+
+  test("不携带 newCharacters 的视图仍通过（full 展示与旧消息兼容）", () => {
+    const view = outlineViewSchema.parse({ kind: "outline", detail: "full", outline: baseOutline });
+    expect(view.newCharacters).toBeUndefined();
   });
 });

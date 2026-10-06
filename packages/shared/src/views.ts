@@ -2,7 +2,7 @@ import { z } from "zod";
 import { characterSchema } from "./character";
 import { chapterPlanSchema } from "./chapter";
 import { coreConflictSchema } from "./conflict";
-import { outlineSchema } from "./outline";
+import { newCharacterSchema, outlineSchema } from "./outline";
 import { worldviewSchema } from "./worldview";
 
 /**
@@ -27,6 +27,8 @@ export const outlineViewSchema = z.object({
   /** confirm = 确认门简览（部/幕名称与概述）；full = 含关键情节点的全量展示 */
   detail: z.enum(["confirm", "full"]),
   outline: outlineSchema,
+  /** 确认门携带的「新增角色清单」（名字+一句话定位）；full 展示与旧消息不带 */
+  newCharacters: z.array(newCharacterSchema).optional(),
 });
 
 export const worldviewViewSchema = z.object({

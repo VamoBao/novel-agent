@@ -5,6 +5,7 @@ import { getDefaultCharacterStore, type CharacterStore } from "../state/characte
 import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
 import { saveOutline } from "../output/outline-writer";
 import { createOutline } from "./agents/outline-agent";
+import { autoCreateCharacters, filterNewCharacters } from "./agents/auto-character-agent";
 
 export interface RegenOutlineOptions {
   /** 交互通道（终端 / 协议 / 测试替身），业务交互的唯一出口 */
@@ -31,6 +32,8 @@ export interface RegenOutlineResult {
  * 用户填幕数/部数表单后复用大纲 Agent 的确认门生成新大纲，
  * 确认后以新版本入库——旧大纲树与已生成章节整体降级为历史版本（行保留，
  * 版本迭代记录），并覆盖 output 产物、回填 novels.description（logline）。
+ * 新版大纲 newCharacters 清单中的新增角色经兜底 diff 后自动填充角色卡入库
+ * （空清单跳过，同 createNovel 收尾动作）。
  * 校验失败（小说不存在 / 世界观未确认 / 无角色）抛可读错误，
  * 由调用方（协议入口）转为 fatal error 消息。
  */
@@ -69,12 +72,13 @@ export async function regenerateOutline(options: RegenOutlineOptions): Promise<R
     default: 1,
   });
 
-  const outline = await createOutline(
+  const submission = await createOutline(
     // 类型/受众/核心冲突未入库，仅喂库内数据（worldview + characters）
     { worldview: storedWorldview.worldview, characters: characters.map((c) => c.character) },
-    { novelTitle: novel.name ?? undefined, actCount, partCount },
+    { novelTitle: novel.name ?? undefined, actCount, partCount, novelId, characterStore },
     channel,
   );
+  const outline = submission.outline;
 
   const treeNodes = outlineStore.saveOutlineTreeNewVersion(novelId, outline.parts);
   const version = treeNodes[0]?.node.version ?? 1;
@@ -86,5 +90,24 @@ export async function regenerateOutline(options: RegenOutlineOptions): Promise<R
   const savedPath = await saveOutline(novelId, outline);
   channel.notify(`🗂 大纲产物已更新：${savedPath}`);
   novelStore.updateNovel(novelId, { description: outline.logline });
+
+  // 大纲新增角色自动入库（兜底 diff + 空清单跳过，同 createNovel 收尾动作）
+  const freshCharacters = characterStore.listCharacters(novelId).map((c) => c.character);
+  const pendingNew = filterNewCharacters(submission.newCharacters, freshCharacters);
+  if (pendingNew.length > 0) {
+    channel.notify(`\n✨ 新版大纲引入了 ${pendingNew.length} 个新角色，正在自动填充角色卡并入库…`);
+    await autoCreateCharacters({
+      novelId,
+      worldview: storedWorldview.worldview,
+      outline,
+      newCharacters: pendingNew,
+      existingCharacters: freshCharacters,
+      channel,
+      characterStore,
+    });
+    channel.notify(
+      `✨ 本次大纲新增 ${pendingNew.length} 个角色已自动入库：${pendingNew.map((c) => c.name).join("、")}`,
+    );
+  }
   return { novelId, version, partCount: partTotal, actCount: actTotal };
 }

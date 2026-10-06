@@ -12,6 +12,7 @@ import type {
   ChapterPlanView,
   Character,
   CoreConflict,
+  NewCharacterOutline,
   Outline,
   Stage,
   View,
@@ -79,7 +80,7 @@ export function renderView(view: View): string {
       return formatCharacterCard(view.character);
     case "outline":
       return view.detail === "confirm"
-        ? formatOutlineForConfirm(view.outline)
+        ? formatOutlineForConfirm(view.outline, view.newCharacters)
         : formatOutlineFull(view.outline);
     case "chapter-plan":
       return formatChapterPlan(view);
@@ -109,14 +110,20 @@ function formatCharacterCard(c: Character): string {
   return lines.join("\n");
 }
 
-/** 确认视图：剧情梗概、主题、两级部/幕名称与概述（详细情节点在保存后完整展示） */
-function formatOutlineForConfirm(o: Outline): string {
+/** 确认视图：剧情梗概、主题、两级部/幕名称与概述 + 新增角色清单（详细情节点在保存后完整展示） */
+function formatOutlineForConfirm(o: Outline, newCharacters?: NewCharacterOutline[]): string {
   const lines = [`📖 大纲草稿：《${o.title}》`, `  剧情梗概：${o.logline}`];
   if (o.theme) lines.push(`  主题：${o.theme}`);
   for (const part of o.parts) {
     lines.push(`  ▶ ${part.name}：${part.summary}`);
     for (const act of part.acts) {
       lines.push(`    ▶ ${act.name}：${act.summary}`);
+    }
+  }
+  if (newCharacters && newCharacters.length > 0) {
+    lines.push(`  ✨ 本次大纲新增角色（确认后自动入库）：`);
+    for (const c of newCharacters) {
+      lines.push(`    · ${c.name}——${c.role}`);
     }
   }
   return lines.join("\n");

@@ -1,7 +1,9 @@
 import { tool } from "ai";
+import { z } from "zod";
 import { runReactAgent } from "../../agents/react";
 import type { UiChannel } from "../../ui/channel";
-import { outlineSchema, type Outline } from "@novel/shared";
+import { getDefaultCharacterStore, type CharacterStore } from "../../state/character-store";
+import { outlineSchema, newCharacterSchema, type NewCharacterOutline, type Outline } from "@novel/shared";
 import type { NovelParams } from "../../state/types";
 
 const SYSTEM_PROMPT = `你是一名资深小说编辑与故事结构师。你的任务：基于给定的创作参数（类型、受众、世界观、角色、核心冲突，可能部分缺失）创作一本小说的大纲。
@@ -19,6 +21,11 @@ const SYSTEM_PROMPT = `你是一名资深小说编辑与故事结构师。你的
 5. 标题要契合类型与调性，logline 用一句话讲清「谁+想要什么+障碍+代价」；
 6. 类型/受众/核心冲突未提供时，依据世界观、角色与小说名自行把握调性与主线，不得虚构与世界观冲突的设定。
 
+角色梳理要求：
+1. 大纲中的角色应尽量沿用角色库已有角色（可用 list_characters 工具查询角色库现状）；
+2. 登场角色不在角色库中时，必须将其列入 save_outline 的 newCharacters：name 为角色名，role 为该角色在大纲中的一句话定位（如「反派·血宗宗主」）；清单内名字不得重复，角色库已有角色不得列入；
+3. newCharacters 会在确认时随大纲一并展示给用户：用户确认后这些角色将自动填充角色卡并入库。
+
 完成后调用 save_outline 工具保存大纲（参数即完整大纲，必须严格符合 schema，且部数与总幕数必须与要求完全一致）。save_outline 会把大纲的剧情梗概、主题、每部概述与每幕名称概述展示给用户确认：用户确认后保存完成；用户提出修改意见时，根据反馈调整大纲后重新调用 save_outline，直到用户确认为止。`;
 
 /** 结构强校验 schema：save_outline 入参必须恰好为 partCount 部、共 actCount 幕（SDK 先校验再执行，模型给错即拒绝重试） */
@@ -31,6 +38,28 @@ export function outlineSchemaFor(actCount: number, partCount: number) {
   );
 }
 
+/** save_outline 的结构化入参：大纲本体 + 新增角色清单（项内名字不得重复），叠加部/幕强校验 */
+export function saveOutlineInputSchemaFor(actCount: number, partCount: number) {
+  return outlineSchema
+    .extend({
+      newCharacters: z
+        .array(newCharacterSchema)
+        .refine((list) => new Set(list.map((c) => c.name)).size === list.length, "新增角色清单内名字不得重复"),
+    })
+    .refine(
+      (o) =>
+        o.parts.length === partCount &&
+        o.parts.reduce((sum, p) => sum + p.acts.length, 0) === actCount,
+      `大纲必须恰好为 ${partCount} 部、共 ${actCount} 幕`,
+    );
+}
+
+/** 大纲 Agent 的最终产物：确认通过的大纲本体 + 随大纲连带确认的新增角色清单 */
+export interface OutlineSubmission {
+  outline: Outline;
+  newCharacters: NewCharacterOutline[];
+}
+
 export interface CreateOutlineOptions {
   /** 用户已命名的书名；指定时大纲 title 必须沿用 */
   novelTitle?: string;
@@ -38,6 +67,10 @@ export interface CreateOutlineOptions {
   actCount: number;
   /** 部数（用户指定，默认 1） */
   partCount: number;
+  /** 目标小说创作 ID（list_characters 工具按此查询角色库） */
+  novelId: string;
+  /** 角色库 store；缺省默认 SQLite store（测试可替换） */
+  characterStore?: CharacterStore;
 }
 
 /**
@@ -59,21 +92,36 @@ export async function createOutline(
   params: OutlineContext,
   options: CreateOutlineOptions,
   channel: UiChannel,
-): Promise<Outline> {
-  const { novelTitle, actCount, partCount } = options;
-  let saved: Outline | undefined;
+): Promise<OutlineSubmission> {
+  const { novelTitle, actCount, partCount, novelId } = options;
+  const characterStore = options.characterStore ?? getDefaultCharacterStore();
+  let saved: OutlineSubmission | undefined;
+
+  /** 角色库查询工具：返回库内全部角色名与叙事定位，供模型比对出「新增角色」 */
+  const listCharacters = tool({
+    description:
+      "查询角色库中已有的全部角色（名字与叙事定位）。梳理 newCharacters 时必须先调用此工具：清单中只能列角色库中没有的角色，库内已有角色不得列入。",
+    inputSchema: z.object({}),
+    execute: async () => {
+      const rows = characterStore.listCharacters(novelId);
+      return {
+        characters: rows.map((r) => ({ name: r.character.basicInfo.name, narrativeRole: r.character.core.narrativeRole })),
+      };
+    },
+  });
 
   const saveOutline = tool({
     description:
-      "大纲完成后调用此工具保存。会把大纲的剧情梗概、主题、每部概述与每幕名称概述展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整大纲后重新调用。",
-    inputSchema: outlineSchemaFor(actCount, partCount),
-    execute: async (outline) => {
+      "大纲完成后调用此工具保存（参数 = 完整大纲 + newCharacters 新增角色清单）。会把剧情梗概、主题、每部概述、每幕名称概述与新增角色清单展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整后重新调用。",
+    inputSchema: saveOutlineInputSchemaFor(actCount, partCount),
+    execute: async (input) => {
+      const { newCharacters, ...outline } = input;
       const confirmed = await channel.askConfirm("以上大纲是否确认？", {
         default: true,
-        view: { kind: "outline", detail: "confirm", outline },
+        view: { kind: "outline", detail: "confirm", outline, newCharacters },
       });
       if (confirmed) {
-        saved = outline;
+        saved = { outline, newCharacters };
         return { ok: true as const };
       }
       const feedback = await channel.askText("请说明大纲需要调整的地方> ");
@@ -101,12 +149,12 @@ export async function createOutline(
         ? [`小说已由用户命名为《${novelTitle}》，大纲的 title 字段必须使用该名称。`]
         : []),
     ].join("\n\n"),
-    tools: { save_outline: saveOutline },
+    tools: { save_outline: saveOutline, list_characters: listCharacters },
     // 不设 stopTool：save_outline 可能被用户否决（需继续修订），
     // hasToolCall 会在工具被调用时无条件停止，无法表达「提交被拒需继续」
     maxSteps: 12,
     isDone: () => saved !== undefined,
-    continuationHint: "请立即调用 save_outline 工具保存大纲（参数为完整大纲），不要只输出文本。",
+    continuationHint: "请立即调用 save_outline 工具保存大纲（参数为完整大纲与 newCharacters 新增角色清单），不要只输出文本。",
   });
 
   if (!saved) {

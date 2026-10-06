@@ -13,6 +13,7 @@ import { saveOutline } from "../output/outline-writer";
 import { collectWorldview } from "./agents/worldview-agent";
 import { createCharacter } from "./agents/character-agent";
 import { createOutline } from "./agents/outline-agent";
+import { autoCreateCharacters, filterNewCharacters } from "./agents/auto-character-agent";
 
 /** 常见热门类型（用户也可自定义输入） */
 const GENRES = [
@@ -191,7 +192,12 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
 
   // 大纲（ReAct Agent，部 → 幕两级结构）
   channel.notify("\n🛠 大纲 Agent 启动…");
-  const outline = await createOutline(params, { novelTitle: novelName, actCount, partCount }, channel);
+  const submission = await createOutline(
+    params,
+    { novelTitle: novelName, actCount, partCount, novelId: id, characterStore },
+    channel,
+  );
+  const outline = submission.outline;
   channel.present({ kind: "outline", detail: "full", outline });
 
   // 确认后入库（outlines 表两级树，梗概与关键情节点随节点入列）并落盘 output/<id>.json
@@ -210,6 +216,28 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
     ...(novelName ? {} : { name: outline.title }),
     description: outline.logline,
   });
+
+  // 大纲新增角色自动入库：代码级兜底 diff（剔除库内已有名 + 去重），空清单跳过（零 LLM 调用）。
+  // 置于 state 收尾与 name/description 回填之后：auto 块抛错（maxSteps 耗尽/中止）时
+  // 小说本身已是自洽的终态（outlined + 回填完成），不会停留在「半成品」。
+  const existingCharacters = characterStore.listCharacters(id).map((c) => c.character);
+  const pendingNew = filterNewCharacters(submission.newCharacters, existingCharacters);
+  if (pendingNew.length > 0) {
+    channel.notify(`\n✨ 大纲引入了 ${pendingNew.length} 个新角色，正在自动填充角色卡并入库…`);
+    await autoCreateCharacters({
+      novelId: id,
+      worldview,
+      outline,
+      newCharacters: pendingNew,
+      existingCharacters,
+      channel,
+      characterStore,
+    });
+    channel.notify(
+      `✨ 本次大纲新增 ${pendingNew.length} 个角色已自动入库：${pendingNew.map((c) => c.name).join("、")}`,
+    );
+  }
+
   const finalName = novelName ?? outline.title;
   channel.notify(`\n✅ 小说《${finalName}》初始化完成！创作 ID：${id}`);
   channel.notify("📑 章节规划不自动进行——请在书库中打开小说，从幕节点「规划本幕章节」逐幕发起");

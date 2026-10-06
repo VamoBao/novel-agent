@@ -1,3 +1,19 @@
+## 2026-10-06 大纲新增角色结构化输出与自动入库（任务包经用户确认，SDD 计划 `docs/superpowers/plans/2026-10-06-outline-new-characters.md`）
+
+- **背景**：大纲生成时模型会引入角色库中不存在的新角色（反派、配角等），此前只存在于大纲文本里——写作期按幕规划章节、写正文时这些角色没有角色卡（内核 / 背景 / 创作目的等结构化设定），世界观约束与人物弧光无从落地。需求：大纲 Agent 生成大纲时把「新增角色」结构化输出，用户确认大纲后自动填充角色卡入库。三个关键机制各有取舍，一并落盘。
+- **决策一：角色自动创建走 ReAct 循环 + save_character 终态工具（方案 A），而非编排层 for 循环 generateObject / 单次 generateObject 数组生成**：
+  1. **ReAct + 终态工具逐卡入库（选定）**：复用既有 `runReactAgent` 基建（isDone 判定 + maxSteps 兜底 + 续跑机制），`save_character` 的 inputSchema 即角色卡 schema——每张卡 SDK 先校验再执行、天然过 zod；工具 execute 内做三重守卫（清单外角色拒绝 / 重复保存拒绝 / 库内同名拒绝），模型被拒后可自行修正重试（集成测试覆盖「守卫拒绝后修正」路径），编排层无需为失败卡写重试逻辑
+  2. 编排层 `for(清单) generateObject` 逐卡生成：每次调用独立无上下文，一张失败编排层要自管重试与部分成功回滚；且绕开工具守卫，模型填错名字（漂移）只能整卡作废重跑
+  3. 单次 `generateObject` 生成全部角色卡的数组：schema 校验全有或全无——一个角色不合规整批拒绝重跑，token 成本随清单长度线性放大且无增量入库
+- **决策二：新增角色清单进 save_outline 确认门连带确认（写库前透明、用户可拦截）**：`saveOutlineInputSchemaFor` 把 `newCharacters`（newCharacterSchema：名字 + 一句话定位，清单内名字不得重复）并入 save_outline 结构化入参，确认视图（CLI renderView 与客户端 ViewCard）以「✨ 本次大纲新增角色（确认后自动入库）」连带展示——角色入库与大纲共用同一道确认门：清单错了用户在大纲确认时反馈修订即可（反馈进 Agent 修订循环，天然收敛），拒绝大纲即连带拦截全部角色入库；若清单不进确认门（确认大纲后静默建角色），用户对「将写入库的新角色」没有否决机会，与项目「写库前经用户确认」的确认门体系相悖。
+- **决策三：编排层 `filterNewCharacters` 兜底 diff，不信任模型的「新增」判定**：入库前以库内角色名（trim 全等）剔除清单中已有项、清单内同名去重保留首个、空名剔除——模型可能把库内角色误列入清单（prompt 与 list_characters 工具已约束，但弱模型仍会漂移），自动创建是无人值守写库（无确认门），最后一道防线必须在代码层而非提示词层；守卫三重兜底（filterNewCharacters 前置剔除 + save_character execute 内库内同名拒绝）后，重复入库在结构上不可能。空清单跳过自动创建（零 LLM 调用）。
+- **设计要点**：
+  - **清单只收名字 + 一句话定位**：完整角色卡字段（13 项）交由自动创建 Agent 依据世界观与大纲填充——大纲阶段让模型同时编 3+ 张完整角色卡会稀释大纲质量，最小信息随大纲确认、扩写后置
+  - **maxSteps = 4 + 清单数 × 2**：每卡一轮生成 + 一轮修正余量，耗尽未完成抛可读错误（已入库卡保留，不回滚——增量入库对齐创作流角色段惯例）
+  - **isDone 按数量判定**（savedNames.size >= 清单长度）：save_character 是「多终态工具」（每卡一次），hasToolCall 会在首次调用即停止，故沿用 character/outline 的 isDone 模式而非 stopTool
+  - **独立导出供复用**：`autoCreateCharacters` / `filterNewCharacters` 不绑定 createNovel——后续章节规划 / 正文生成等写作期工作流引入新角色时可直接复用
+- **结论**：shared `newCharacterSchema` + 大纲 Agent `list_characters` 工具与 save_outline 结构化入参 + `agents/auto-character-agent.ts`（autoCreateCharacters / filterNewCharacters）+ createNovel / regenerateOutline 确认入库后兜底 diff 自动创建 + CLI renderView / 客户端 ViewCard 清单渲染。AC：typecheck 3 工程 / lint / 232 用例全过（净增 14）；真实 LLM 端到端待用户复验（`bun run dev` 走到大纲确认门观察清单展示、确认后查 characters 表）。
+
 ## 2026-10-02 客户端暗黑模式：nativeTheme.themeSource + prefers-color-scheme 媒体查询（renderer 零主题 JS）
 
 - **背景**：客户端界面需要暗黑模式——默认跟随系统，设置弹窗可手动三选（跟随系统 / 浅色 / 深色），主题机制在三个方案间对比选型。

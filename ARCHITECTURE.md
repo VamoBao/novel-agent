@@ -65,10 +65,12 @@ apps/agent/src/
 └── workflows/
     ├── index.ts         # 模块出口（createNovel / planActChapters / regenerateOutline / polishCharacter
     │                    #   / writeChapter / collectWorldview / createOutline / planChapters）
-    ├── create-novel.ts  # 主编排：初始化 → 参数收集 → 大纲生成确认入库 → 会话收尾（章节规划由单幕会话手动发起）
+    ├── create-novel.ts  # 主编排：初始化 → 参数收集 → 大纲生成确认入库 → state 收尾回填 → 新增角色自动入库 → 会话收尾
+    │                    #   （章节规划由单幕会话手动发起）
     ├── plan-act-chapters.ts # 单幕章节规划编排：校验并从库组装上下文 → 复用章节 Agent → saveChapters 幕下建章
     ├── regen-outline.ts # 大纲重新生成编排：读库校验 → 幕数/部数表单 → 复用大纲 Agent（入参松绑，仅库内数据）
     │                    #   → saveOutlineTreeNewVersion 新版本入库（旧版与旧章降级归档）→ 覆盖产物与 description
+    │                    #   → 新增角色自动入库（兜底 diff + autoCreateCharacters，同新建流程）
     ├── polish-character.ts # 角色 AI 润色编排：读库校验（小说/角色/世界观）→ generateObject 以表单值+世界观
     │                    #   全字段润色（无确认门，结果回填客户端表单，不自动入库）
     ├── write-chapter.ts # 章节正文生成编排：读库校验（小说/章节点/概述/无正文/世界观）→ 库内组上下文
@@ -78,8 +80,14 @@ apps/agent/src/
         ├── worldview-agent.ts   # 世界观 ReAct Agent（多轮追问 + 终态提交）
         ├── character-agent.ts   # 角色 ReAct Agent（逐字段「发散丰富→确认→保存」：标识性字段照存原词、描述性字段扩写；终态组装校验）
         ├── outline-agent.ts     # 大纲 ReAct Agent（部→幕两级结构，用户确认门 + 幕/部数强校验；
+        │                         #   list_characters 角色库查询工具，save_outline 结构化入参附
+        │                         #   newCharacters 新增角色清单随大纲进确认门连带确认；
         │                         #   入参 OutlineContext 松绑——genre/audience/coreConflict 可选，重生成会话仅喂库内数据）
-        └── chapter-agent.ts     # 章节 ReAct Agent（单幕拆章：按幕梗概与情节点推荐章节数量与概述，用户确认门；单幕规划会话调用）
+        ├── chapter-agent.ts     # 章节 ReAct Agent（单幕拆章：按幕梗概与情节点推荐章节数量与概述，用户确认门；单幕规划会话调用）
+        └── auto-character-agent.ts  # 新增角色自动创建 Agent（无确认门：依据世界观与大纲为清单逐个填充角色卡并
+                                     #   调 save_character 终态工具入库，isDone 按清单数量判定、maxSteps 耗尽抛
+                                     #   可读错误保留已入库卡；另导出 filterNewCharacters 编排层兜底 diff 纯函数——
+                                     #   剔除库内已有名 / 清单内去重 / 空名剔除；独立导出供后续写作期工作流复用）
 
 packages/shared/src/     # @novel/shared：双端共享纯 zod 层——领域 schema（worldview / character /
                          #   conflict / outline / chapter-plan / audience / outline-node）+ 展示视图（views）+
@@ -144,7 +152,7 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 6. **世界观**：独立 ReAct Agent（`worldview-agent`）——ask_user 工具多轮追问 → submit_worldview 终态提交（schema 校验），确认后按创作 ID upsert 入库（`worldview-store`）
 7. **角色**：独立 ReAct Agent（`character-agent`）——字段协议驱动（13 个扁平字段映射到角色卡 schema）：`ask_user` 征集文本 → `save_field` 逐字段「发散丰富 → 用户确认 → 保存」（标识性字段 name/gender/narrativeRole 照存用户原词不扩写，其余描述性字段以用户描述为种子扩写成 2~4 句设定文字、不照抄原话；确认与反馈在工具 execute 内代码强制）→ 必填字段（姓名、内核三维、背景、创作目的、结局方向）齐全后 `submit_character` 组装整卡并**展示给用户做最终确认**（用户确认无补充才结束；有反馈则处理后重新提交），组装由代码完成并过 schema 校验（杜绝模型漂移）；每张角色卡确认后立即按创作 ID 写入 SQLite（增量持久化，`character-store`）；外层循环支持多角色，约束至少一名主角；内核/背景/创作目的/结局方向为生成后固定不变的属性
 8. **核心冲突**：自由文本 → generateObject 归一化（由来/影响/理想解决）
-9. **大纲**：先询问幕数（askInt，3-20，直接回车默认 5）再询问部数（1~幕数，默认 1）→ ReAct Agent（`outline-agent`）基于全部参数生成「部 → 幕」两级大纲（用户已命名时 title 沿用书名；结构经 `outlineSchemaFor(actCount, partCount)` refine 强校验恰好 M 部共 N 幕、每部至少一幕，各部幕数由模型按剧情节奏分配）→ `save_outline` 内展示「剧情梗概、主题、每部概述与每幕名称概述」请用户确认——确认无修改才完成，有修改意见按反馈调整后重新提交确认（循环）；确认后 `saveOutlineTree` 两级入库（部为根节点、幕为子节点，整树事务，梗概与关键情节点随节点入列——供写作期按幕内容生成章节大纲）并按 ID 落盘 `output/<id>.json`（`outline-writer`）
+9. **大纲**：先询问幕数（askInt，3-20，直接回车默认 5）再询问部数（1~幕数，默认 1）→ ReAct Agent（`outline-agent`，配 `list_characters` 角色库查询工具——返回库内全部角色名与叙事定位，梳理新增角色须先调用）基于全部参数生成「部 → 幕」两级大纲（用户已命名时 title 沿用书名；结构经 `outlineSchemaFor(actCount, partCount)` refine 强校验恰好 M 部共 N 幕、每部至少一幕，各部幕数由模型按剧情节奏分配；登场而角色库没有的角色列入 `newCharacters` 新增角色清单——名字 + 一句话定位，清单内名字不得重复（经 `saveOutlineInputSchemaFor` 在 save_outline 入参层强校验）、库内已有角色不得列入（提示词层约束，由编排层兜底 diff 把关））→ `save_outline` 内展示「剧情梗概、主题、每部概述与每幕名称概述 + 新增角色清单」请用户确认——确认无修改才完成，有修改意见按反馈调整后重新提交确认（循环，清单随大纲连带确认）；确认后 `saveOutlineTree` 两级入库（部为根节点、幕为子节点，整树事务，梗概与关键情节点随节点入列——供写作期按幕内容生成章节大纲）并按 ID 落盘 `output/<id>.json`（`outline-writer`）；随后 state 收尾与回填先行完成（status → outlined；`novelStore.updateNovel`——未命名时 name = 大纲标题，description = logline），再由编排层对清单兜底 diff——`filterNewCharacters`（trim 全等剔除库内已有名、清单内同名去重保留首个、空名剔除，不信任模型的「新增」判定），空清单跳过（零 LLM 调用），非空经 `autoCreateCharacters`（`agents/auto-character-agent`）依据世界观与大纲自动填充角色卡并逐张入库（notify 通报进度与名单）。自动入库置于收尾回填之后：auto 块抛错（maxSteps 耗尽 / 会话中止）时小说本身已是自洽终态，不会停留在「半成品」
 10. **章节规划不自动衔接**（2026-09-25 起，决策见 DECISIONS）：大纲确认入库落盘后会话即收尾（run_finished），不自动规划第一幕章节——章节规划（章名 + 剧情概述，确认后幕下事务建章）由用户在客户端幕节点卡「规划本幕章节」入口经 `planActChapters` 单幕会话逐幕手动发起（见下节）；`chapter` 阶段枚举与 `chapter-plan` 确认视图保留，归单幕规划会话使用
 11. 全程通过 `NovelStateStore` 更新 state（initializing → gathering → outlined；写作状态流转待正文工作流）
 
@@ -164,6 +172,7 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 2. **数量表单**：askInt 幕数（3-20 默认 5）→ 部数（1~幕数 默认 1），与新建流程一致
 3. **复用大纲 Agent**：`createOutline` 入参松绑为 `OutlineContext`（worldview / characters 必带，genre / audience / coreConflict 可选——这三项未入库，重生成只喂库内数据，不喂旧大纲避免新版本被旧结构锚定）→ save_outline 确认门（预览-反馈-调整循环）
 4. **版本切换入库**：`saveOutlineTreeNewVersion` 单事务——该小说全部当前版本行（部/幕/章，含已生成章节）降级 `is_current_version=0` 归档为历史版本，新树以 `version=max+1` 入库为当前版本；覆盖 `output/<id>.json` 产物、回填 novels.description（logline）；旧节点 ID 随降级失效，客户端完成后重置选中并刷新详情（新幕恢复「规划本幕章节」入口）
+5. **新增角色自动入库**：同新建流程收尾动作——`filterNewCharacters` 对新版大纲 `newCharacters` 清单兜底 diff（剔除库内已有名，空清单跳过、零 LLM 调用）→ `autoCreateCharacters` 依据世界观与新版大纲自动填充角色卡并逐张入库（清单随大纲在确认门连带确认过，写库前透明可拦截）
 
 ## 章节正文生成工作流（src/workflows/write-chapter.ts）
 

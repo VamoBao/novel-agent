@@ -22,7 +22,11 @@ type MockTool = { execute: (input: never, options: unknown) => Promise<unknown> 
 mock.module("ai", () => ({
   tool: (spec: unknown) => spec,
   generateText: async ({ tools }: { tools: Record<string, MockTool> }) => {
-    const turns = textScript.shift() ?? [];
+    // 脚本耗尽即抛错：任何计划外的 LLM 调用都会炸测试（「零 LLM 调用」断言的硬证明）
+    const turns = textScript.shift();
+    if (turns === undefined) {
+      throw new Error("textScript 脚本耗尽——出现了计划外的 LLM 调用");
+    }
     let callIndex = 0;
     for (const turn of turns) {
       for (const call of turn) {
@@ -62,10 +66,23 @@ const characterFields = [
   { field: "endingDirection", summary: "打破宗门垄断后归隐" },
 ];
 
+/** 自动创建 Agent 入库「萧无咎」用的完整角色卡（过 characterSchema） */
+const autoCard = {
+  basicInfo: { name: "萧无咎", gender: "男" },
+  core: { desire: "掌控九州灵脉", fear: "宗门基业毁于己手", narrativeRole: "反派" },
+  background: "血宗宗主，靠垄断灵脉崛起",
+  creationPurpose: "作为主要反派逼出主角的成长",
+  endingDirection: "被主角击败，宗门垄断瓦解",
+};
+
 const outlineFixture = {
   title: "灵脉遗孤",
   logline: "散修少年夺回被宗门垄断的灵脉",
   theme: "反抗垄断",
+  newCharacters: [
+    { name: "萧无咎", role: "反派·血宗宗主" },
+    { name: "林恒", role: "误标已有角色（应被兜底 diff 剔除）" },
+  ],
   parts: [
     {
       name: "第一部·风起",
@@ -97,11 +114,12 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     closeDb = () => db.close();
 
     // LLM 脚本：worldview agent 一次提交；character agent 一轮 7 个 save_field + 一轮 submit；
-    // outline agent 一次 save_outline（章节规划不随大纲自动进行，无章节 Agent 轮）
+    // outline agent 一次 save_outline；auto-character agent 一轮入库萧无咎（章节规划不随大纲自动进行）
     textScript = [
       [[{ tool: "submit_worldview", args: worldviewFixture }]],
       [characterFields.map((f) => ({ tool: "save_field", args: f })), [{ tool: "submit_character", args: {} }]],
       [[{ tool: "save_outline", args: outlineFixture }]],
+      [[{ tool: "save_character", args: autoCard }]],
     ];
     objectScript = [
       { options: [{ label: "都市青年读者", description: "节奏明快的成长与逆袭" }] },
@@ -168,9 +186,14 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     const worldviewStore = new WorldviewStore(db);
     expect(worldviewStore.getWorldview(state.id)?.worldview.taboos).toEqual(worldviewFixture.taboos);
     const characterStore = new CharacterStore(db);
+    // 新增角色自动入库：清单内「林恒」为库内已有角色，被兜底 diff 剔除（零调用、不入库），
+    // 「萧无咎」经自动创建 Agent 入库
     expect(
       characterStore.listCharacters(state.id).map((c) => c.character.basicInfo.name),
-    ).toEqual(["林恒"]);
+    ).toEqual(["林恒", "萧无咎"]);
+    // 逐卡 notify 与汇总 notify
+    expect(channel.notifies.some((n) => n.includes("新角色已自动入库：萧无咎"))).toBe(true);
+    expect(channel.notifies.some((n) => n.includes("新增 1 个角色已自动入库"))).toBe(true);
 
     // 大纲内容入库：部有梗概无情节点，幕梗概与情节点齐全；无章节点（规划改由单幕会话手动发起）
     const outlineNodes = new OutlineStore(db).listOutlineNodes(state.id);
@@ -182,6 +205,59 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     expect(firstAct?.node.summary).toBe("第1幕梗概");
     expect(firstAct?.node.keyPlotPoints).toEqual(["第1幕情节点"]);
     expect(outlineNodes.some((n) => n.node.type === "chapter")).toBe(false);
+  });
+
+  test("大纲未引入新角色时跳过自动创建（零 LLM 调用）", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "novel-create-nonew-"));
+    process.chdir(tempDir);
+    const db = openDatabase(join(tempDir, "test.db"));
+    closeDb = () => db.close();
+
+    // 复用主流程脚本：newCharacters 置空，textScript 不含 auto-character agent 轮次
+    const outlineNoNew = { ...outlineFixture, newCharacters: [] };
+    textScript = [
+      [[{ tool: "submit_worldview", args: worldviewFixture }]],
+      [characterFields.map((f) => ({ tool: "save_field", args: f })), [{ tool: "submit_character", args: {} }]],
+      [[{ tool: "save_outline", args: outlineNoNew }]],
+    ];
+    objectScript = [
+      { options: [{ label: "都市青年读者", description: "节奏明快的成长与逆袭" }] },
+      { origin: "宗门垄断灵脉", impact: "散修如草芥", idealResolution: "灵脉归于众生" },
+    ];
+    const channel = new FakeChannel([
+      "",
+      "仙侠",
+      ["都市青年读者——节奏明快的成长与逆袭"],
+      "",
+      "九州大陆，灵脉断绝的修仙世界",
+      "林恒，十六岁散修少年，主角",
+      ...characterFields.map(() => true),
+      true,
+      "",
+      "宗门垄断灵脉，散修如草芥",
+      5,
+      1,
+      true,
+    ]);
+
+    const state = await createNovel({
+      channel,
+      store: memoryNovelStateStore,
+      characterStore: new CharacterStore(db),
+      worldviewStore: new WorldviewStore(db),
+      novelStore: new NovelStore(db),
+      outlineStore: new OutlineStore(db),
+    });
+
+    // 空清单跳过：无自动入库相关 notify，角色库仅保留流程内确认的角色
+    expect(channel.notifies.some((n) => n.includes("自动入库"))).toBe(false);
+    const characterStore = new CharacterStore(db);
+    expect(
+      characterStore.listCharacters(state.id).map((c) => c.character.basicInfo.name),
+    ).toEqual(["林恒"]);
+    // 零 LLM 调用：脚本轮次恰好消耗完，自动创建 Agent 未被发起
+    expect(textScript).toHaveLength(0);
+    expect(state.status).toBe("outlined");
   });
 
   test("UserAbortedError：任一提问通道关闭即中止全流程", async () => {

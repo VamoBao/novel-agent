@@ -9,7 +9,7 @@ export {
   type ForeshadowPatch,
 } from "./foreshadow";
 export { coreConflictSchema, type CoreConflict } from "./conflict";
-export { outlineSchema, type Outline } from "./outline";
+export { outlineSchema, newCharacterSchema, type Outline, type NewCharacterOutline } from "./outline";
 export { chapterPlanSchema, type ChapterPlan } from "./chapter";
 export {
   outlineNodeTypeSchema,
