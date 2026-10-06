@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   audienceSuggestionSchema,
   chapterPlanSchema,
+  chapterPlanViewSchema,
   characterSchema,
   coreConflictSchema,
   foreshadowPatchSchema,
@@ -376,6 +377,29 @@ describe("outlineViewSchema 的 newCharacters 可选字段", () => {
 
   test("不携带 newCharacters 的视图仍通过（full 展示与旧消息兼容）", () => {
     const view = outlineViewSchema.parse({ kind: "outline", detail: "full", outline: baseOutline });
+    expect(view.newCharacters).toBeUndefined();
+  });
+});
+
+describe("chapterPlanViewSchema 的 newCharacters 可选字段", () => {
+  const baseView = {
+    kind: "chapter-plan",
+    actName: "第2幕",
+    actSummary: "本幕梗概",
+    keyPlotPoints: ["情节点A"],
+    plan: { chapters: [{ name: "第一章·雨夜", summary: "雨夜夺脉" }] },
+  };
+
+  test("携带 newCharacters 的确认视图通过校验", () => {
+    const view = chapterPlanViewSchema.parse({
+      ...baseView,
+      newCharacters: [{ name: "萧无咎", role: "第1章登场·血宗宗主" }],
+    });
+    expect(view.newCharacters).toHaveLength(1);
+  });
+
+  test("不携带 newCharacters 的视图仍通过（旧消息兼容）", () => {
+    const view = chapterPlanViewSchema.parse(baseView);
     expect(view.newCharacters).toBeUndefined();
   });
 });

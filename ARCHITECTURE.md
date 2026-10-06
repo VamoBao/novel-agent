@@ -67,7 +67,9 @@ apps/agent/src/
     │                    #   / writeChapter / collectWorldview / createOutline / planChapters）
     ├── create-novel.ts  # 主编排：初始化 → 参数收集 → 大纲生成确认入库 → state 收尾回填 → 新增角色自动入库 → 会话收尾
     │                    #   （章节规划由单幕会话手动发起）
-    ├── plan-act-chapters.ts # 单幕章节规划编排：校验并从库组装上下文 → 复用章节 Agent → saveChapters 幕下建章
+    ├── plan-act-chapters.ts # 单幕章节规划编排：校验（含世界观已确认）并从库组装上下文 → 复用章节 Agent
+    │                    #   （save_chapters 附新增角色清单连带确认）→ saveChapters 幕下建章 → 新增角色
+    │                    #   兜底 diff + 自动入库（同大纲两条流程的收尾动作）
     ├── regen-outline.ts # 大纲重新生成编排：读库校验 → 幕数/部数表单 → 复用大纲 Agent（入参松绑，仅库内数据）
     │                    #   → saveOutlineTreeNewVersion 新版本入库（旧版与旧章降级归档）→ 覆盖产物与 description
     │                    #   → 新增角色自动入库（兜底 diff + autoCreateCharacters，同新建流程）
@@ -83,11 +85,15 @@ apps/agent/src/
         │                         #   list_characters 角色库查询工具，save_outline 结构化入参附
         │                         #   newCharacters 新增角色清单随大纲进确认门连带确认；
         │                         #   入参 OutlineContext 松绑——genre/audience/coreConflict 可选，重生成会话仅喂库内数据）
-        ├── chapter-agent.ts     # 章节 ReAct Agent（单幕拆章：按幕梗概与情节点推荐章节数量与概述，用户确认门；单幕规划会话调用）
+        ├── chapter-agent.ts     # 章节 ReAct Agent（单幕拆章：按幕梗概与情节点推荐章节数量与概述，用户确认门；单幕规划会话调用；
+        │                         #   list_characters 角色库查询工具 + prompt 已有角色行——概述尽量点名出场角色，
+        │                         #   save_chapters 经 saveChaptersInputSchema 结构化入参附顶层 newCharacters 新增角色清单
+        │                         #   （清单内名字不得重复）随规划进确认门连带确认；产物 ChapterPlanSubmission = plan + newCharacters）
         └── auto-character-agent.ts  # 新增角色自动创建 Agent（无确认门：依据世界观与大纲为清单逐个填充角色卡并
                                      #   调 save_character 终态工具入库，isDone 按清单数量判定、maxSteps 耗尽抛
-                                     #   可读错误保留已入库卡；另导出 filterNewCharacters 编排层兜底 diff 纯函数——
-                                     #   剔除库内已有名 / 清单内去重 / 空名剔除；独立导出供后续写作期工作流复用）
+                                     #   可读错误保留已入库卡；增可选 extraContext 附加上下文——章节规划喂章级
+                                     #   素材，既有调用方零改动；另导出 filterNewCharacters 编排层兜底 diff 纯函数——
+                                     #   剔除库内已有名 / 清单内去重 / 空名剔除；独立导出供写作期工作流复用）
 
 packages/shared/src/     # @novel/shared：双端共享纯 zod 层——领域 schema（worldview / character /
                          #   conflict / outline / chapter-plan / audience / outline-node）+ 展示视图（views）+
@@ -97,7 +103,8 @@ packages/shared/src/     # @novel/shared：双端共享纯 zod 层——领域 s
 apps/client/             # @novel/client：Electron 客户端（electron-vite 三段式 + React）
 ├── electron/
 │   ├── main.ts          # 主进程：窗口 + AgentProcess（spawn bun headless——AgentStartOptions
-│   │                    #   映射 argv（create / plan-chapters / regen-outline / polish-character 含表单载荷）、
+│   │                    #   映射 argv（create / plan-chapters / regen-outline /
+│   │                    #   polish-character 含表单载荷 / write-chapter 章节正文生成）、
 │   │                    #   消息 zod 复验转发、hello 版本校验、退出回收）
 │   │                    #   + library 查询 / 管理 IPC（spawn 一次性查询 CLI、shared
 │   │                    #   schema 复验、超时兜底；角色管理 addCharacter / updateCharacter）
@@ -160,9 +167,10 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 
 客户端幕节点卡「规划本幕章节」入口的会话编排（headless `plan-chapters <novelId> <actNodeId>` 模式，决策见 DECISIONS）：
 
-1. **前置校验**（全部抛可读错误，由协议入口转 fatal error）：小说存在 → 幕节点存在、同小说且类型为 act → 幕梗概与关键情节点非空（旧数据缺内容拒绝）→ 所属部节点存在 → 该幕尚无章节点（同一幕重复规划被唯一索引拒绝，修订流为既有待办）
-2. **上下文组装（全取自库）**：novels.name / description（书名 / logline）+ 部名与部梗概 + 幕名 / 幕梗概 / 关键情节点；theme 经 `readOutlineTheme` 从 output 产物尽力读取，缺失省略
-3. **复用章节 Agent**：`planChapters`（save_chapters 确认门循环同大纲）→ 确认后 `saveChapters` 幕下事务批量建章 → 通知入库统计；run_finished 携带小说 ID 供客户端刷新
+1. **前置校验**（全部抛可读错误，由协议入口转 fatal error）：小说存在 → 幕节点存在、同小说且类型为 act → 幕梗概与关键情节点非空（旧数据缺内容拒绝）→ 所属部节点存在 → 该幕尚无章节点（同一幕重复规划被唯一索引拒绝，修订流为既有待办）→ 世界观已确认（worldviews 表有记录——自动创建新角色需要世界观依据，前置拒绝避免「确认入库后才发现无法自动创建」的中间态，对齐 regen-outline / write-chapter 校验惯例）
+2. **上下文组装（全取自库）**：novels.name / description（书名 / logline）+ 部名与部梗概 + 幕名 / 幕梗概 / 关键情节点 + 角色库已有角色行（名 + 叙事定位，与 `list_characters` 工具同源）；theme 经 `readOutlineTheme` 从 output 产物尽力读取，缺失省略
+3. **复用章节 Agent**：`planChapters` 配 `list_characters` 角色库查询工具（返回名 + 叙事定位），系统提示约束章节概述尽量点名出场角色（已有角色用真名、新角色用清单名）、登场角色不在库中必须列入 `newCharacters`；`save_chapters` 经 `saveChaptersInputSchema` 结构化入参附顶层新增角色清单（newCharacterSchema：名字 + 一句话定位、定位注明登场章，清单内名字不得重复）——确认视图连带展示「✨ 本次规划新增角色（确认后自动入库）」，拒绝规划即连带作废清单重新提交
+4. **入库与新增角色自动创建**：确认后 `saveChapters` 幕下事务批量建章 → 通知入库统计 → `filterNewCharacters` 对清单兜底 diff（trim 全等剔除库内已有名、清单内同名去重保留首个、空名剔除），空清单跳过（零 LLM 调用）；非空组「部/幕」两级伪 Outline（章不进 Outline，规划产物与章节点结构不变）并经 `autoCreateCharacters`（`agents/auto-character-agent`）以世界观 + 伪 Outline + `extraContext`（本次规划的章节列表全文——章节概述是新角色言行的一手素材）自动填充角色卡逐张入库（notify「✨ 本幕规划引入了 N 个新角色…」+ 汇总名单）；run_finished 携带小说 ID 供客户端刷新
 
 ## 大纲重新生成工作流（src/workflows/regen-outline.ts）
 

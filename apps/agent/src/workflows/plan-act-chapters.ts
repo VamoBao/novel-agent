@@ -1,8 +1,12 @@
 import type { UiChannel } from "../ui/channel";
 import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
+import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
+import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
 import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
 import { readOutlineTheme } from "../output/outline-writer";
+import type { Outline } from "@novel/shared";
 import { planChapters } from "./agents/chapter-agent";
+import { autoCreateCharacters, filterNewCharacters } from "./agents/auto-character-agent";
 
 export interface PlanActChaptersOptions {
   /** 交互通道（终端 / 协议 / 测试替身），业务交互的唯一出口 */
@@ -15,6 +19,10 @@ export interface PlanActChaptersOptions {
   novelStore?: NovelStore;
   /** 大纲树 store；缺省用默认 SQLite store（data/novel.db） */
   outlineStore?: OutlineStore;
+  /** 世界观 store；缺省用默认 SQLite store（data/novel.db） */
+  worldviewStore?: WorldviewStore;
+  /** 角色库 store；缺省用默认 SQLite store（data/novel.db） */
+  characterStore?: CharacterStore;
 }
 
 export interface PlanActChaptersResult {
@@ -25,17 +33,20 @@ export interface PlanActChaptersResult {
 }
 
 /**
- * 单幕章节规划工作流（客户端幕节点「生成本幕章节」入口）：
+ * 单幕章节规划工作流（客户端幕节点「规划本幕章节」入口）：
  * 从库中校验并组装目标幕的规划上下文（小说名/logline、所属部、幕梗概与关键情节点，
  * theme 自 output 产物尽力读取），复用章节 Agent 的确认门规划章节，
- * 确认后经 saveChapters 在幕下批量建章。
- * 校验失败（小说/幕不存在、非幕节点、旧数据缺内容、已有章节规划）抛可读错误，
- * 由调用方（协议入口）转为 fatal error 消息。
+ * 确认后经 saveChapters 在幕下批量建章；规划 newCharacters 清单中的新增角色
+ * 经兜底 diff 后自动填充角色卡入库（空清单跳过，同大纲两条流程的收尾动作）。
+ * 校验失败（小说/幕不存在、非幕节点、旧数据缺内容、已有章节规划、世界观未确认）
+ * 抛可读错误，由调用方（协议入口）转为 fatal error 消息。
  */
 export async function planActChapters(options: PlanActChaptersOptions): Promise<PlanActChaptersResult> {
   const { channel, novelId, actNodeId } = options;
   const novelStore = options.novelStore ?? getDefaultNovelStore();
   const outlineStore = options.outlineStore ?? getDefaultOutlineStore();
+  const worldviewStore = options.worldviewStore ?? getDefaultWorldviewStore();
+  const characterStore = options.characterStore ?? getDefaultCharacterStore();
 
   const novel = novelStore.getNovel(novelId);
   if (!novel) {
@@ -66,9 +77,15 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
     throw new Error(`幕「${act.node.name}」已有章节规划，重新规划（修订流）为后续需求`);
   }
 
+  // 自动创建新角色需要世界观依据；前置拒绝避免「确认入库后才发现无法自动创建」的中间态
+  const storedWorldview = worldviewStore.getWorldview(novelId);
+  if (!storedWorldview) {
+    throw new Error("该小说世界观未确认（库中无记录），无法规划章节");
+  }
+
   channel.stage("chapter");
   channel.notify(`📑 章节规划 Agent 启动（${act.node.name}）…`);
-  const plan = await planChapters(
+  const { plan, newCharacters } = await planChapters(
     {
       novelTitle: novel.name ?? "未命名小说",
       logline: novel.description ?? "",
@@ -80,9 +97,50 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
       keyPlotPoints: act.node.keyPlotPoints,
     },
     channel,
+    { novelId, characterStore },
   );
 
   const chapterNodes = outlineStore.saveChapters(novelId, act.id, plan.chapters);
   channel.notify(`📑 章节已入库：${act.node.name} 规划 ${chapterNodes.length} 章`);
+
+  // 章节规划新增角色自动入库：代码级兜底 diff（剔除库内已有名 + 去重），空清单跳过（零 LLM 调用）
+  const existingCharacters = characterStore.listCharacters(novelId).map((c) => c.character);
+  const pendingNew = filterNewCharacters(newCharacters, existingCharacters);
+  if (pendingNew.length > 0) {
+    channel.notify(`\n✨ 本幕规划引入了 ${pendingNew.length} 个新角色，正在自动填充角色卡并入库…`);
+    // 部/幕节点组装伪 Outline（结构匹配 Outline，供自动创建 Agent 作登场情节上下文）
+    const outlineContext: Outline = {
+      title: novel.name ?? "未命名小说",
+      logline: novel.description ?? "",
+      parts: [
+        {
+          name: part.node.name,
+          summary: part.node.summary ?? "",
+          acts: [
+            {
+              name: act.node.name,
+              summary: act.node.summary,
+              keyPlotPoints: act.node.keyPlotPoints,
+            },
+          ],
+        },
+      ],
+    };
+    await autoCreateCharacters({
+      novelId,
+      worldview: storedWorldview.worldview,
+      outline: outlineContext,
+      newCharacters: pendingNew,
+      existingCharacters,
+      channel,
+      characterStore,
+      extraContext: `本次规划的章节列表：\n${plan.chapters
+        .map((c, i) => `第${i + 1}章 ${c.name}：${c.summary}`)
+        .join("\n")}`,
+    });
+    channel.notify(
+      `✨ 本次章节规划新增 ${pendingNew.length} 个角色已自动入库：${pendingNew.map((c) => c.name).join("、")}`,
+    );
+  }
   return { novelId, actNodeId: act.id, actName: act.node.name, chapterCount: chapterNodes.length };
 }

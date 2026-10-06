@@ -43,6 +43,8 @@ export const chapterPlanViewSchema = z.object({
   actSummary: z.string().describe("幕梗概"),
   keyPlotPoints: z.array(z.string()).describe("幕关键情节点"),
   plan: chapterPlanSchema.describe("推荐的本幕章节规划"),
+  /** 确认门携带的「新增角色清单」（名字+一句话定位）；旧消息不带 */
+  newCharacters: z.array(newCharacterSchema).optional(),
 });
 
 export const conflictViewSchema = z.object({

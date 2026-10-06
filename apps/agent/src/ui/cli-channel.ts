@@ -83,7 +83,7 @@ export function renderView(view: View): string {
         ? formatOutlineForConfirm(view.outline, view.newCharacters)
         : formatOutlineFull(view.outline);
     case "chapter-plan":
-      return formatChapterPlan(view);
+      return formatChapterPlan(view, view.newCharacters);
     case "worldview":
       return formatWorldview(view.worldview);
     case "conflict":
@@ -143,8 +143,8 @@ function formatOutlineFull(o: Outline): string {
   return lines.join("\n");
 }
 
-/** 章节规划确认视图：本幕梗概、关键情节点与推荐章节列表（拼入 save_chapters 最终确认提示） */
-function formatChapterPlan(view: ChapterPlanView): string {
+/** 章节规划确认视图：本幕梗概、关键情节点与推荐章节列表 + 新增角色清单（拼入 save_chapters 最终确认提示） */
+function formatChapterPlan(view: ChapterPlanView, newCharacters?: NewCharacterOutline[]): string {
   const lines = [
     `📑 章节规划草稿（${view.actName}）`,
     `  本幕梗概：${view.actSummary}`,
@@ -153,6 +153,12 @@ function formatChapterPlan(view: ChapterPlanView): string {
     `  拟分 ${view.plan.chapters.length} 章：`,
     ...view.plan.chapters.map((c, i) => `    第${i + 1}章 ${c.name}：${c.summary}`),
   ];
+  if (newCharacters && newCharacters.length > 0) {
+    lines.push(`  ✨ 本次规划新增角色（确认后自动入库）：`);
+    for (const c of newCharacters) {
+      lines.push(`    · ${c.name}——${c.role}`);
+    }
+  }
   return lines.join("\n");
 }
 

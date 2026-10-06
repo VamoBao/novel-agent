@@ -90,6 +90,22 @@ describe("renderView", () => {
     expect(text).toContain("第2章 第二章·来客：来客的剧情概述");
   });
 
+  test("chapter-plan：携带 newCharacters 时渲染新增角色清单，缺失不渲染", () => {
+    const view = {
+      kind: "chapter-plan",
+      actName: "第2幕",
+      actSummary: "本幕梗概",
+      keyPlotPoints: ["情节点A"],
+      plan: { chapters: [{ name: "第一章·雨夜", summary: "雨夜夺脉" }] },
+      newCharacters: [{ name: "萧无咎", role: "第1章登场·血宗宗主" }],
+    } as const;
+    const withNew = renderView(view as never);
+    expect(withNew).toContain("本次规划新增角色");
+    expect(withNew).toContain("萧无咎——第1章登场·血宗宗主");
+    const withoutNew = renderView({ ...view, newCharacters: undefined } as never);
+    expect(withoutNew).not.toContain("新增角色");
+  });
+
   test("worldview：可选行缺省不渲染", () => {
     const text = renderView({
       kind: "worldview",

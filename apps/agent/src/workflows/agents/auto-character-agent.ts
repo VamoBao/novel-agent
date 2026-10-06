@@ -30,6 +30,8 @@ export interface AutoCreateCharactersOptions {
   worldview: Worldview;
   /** 已确认的大纲本体（角色登场情节与定位的依据） */
   outline: Outline;
+  /** 附加上下文（如章节规划的「章名+概述」全文），存在时追加进 prompt 供填卡参考 */
+  extraContext?: string;
   /** 待自动创建的新增角色清单（须先经 filterNewCharacters 过滤） */
   newCharacters: NewCharacterOutline[];
   /** 角色库已有角色（供关系字段引用与重名守卫） */
@@ -70,7 +72,7 @@ export function filterNewCharacters(
 export async function autoCreateCharacters(
   options: AutoCreateCharactersOptions,
 ): Promise<StoredCharacter[]> {
-  const { novelId, worldview, outline, newCharacters, existingCharacters, channel } = options;
+  const { novelId, worldview, outline, extraContext, newCharacters, existingCharacters, channel } = options;
   const characterStore = options.characterStore ?? getDefaultCharacterStore();
   if (newCharacters.length === 0) return [];
 
@@ -108,6 +110,7 @@ export async function autoCreateCharacters(
     prompt: [
       `世界观（JSON）：\n${JSON.stringify(worldview, null, 2)}`,
       `大纲（JSON）：\n${JSON.stringify(outline, null, 2)}`,
+      ...(extraContext ? [extraContext] : []),
       existingCharacters.length > 0
         ? `角色库已有角色：${existingCharacters.map((c) => `${c.basicInfo.name}（${c.core.narrativeRole}）`).join("、")}`
         : "角色库暂无角色",

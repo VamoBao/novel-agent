@@ -6,11 +6,20 @@ import { join } from "node:path";
 type ScriptedCall = { tool: string; args: unknown };
 type ScriptedTurn = ScriptedCall[];
 let textScript: ScriptedTurn[][] = [];
+let lastPrompt = "";
 type MockTool = { execute: (input: never, options: unknown) => Promise<unknown> };
 
 mock.module("ai", () => ({
   tool: (spec: unknown) => spec,
-  generateText: async ({ tools }: { tools: Record<string, MockTool> }) => {
+  // runReactAgent 将 prompt 原文包在 messages[0].content 传入，记录之供断言
+  generateText: async ({
+    tools,
+    messages,
+  }: {
+    tools: Record<string, MockTool>;
+    messages: { content: string }[];
+  }) => {
+    lastPrompt = messages[0]?.content ?? "";
     const turns = textScript.shift() ?? [];
     let callIndex = 0;
     for (const turn of turns) {
@@ -185,5 +194,40 @@ describe("autoCreateCharacters", () => {
       characterStore.listCharacters("novel-3").map((r) => r.character.basicInfo.name),
     ).toEqual(["林恒", "萧无咎"]);
     db.close();
+  });
+});
+
+describe("autoCreateCharacters extraContext", () => {
+  test("传入 extraContext 时作为附加上下文块进入 prompt；不传时不出现", async () => {
+    const tempDir2 = await mkdtemp(join(tmpdir(), "novel-auto-extra-"));
+    const db = openDatabase(join(tempDir2, "test.db"));
+    const characterStore = new CharacterStore(db);
+    new (await import("../../state/novel-store")).NovelStore(db).createNovel({ id: "novel-extra" });
+    const channel = new FakeChannel([]);
+
+    const baseOptions = {
+      novelId: "novel-extra",
+      worldview: worldview as never,
+      outline: outline as never,
+      newCharacters: [{ name: "萧无咎", role: "第2章登场·血宗宗主" }],
+      existingCharacters: [] as never[],
+      channel,
+      characterStore,
+    };
+    const extraText = "本次规划的章节列表：\n第1章 雨夜：雨夜夺脉，萧无咎现身";
+    textScript = [[[{ tool: "save_character", args: newCard("萧无咎") }]]];
+
+    await autoCreateCharacters({ ...baseOptions, extraContext: extraText });
+    expect(lastPrompt).toContain(extraText);
+
+    textScript = [[[{ tool: "save_character", args: newCard("叶青璃") }]]];
+    await autoCreateCharacters({
+      ...baseOptions,
+      newCharacters: [{ name: "叶青璃", role: "第1章登场·灵医传人" }],
+      extraContext: undefined,
+    });
+    expect(lastPrompt).not.toContain("本次规划的章节列表");
+    db.close();
+    await rm(tempDir2, { recursive: true, force: true });
   });
 });

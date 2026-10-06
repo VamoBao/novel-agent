@@ -1,3 +1,20 @@
+## 2026-10-06 章节规划新增角色梳理与自动入库（任务包经用户确认，SDD 计划 `docs/superpowers/plans/2026-10-06-chapter-plan-new-characters.md`）
+
+- **背景**：单幕章节规划（`planActChapters`）时模型同样会引入角色库中没有的新角色（本幕登场的反派、配角等），此前只存在于章节概述文本里——写正文时没有角色卡可依；且章节 Agent 上下文不读角色库，概述无法点名已有角色、易虚构重复。需求：`save_chapters` 附新增角色清单随规划进确认门，确认后自动填充角色卡入库（复用上一需求的 `autoCreateCharacters` / `filterNewCharacters`），概述尽量点名出场角色。三个关键取舍一并落盘。
+- **决策一：新增角色清单取顶层 newCharacters（名字 + 一句话定位、定位注明登场章，如「第3章登场·血宗打手」），而非按章归属（每章嵌自己的新角色子清单）**：
+  1. **顶层清单（选定，方案经用户确认）**：与大纲 `newCharacters` 形态完全一致——`newCharacterSchema` / 确认门连带确认 / 兜底 diff / 自动创建全链路零新增概念直接复用；角色常跨章登场，顶层归属天然支持定位里注明登场章；确认视图一个区块、双端渲染一处追加
+  2. 按章归属（`chapters[i].newCharacters`）：登场信息结构化更强，但同一角色跨两章时须模型自行合并去重——schema 与兜底 diff 都要按章聚合，「同一角色在两章各列一次」的漂移面更大；确认视图逐章散列，用户难以一眼看全本次共引入几人
+- **决策二：世界观已确认作为前置校验（对齐 regen-outline / write-chapter），而非确认入库后再判断或静默跳过**：自动创建新角色需要世界观依据（`autoCreateCharacters` 入参必带 worldview）；regen-outline / write-chapter 均有「世界观已确认」前置校验先例。若把校验放在确认入库之后：章节已入库无法回退（同一幕重复规划被唯一索引拒绝、修订流未建），才告知「世界观缺失无法自动创建角色」，用户陷入进退两难的中间态；若静默跳过自动创建：与确认门里「确认后自动入库」的展示文案相悖，属静默失败。前置拒绝（可读错误 → fatal error）成本最低——世界观在创作流里必先于大纲确认，正常数据不会命中该校验，只有旧数据 / 异常库才会。
+- **决策三：`autoCreateCharacters` 增可选 `extraContext` 附加上下文，而非把章节文本拼进伪 Outline 或不给章级素材**：
+  1. **可选参数（选定）**：章节规划的「章名 + 概述」是新角色在本幕言行的一手素材，作为附加上下文块追加进 prompt 可显著提升填卡质量；纯增量可选参数，createNovel / regenerateOutline 两个既有调用方零改动
+  2. 把章节文本拼进伪 Outline 的 act.summary：污染大纲语义——summary 会作为角色卡的登场情节上下文，却不再是真实的大纲原文，且拼接格式受 Outline schema 字段约束
+  3. 不给章级素材：填卡只剩部/幕两级梗概，新角色「在哪一章做什么」无从依据，清单定位里注明登场章的信息被浪费
+- **设计要点**：
+  - **伪 Outline 仅部/幕两级**：自动创建上下文按「目标部 → 目标幕」组装（结构天然匹配 `Outline`），章不进 Outline——`chapterPlanSchema` 产物与 outlines 章节点结构不变
+  - **章级素材经 `extraContext` 注入**：`本次规划的章节列表：\n第i章 <章名>：<概述>` 逐行（取自确认后的规划本体），与世界观 / 伪 Outline / 已有角色行并列进 prompt
+  - **注入可替换**：`PlanActChaptersOptions` 增 `worldviewStore` / `characterStore`（缺省默认 SQLite store，测试替换），`planChapters` 增第三参 `{ novelId, characterStore }`
+- **结论**：shared `chapterPlanViewSchema` 可选 `newCharacters` + 章节 Agent `list_characters` 工具与 `saveChaptersInputSchema` 结构化入参（产物 `ChapterPlanSubmission = plan + newCharacters`）+ planActChapters 世界观前置校验与确认入库后兜底 diff 自动创建 + `autoCreateCharacters` extraContext + CLI renderView / 客户端 ViewCard 清单渲染。AC：typecheck 3 工程 / lint / 243 用例全过（净增 10）；真实 LLM 端到端待用户复验（客户端幕卡「规划本幕章节」走确认门，观察清单展示、概述点名角色、确认后自动入库）。
+
 ## 2026-10-06 大纲新增角色结构化输出与自动入库（任务包经用户确认，SDD 计划 `docs/superpowers/plans/2026-10-06-outline-new-characters.md`）
 
 - **背景**：大纲生成时模型会引入角色库中不存在的新角色（反派、配角等），此前只存在于大纲文本里——写作期按幕规划章节、写正文时这些角色没有角色卡（内核 / 背景 / 创作目的等结构化设定），世界观约束与人物弧光无从落地。需求：大纲 Agent 生成大纲时把「新增角色」结构化输出，用户确认大纲后自动填充角色卡入库。三个关键机制各有取舍，一并落盘。

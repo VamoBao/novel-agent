@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { openDatabase } from "../state/db";
 import { NovelStore } from "../state/novel-store";
 import { OutlineStore } from "../state/outline-store";
+import { WorldviewStore } from "../state/worldview-store";
+import { CharacterStore } from "../state/character-store";
 import { FakeChannel } from "../ui/fake-channel";
 import { UserAbortedError } from "../ui/aborted";
 
@@ -61,32 +63,55 @@ const chapterPlanFixture = {
     { name: "第二章·来客", summary: "神秘来客的剧情概述" },
     { name: "第三章·破晓", summary: "黎明反击的剧情概述" },
   ],
+  newCharacters: [],
+};
+
+const worldviewFixture = {
+  background: { geography: "九州大陆" },
+  taboos: ["不可出现现代科技"],
+};
+
+const autoCard = {
+  basicInfo: { name: "萧无咎", gender: "男" },
+  core: { desire: "掌控九州灵脉", fear: "宗门基业毁于己手", narrativeRole: "反派" },
+  background: "血宗宗主，靠垄断灵脉崛起",
+  creationPurpose: "作为主要反派逼出主角的成长",
+  endingDirection: "被主角击败，宗门垄断瓦解",
 };
 
 interface Seeded {
   novelStore: NovelStore;
   outlineStore: OutlineStore;
+  worldviewStore: WorldviewStore;
+  characterStore: CharacterStore;
   partNodeId: string;
   actNodes: { id: string; name: string }[];
 }
 
-/** 每个用例独立临时库：小说行 + 一部两幕的大纲树（返回 seed 后的 store 与节点 ID） */
+/** 每个用例独立临时库：小说行 +（可选）世界观 + 一部两幕的大纲树（返回 seed 后的 store 与节点 ID） */
 let tempDir: string;
 const originalCwd = process.cwd();
 let closeDb: () => void = () => {};
 
-async function seed(): Promise<Seeded> {
+async function seed(withWorldview = true): Promise<Seeded> {
   tempDir = await mkdtemp(join(tmpdir(), "novel-plan-act-"));
   process.chdir(tempDir);
   const db = openDatabase(join(tempDir, "test.db"));
   closeDb = () => db.close();
   const novelStore = new NovelStore(db);
   const outlineStore = new OutlineStore(db);
+  const worldviewStore = new WorldviewStore(db);
+  const characterStore = new CharacterStore(db);
   novelStore.createNovel({ id: NOVEL_ID, name: "灵脉遗孤", description: "散修少年夺回被宗门垄断的灵脉" });
+  if (withWorldview) {
+    worldviewStore.saveWorldview(NOVEL_ID, worldviewFixture);
+  }
   const tree = outlineStore.saveOutlineTree(NOVEL_ID, partsFixture);
   return {
     novelStore,
     outlineStore,
+    worldviewStore,
+    characterStore,
     partNodeId: tree.find((n) => n.node.type === "part")!.id,
     actNodes: tree.filter((n) => n.node.type === "act").map((n) => ({ id: n.id, name: n.node.name })),
   };
@@ -102,7 +127,11 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
   test("指定幕规划成功：上下文取自库，确认视图与通知齐备，章节挂幕入库", async () => {
     const world = await seed();
     const secondAct = world.actNodes[1]!;
-    textScript = [[[{ tool: "save_chapters", args: chapterPlanFixture }]]];
+    // 双轮脚本：轮 1 章节 Agent save_chapters（带新增角色清单）→ 轮 2 自动创建 Agent save_character 入库
+    textScript = [
+      [[{ tool: "save_chapters", args: { ...chapterPlanFixture, newCharacters: [{ name: "萧无咎", role: "第2章登场·血宗宗主" }] } }]],
+      [[{ tool: "save_character", args: autoCard }]],
+    ];
     const channel = new FakeChannel([true]);
 
     const result = await planActChapters({
@@ -111,6 +140,8 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
       actNodeId: secondAct.id,
       novelStore: world.novelStore,
       outlineStore: world.outlineStore,
+      worldviewStore: world.worldviewStore,
+      characterStore: world.characterStore,
     });
 
     expect(result).toEqual({ novelId: NOVEL_ID, actNodeId: secondAct.id, actName: "第2幕", chapterCount: 3 });
@@ -127,6 +158,14 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
       [secondAct.id, "第二章·来客", 2],
       [secondAct.id, "第三章·破晓", 3],
     ]);
+
+    // 新增角色随规划确认自动入库：进度 / 逐卡 / 汇总三段通知 + 真实落库行
+    expect(channel.notifies.some((n) => n.includes("本幕规划引入了 1 个新角色"))).toBe(true);
+    expect(channel.notifies.some((n) => n.includes("新角色已自动入库：萧无咎"))).toBe(true);
+    expect(channel.notifies.some((n) => n.includes("本次章节规划新增 1 个角色已自动入库"))).toBe(true);
+    expect(
+      world.characterStore.listCharacters(NOVEL_ID).map((c) => c.character.basicInfo.name),
+    ).toEqual(["萧无咎"]);
   });
 
   test("小说不存在：抛可读错误，不启动 Agent", async () => {
@@ -139,6 +178,8 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
         actNodeId: world.actNodes[0]!.id,
         novelStore: world.novelStore,
         outlineStore: world.outlineStore,
+        worldviewStore: world.worldviewStore,
+        characterStore: world.characterStore,
       }),
     ).rejects.toThrow("小说不存在");
     expect(channel.notifies).toHaveLength(0);
@@ -159,6 +200,8 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
         actNodeId: otherAct.id,
         novelStore: world.novelStore,
         outlineStore: world.outlineStore,
+        worldviewStore: world.worldviewStore,
+        characterStore: world.characterStore,
       }),
     ).rejects.toThrow("不属于该小说");
   });
@@ -173,6 +216,8 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
         actNodeId: world.partNodeId,
         novelStore: world.novelStore,
         outlineStore: world.outlineStore,
+        worldviewStore: world.worldviewStore,
+        characterStore: world.characterStore,
       }),
     ).rejects.toThrow("不是幕（类型为 part）");
   });
@@ -194,6 +239,8 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
         actNodeId: legacyAct.id,
         novelStore: world.novelStore,
         outlineStore: world.outlineStore,
+        worldviewStore: world.worldviewStore,
+        characterStore: world.characterStore,
       }),
     ).rejects.toThrow("旧数据");
   });
@@ -211,9 +258,47 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
         actNodeId: target.id,
         novelStore: world.novelStore,
         outlineStore: world.outlineStore,
+        worldviewStore: world.worldviewStore,
+        characterStore: world.characterStore,
       }),
     ).rejects.toThrow("已有章节规划");
     expect(channel.notifies).toHaveLength(0);
+  });
+
+  test("世界观未确认：前置拒绝，不启动 Agent", async () => {
+    const world = await seed(false);
+    textScript = [];
+    const channel = new FakeChannel([]);
+    await expect(
+      planActChapters({
+        channel,
+        novelId: NOVEL_ID,
+        actNodeId: world.actNodes[0]!.id,
+        novelStore: world.novelStore,
+        outlineStore: world.outlineStore,
+        worldviewStore: world.worldviewStore,
+        characterStore: world.characterStore,
+      }),
+    ).rejects.toThrow("世界观未确认");
+    expect(channel.notifies).toHaveLength(0);
+  });
+
+  test("规划未引入新角色：空清单跳过自动创建（零 LLM 调用）", async () => {
+    const world = await seed();
+    textScript = [[[{ tool: "save_chapters", args: chapterPlanFixture }]]]; // fixture 的 newCharacters 为 []
+    const channel = new FakeChannel([true]);
+    await planActChapters({
+      channel,
+      novelId: NOVEL_ID,
+      actNodeId: world.actNodes[0]!.id,
+      novelStore: world.novelStore,
+      outlineStore: world.outlineStore,
+      worldviewStore: world.worldviewStore,
+      characterStore: world.characterStore,
+    });
+    expect(textScript).toHaveLength(0);
+    expect(channel.notifies.some((n) => n.includes("自动入库"))).toBe(false);
+    expect(world.characterStore.listCharacters(NOVEL_ID)).toHaveLength(0);
   });
 
   test("确认门通道关闭：UserAbortedError 中止规划", async () => {
@@ -227,6 +312,8 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
         actNodeId: world.actNodes[0]!.id,
         novelStore: world.novelStore,
         outlineStore: world.outlineStore,
+        worldviewStore: world.worldviewStore,
+        characterStore: world.characterStore,
       }),
     ).rejects.toBeInstanceOf(UserAbortedError);
   });

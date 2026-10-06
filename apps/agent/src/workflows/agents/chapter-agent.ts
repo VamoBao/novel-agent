@@ -1,7 +1,9 @@
 import { tool } from "ai";
+import { z } from "zod";
 import { runReactAgent } from "../../agents/react";
 import type { UiChannel } from "../../ui/channel";
-import { chapterPlanSchema, type ChapterPlan } from "@novel/shared";
+import { getDefaultCharacterStore, type CharacterStore } from "../../state/character-store";
+import { chapterPlanSchema, newCharacterSchema, type ChapterPlan, type NewCharacterOutline } from "@novel/shared";
 
 const SYSTEM_PROMPT = `你是一名资深小说编辑。你的任务：把给定的一幕（act）拆解为若干章（chapter）的章节规划，供后续逐章写作。
 
@@ -12,7 +14,12 @@ const SYSTEM_PROMPT = `你是一名资深小说编辑。你的任务：把给定
 4. 章章有推进：每章至少推进一个情节点或完成一次人物状态变化，不写原地踏步的章节；
 5. 章名贴合小说调性，概括本章核心事件或意象。
 
-完成后调用 save_chapters 工具保存章节规划（参数即完整规划，必须严格符合 schema）。save_chapters 会把本幕梗概、关键情节点与推荐的章节列表展示给用户确认：用户确认后保存完成；用户提出修改意见时，根据反馈调整规划后重新调用 save_chapters，直到用户确认为止。`;
+角色梳理要求：
+1. 章节概述尽量点名本章出场角色——角色库已有角色使用其真实名字，新角色使用其清单中的名字，让后续写作能直接按概述确定出场阵容；
+2. 登场角色不在角色库中时，必须将其列入 save_chapters 的 newCharacters：name 为角色名，role 为一句话定位并注明登场章（如「第3章登场·血宗打手」）；清单内名字不得重复，角色库已有角色不得列入；
+3. 可用 list_characters 工具查询角色库现状。newCharacters 会在确认时随规划一并展示给用户：确认后这些角色将自动填充角色卡并入库。
+
+完成后调用 save_chapters 工具保存章节规划（参数 = 完整规划 + newCharacters 新增角色清单，必须严格符合 schema）。save_chapters 会把本幕梗概、关键情节点与推荐的章节列表展示给用户确认：用户确认后保存完成；用户提出修改意见时，根据反馈调整规划后重新调用 save_chapters，直到用户确认为止。`;
 
 /** 章节规划的输入上下文：大纲全局信息 + 所属部 + 目标幕（模型按幕内容推荐章节数量） */
 export interface PlanChaptersInput {
@@ -26,18 +33,59 @@ export interface PlanChaptersInput {
   keyPlotPoints: ReadonlyArray<string>;
 }
 
+/** 章节 Agent 的注入项：角色库查询按 novelId 进行，store 可替换（测试） */
+export interface PlanChaptersAgentOptions {
+  /** 目标小说创作 ID（list_characters 工具按此查询角色库） */
+  novelId: string;
+  /** 角色库 store；缺省默认 SQLite store（测试可替换） */
+  characterStore?: CharacterStore;
+}
+
+/** save_chapters 的结构化入参：章节规划 + 新增角色清单（项内名字不得重复） */
+export const saveChaptersInputSchema = chapterPlanSchema.extend({
+  newCharacters: z
+    .array(newCharacterSchema)
+    .refine((list) => new Set(list.map((c) => c.name)).size === list.length, "新增角色清单内名字不得重复"),
+});
+
+/** 章节 Agent 的最终产物：确认通过的规划本体 + 随规划连带确认的新增角色清单 */
+export interface ChapterPlanSubmission {
+  plan: ChapterPlan;
+  newCharacters: NewCharacterOutline[];
+}
+
 /**
  * 章节 Agent（ReAct）：基于一幕的梗概与关键情节点推荐「章名 + 剧情概述」的章节规划，
  * 经用户「确认 / 修改意见 → 调整 → 再确认」循环后才完成。
  */
-export async function planChapters(input: PlanChaptersInput, channel: UiChannel): Promise<ChapterPlan> {
-  let saved: ChapterPlan | undefined;
+export async function planChapters(
+  input: PlanChaptersInput,
+  channel: UiChannel,
+  options: PlanChaptersAgentOptions,
+): Promise<ChapterPlanSubmission> {
+  const { novelId } = options;
+  const characterStore = options.characterStore ?? getDefaultCharacterStore();
+  let saved: ChapterPlanSubmission | undefined;
+
+  /** 角色库查询工具：返回库内全部角色名与叙事定位，供模型点名概述与梳理「新增角色」 */
+  const listCharacters = tool({
+    description:
+      "查询角色库中已有的全部角色（名字与叙事定位）。梳理 newCharacters 时必须先调用此工具：清单中只能列角色库中没有的角色，库内已有角色不得列入。",
+    inputSchema: z.object({}),
+    execute: async () => {
+      const rows = characterStore.listCharacters(novelId);
+      return {
+        characters: rows.map((r) => ({ name: r.character.basicInfo.name, narrativeRole: r.character.core.narrativeRole })),
+      };
+    },
+  });
 
   const saveChapters = tool({
     description:
-      "章节规划完成后调用此工具保存。会把本幕梗概、关键情节点与推荐的章节列表展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整规划后重新调用。",
-    inputSchema: chapterPlanSchema,
-    execute: async (plan) => {
+      "章节规划完成后调用此工具保存（参数 = 完整规划 + newCharacters 新增角色清单）。会把本幕梗概、关键情节点、推荐的章节列表与新增角色清单展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整规划后重新调用。",
+    inputSchema: saveChaptersInputSchema,
+    execute: async (inputPlan) => {
+      const { newCharacters, ...plan } = inputPlan;
       const confirmed = await channel.askConfirm("以上章节规划是否确认？", {
         default: true,
         view: {
@@ -46,10 +94,11 @@ export async function planChapters(input: PlanChaptersInput, channel: UiChannel)
           actSummary: input.actSummary,
           keyPlotPoints: [...input.keyPlotPoints],
           plan,
+          newCharacters,
         },
       });
       if (confirmed) {
-        saved = plan;
+        saved = { plan, newCharacters };
         return { ok: true as const };
       }
       const feedback = await channel.askText("请说明章节规划需要调整的地方> ");
@@ -61,6 +110,8 @@ export async function planChapters(input: PlanChaptersInput, channel: UiChannel)
     },
   });
 
+  const libraryRows = characterStore.listCharacters(novelId);
+
   const result = await runReactAgent({
     system: SYSTEM_PROMPT,
     prompt: [
@@ -70,14 +121,17 @@ export async function planChapters(input: PlanChaptersInput, channel: UiChannel)
       `目标幕：${input.actName}`,
       `本幕梗概：${input.actSummary}`,
       `本幕关键情节点：\n${input.keyPlotPoints.map((p, i) => `${i + 1}. ${p}`).join("\n")}`,
+      libraryRows.length > 0
+        ? `角色库已有角色：${libraryRows.map((r) => `${r.character.basicInfo.name}（${r.character.core.narrativeRole}）`).join("、")}`
+        : "角色库暂无角色",
       "请基于以上内容推荐本幕的章节规划并调用 save_chapters 保存。",
     ].join("\n\n"),
-    tools: { save_chapters: saveChapters },
-    // 不设 stopTool：save_chapters 可能被用户否决（需继续修订），
-    // hasToolCall 会在工具被调用时无条件停止，无法表达「提交被拒需继续」
+    tools: { save_chapters: saveChapters, list_characters: listCharacters },
+    // 不设 stopTool：save_chapters 可能被用户否决（需继续修订）
     maxSteps: 12,
     isDone: () => saved !== undefined,
-    continuationHint: "请立即调用 save_chapters 工具保存章节规划（参数为完整规划），不要只输出文本。",
+    continuationHint:
+      "请立即调用 save_chapters 工具保存章节规划（参数为完整规划与 newCharacters 新增角色清单），不要只输出文本。",
   });
 
   if (!saved) {

@@ -103,6 +103,16 @@ export function ViewCard({ view }: { view: View }) {
               </p>
             </div>
           ))}
+          {view.newCharacters && view.newCharacters.length > 0 ? (
+            <>
+              <p className="part-name">✨ 本次规划新增角色（确认后自动入库）</p>
+              {view.newCharacters.map((c) => (
+                <p key={c.name} className="act">
+                  · {c.name}——{c.role}
+                </p>
+              ))}
+            </>
+          ) : null}
         </section>
       );
     case "field-summary":
