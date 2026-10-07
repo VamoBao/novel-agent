@@ -3,10 +3,12 @@ import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
 import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
 import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
 import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
+import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
 import { readOutlineTheme } from "../output/outline-writer";
 import type { Outline } from "@novel/shared";
 import { planChapters } from "./agents/chapter-agent";
 import { autoCreateCharacters, filterNewCharacters } from "./agents/auto-character-agent";
+import { plantChapterForeshadows } from "./foreshadow-intake";
 
 export interface PlanActChaptersOptions {
   /** 交互通道（终端 / 协议 / 测试替身），业务交互的唯一出口 */
@@ -23,6 +25,8 @@ export interface PlanActChaptersOptions {
   worldviewStore?: WorldviewStore;
   /** 角色库 store；缺省用默认 SQLite store（data/novel.db） */
   characterStore?: CharacterStore;
+  /** 伏笔 store；缺省用默认 SQLite store（data/novel.db） */
+  foreshadowStore?: ForeshadowStore;
 }
 
 export interface PlanActChaptersResult {
@@ -38,6 +42,8 @@ export interface PlanActChaptersResult {
  * theme 自 output 产物尽力读取），复用章节 Agent 的确认门规划章节，
  * 确认后经 saveChapters 在幕下批量建章；规划 newCharacters 清单中的新增角色
  * 经兜底 diff 后自动填充角色卡入库（空清单跳过，同大纲两条流程的收尾动作）。
+ * 本幕「未绑登场章」的伏笔随规划上下文回传给 LLM；确认后 newForeshadows 新伏笔
+ * 带登场章与幕归属入库、foreshadowBindings 绑定指令把回传伏笔 patch 到登场章（空清单跳过）。
  * 校验失败（小说/幕不存在、非幕节点、旧数据缺内容、已有章节规划、世界观未确认）
  * 抛可读错误，由调用方（协议入口）转为 fatal error 消息。
  */
@@ -47,6 +53,7 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
   const outlineStore = options.outlineStore ?? getDefaultOutlineStore();
   const worldviewStore = options.worldviewStore ?? getDefaultWorldviewStore();
   const characterStore = options.characterStore ?? getDefaultCharacterStore();
+  const foreshadowStore = options.foreshadowStore ?? getDefaultForeshadowStore();
 
   const novel = novelStore.getNovel(novelId);
   if (!novel) {
@@ -83,9 +90,12 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
     throw new Error("该小说世界观未确认（库中无记录），无法规划章节");
   }
 
+  // 本幕「未绑登场章」的伏笔回传给章节 Agent：有则模型输出 foreshadowBindings 绑定登场章
+  const unboundForeshadows = foreshadowStore.listUnboundByAct(novelId, act.id);
+
   channel.stage("chapter");
   channel.notify(`📑 章节规划 Agent 启动（${act.node.name}）…`);
-  const { plan, newCharacters } = await planChapters(
+  const { plan, newCharacters, newForeshadows, foreshadowBindings } = await planChapters(
     {
       novelTitle: novel.name ?? "未命名小说",
       logline: novel.description ?? "",
@@ -97,7 +107,7 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
       keyPlotPoints: act.node.keyPlotPoints,
     },
     channel,
-    { novelId, characterStore },
+    { novelId, characterStore, unboundForeshadows },
   );
 
   const chapterNodes = outlineStore.saveChapters(novelId, act.id, plan.chapters);
@@ -140,6 +150,27 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
     });
     channel.notify(
       `✨ 本次章节规划新增 ${pendingNew.length} 个角色已自动入库：${pendingNew.map((c) => c.name).join("、")}`,
+    );
+  }
+
+  // 伏笔处理：新伏笔带登场章与幕入库、既有未绑伏笔按 LLM 绑定指令 patch（确定性代码）。
+  // 置于角色自动入库块之后：新伏笔的 characterNames 可能引用本轮自动入库的新角色。
+  if (newForeshadows.length > 0 || foreshadowBindings.length > 0) {
+    channel.notify(`\n✨ 本幕伏笔处理中：新增 ${newForeshadows.length} 处、绑定 ${foreshadowBindings.length} 处…`);
+    const chapterNodeRefs = chapterNodes.map((n) => ({ id: n.id, name: n.node.name }));
+    const { created, skipped, bound } = plantChapterForeshadows({
+      novelId,
+      actNodeId: act.id,
+      newForeshadows,
+      bindings: foreshadowBindings,
+      characters: characterStore.listCharacters(novelId),
+      chapterNodes: chapterNodeRefs,
+      unbound: unboundForeshadows,
+      channel,
+      foreshadowStore,
+    });
+    channel.notify(
+      `✨ 本次规划伏笔入库 ${created} 处、绑定 ${bound} 处${skipped > 0 ? `（${skipped} 处未匹配跳过）` : ""}`,
     );
   }
   return { novelId, actNodeId: act.id, actName: act.node.name, chapterCount: chapterNodes.length };

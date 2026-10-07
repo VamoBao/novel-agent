@@ -1,3 +1,15 @@
+## 2026-10-06 大纲与章节规划伏笔接入：act 列精确圈定回传 + 确定性入库（任务包经用户确认，SDD 计划 `docs/superpowers/plans/2026-10-06-foreshadow-intake.md`）
+
+- **背景**：foreshadows 表自 2026-09-24 起已有完整 CRUD（数据层先行，采集为后续需求）。创作流伏笔采集缺口：大纲与章节规划时模型安排的伏笔只存在于大纲 / 概述文本里，库中无行——写作期正文无从按伏笔表面行为落笔，回收状态流转无从启动。需求：大纲 Agent `save_outline` 与章节 Agent `save_chapters` 附「未创建伏笔清单」随确认门连带确认，确认入库后自动入库；章节规划另把本幕未绑伏笔回传 LLM 绑定登场章。四项关键取舍一并落盘。
+- **决策一：foreshadows 增 `act_node_id` 列按幕精确圈定回传，而非全书伏笔全量回传**：
+  1. **act 列精确圈定（选定，方案经用户确认）**：伏笔在大纲阶段挂幕（章尚不存在）→ 章节规划时 `listUnboundByAct(novelId, actNodeId)` 只回传本幕「未绑登场章」的伏笔——上下文体积恒定可控，模型只面对与本幕直接相关的伏笔，绑定指令（index + chapterName）引用的是带序号紧凑清单，序号漂移面小
+  2. 全量回传（`listForeshadows` 免新列免新查询）：随伏笔积累 prompt 线性膨胀，且模型要自行从全量中筛出本幕相关者——弱模型误绑跨幕伏笔的漂移面更大
+  - **迁移形态**：SCHEMA_VERSION 11→12，`ALTER TABLE foreshadows ADD COLUMN act_node_id TEXT`——加可空裸列无行级改写，SQLite 最安全迁移形态（同 4→5 先例）；守卫 `version >= 8 && version <= 11`——foreshadows 表自 v8 起已存在（不同于 10→11 时 documents 尚不存在），8~11 的库都持无此列的旧表形态，CREATE TABLE IF NOT EXISTS 对其不生效，守卫须覆盖整段而非仅 `version === 11`
+- **决策二：幕名 / 章名 / 服务角色名 / 绑定序号未匹配逐条跳过并 notify，而非中止整批或静默丢弃**：伏笔清单是随大纲 / 规划连带确认的次要产物（确认的主对象是大纲与章节），一条伏笔的幕名拼错不应连累其余条目；跳过经 notify `⚠️ 伏笔跳过…` 透明可见，用户可后续手动补录（完整 CRUD 已有）。服务角色**全部**无法解析才跳过该条、部分未解析仅剔除未解析者并警告——`characterIds` 是服务语义而非身份必需，无角色的伏笔仍成立。与角色链路的差异：角色自动创建是 LLM Agent，被守卫拒绝后可自行修正重试；伏笔入库是确定性代码无处重试——跳过即终态，故透明 notify 是必须的兜底。
+- **决策三：regen 保留旧伏笔不清理，而非随旧版归档或删除**：大纲重生成只降级大纲节点（行保留），伏笔行不动——旧伏笔 `act_node_id` 指向已降级的旧幕节点，悬挂但无害：`listUnboundByAct` 按当前 act 查询天然不回传旧版伏笔，旧伏笔不再进入新版大纲的规划上下文。删除则永久丢失用户已确认过的伏笔数据；「重新挂接到新版同名幕」则要代码猜幕对应关系，漂移面大。同「正文行与归档章关联留存」先例——历史回溯不吃 schema 变更；若需把旧伏笔重新挂到新版幕，另起需求。
+- **决策四：伏笔入库走确定性代码（`foreshadow-intake.ts`），而非 LLM Agent（与角色链路的差异论证）**：角色自动创建需要「依据世界观与大纲为每个新角色扩写 13 字段完整角色卡」——生成任务必须 LLM（ReAct + save_character 逐卡入库，守卫拒绝后模型自行修正重试）；伏笔清单本身已是结构化数据（表面行为 / 隐藏真相 / 注意度都由大纲或章节 Agent 产出且在确认门过目过），入库只需「幕名 / 章名 → 节点 ID、角色名 → 角色 ID」的查表映射——确定性代码零 LLM 调用、零漂移、零 token 成本，错误处理收敛为「跳过 + notify」而非「重试循环」。挂幕而非挂章（大纲阶段章尚不存在），登场章由章节规划阶段的绑定指令补齐——两阶段各取当时已存在的最小锚点。
+- **结论**：SCHEMA_VERSION 12 + `listUnboundByAct` + shared 伏笔清单三变体与绑定 schema + `workflows/foreshadow-intake.ts`（resolveCharacterIds / plantOutlineForeshadows / plantChapterForeshadows）+ 两 Agent 结构化入参（save_outline 附 newForeshadows 挂幕；save_chapters 附 newForeshadows 登场章 + foreshadowBindings 序号绑定）+ 两编排确认入库后（角色入库之后）确定性入库 + CLI / 客户端确认视图伏笔与绑定区块渲染。AC：typecheck 3 工程 / lint / 262 用例全过（净增 19）；真实库副本 11→12 迁移实跑数据无损；真实 LLM 端到端待用户复验（大纲确认门观察伏笔清单展示与确认后入库、章节规划观察未绑伏笔回传与绑定生效）。
+
 ## 2026-10-06 章节规划新增角色梳理与自动入库（任务包经用户确认，SDD 计划 `docs/superpowers/plans/2026-10-06-chapter-plan-new-characters.md`）
 
 - **背景**：单幕章节规划（`planActChapters`）时模型同样会引入角色库中没有的新角色（本幕登场的反派、配角等），此前只存在于章节概述文本里——写正文时没有角色卡可依；且章节 Agent 上下文不读角色库，概述无法点名已有角色、易虚构重复。需求：`save_chapters` 附新增角色清单随规划进确认门，确认后自动填充角色卡入库（复用上一需求的 `autoCreateCharacters` / `filterNewCharacters`），概述尽量点名出场角色。三个关键取舍一并落盘。

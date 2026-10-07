@@ -3,6 +3,8 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+// store 不依赖 'ai'，可静态导入（被测模块仍须在 mock 注册后动态导入）
+import { ForeshadowStore } from "../state/foreshadow-store";
 
 /**
  * createNovel 全流程集成测试：mock 掉 'ai' 模块（generateObject 返回脚本 fixture、
@@ -83,6 +85,10 @@ const outlineFixture = {
     { name: "萧无咎", role: "反派·血宗宗主" },
     { name: "林恒", role: "误标已有角色（应被兜底 diff 剔除）" },
   ],
+  newForeshadows: [
+    { surfaceAction: "宗主赐下断脉散", hiddenTruth: "药中掺了追踪灵脉的蛊种", attentionLevel: 6, characterNames: ["林恒", "萧无咎"], actName: "第1幕" },
+    { surfaceAction: "幕名漂移的伏笔", hiddenTruth: "不会入库", attentionLevel: 3, characterNames: ["林恒"], actName: "不存在的幕" },
+  ],
   parts: [
     {
       name: "第一部·风起",
@@ -151,6 +157,7 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
       worldviewStore: new WorldviewStore(db),
       novelStore: new NovelStore(db),
       outlineStore: new OutlineStore(db),
+      foreshadowStore: new ForeshadowStore(db),
     });
 
     // 最终状态与产物
@@ -205,6 +212,21 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     expect(firstAct?.node.summary).toBe("第1幕梗概");
     expect(firstAct?.node.keyPlotPoints).toEqual(["第1幕情节点"]);
     expect(outlineNodes.some((n) => n.node.type === "chapter")).toBe(false);
+
+    // 大纲伏笔入库：幕名匹配的入库（角色 ID 解析自林恒+自动入库的萧无咎），幕名漂移的跳过
+    const foreshadowStore = new ForeshadowStore(db);
+    const all = foreshadowStore.listForeshadows(state.id);
+    expect(all.map((f) => f.foreshadow.surfaceAction)).toEqual(["宗主赐下断脉散"]);
+    const fsRow = all[0]!;
+    const ids = characterStore.listCharacters(state.id).map((c) => c.id);
+    expect(fsRow.foreshadow.characterIds).toEqual(ids); // 林恒、萧无咎按入库顺序
+    expect(fsRow.foreshadow.recoveryStatus).toBe("unrecovered");
+    expect(fsRow.actNodeId).toBeDefined();
+    const actNode = new OutlineStore(db).listOutlineNodes(state.id, { currentOnly: true }).find((n) => n.node.name === "第1幕");
+    expect(actNode).toBeDefined();
+    expect(fsRow.actNodeId).toBe(actNode!.id);
+    expect(channel.notifies.some((n) => n.includes("大纲安排了 2 处伏笔"))).toBe(true);
+    expect(channel.notifies.some((n) => n.includes("本次大纲伏笔已入库 1 处（1 处因幕名/角色名未匹配跳过）"))).toBe(true);
   });
 
   test("大纲未引入新角色时跳过自动创建（零 LLM 调用）", async () => {
@@ -247,6 +269,7 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
       worldviewStore: new WorldviewStore(db),
       novelStore: new NovelStore(db),
       outlineStore: new OutlineStore(db),
+      foreshadowStore: new ForeshadowStore(db),
     });
 
     // 空清单跳过：无自动入库相关 notify，角色库仅保留流程内确认的角色

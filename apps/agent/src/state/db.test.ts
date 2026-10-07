@@ -210,14 +210,14 @@ function createV9Db(path: string): void {
   legacy.close();
 }
 
-describe("openDatabase 迁移（SCHEMA_VERSION 11）", () => {
+describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
   const tempDirs: string[] = [];
 
   afterAll(async () => {
     await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
   });
 
-  test("v5 库迁移：outlines 补内容列、数据无损、版本升 11", async () => {
+  test("v5 库迁移：outlines 补内容列、数据无损、版本升 12", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig5-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "v5.db");
@@ -254,11 +254,11 @@ describe("openDatabase 迁移（SCHEMA_VERSION 11）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(11);
+    ).toBe(12);
     db.close();
   });
 
-  test("v6 库迁移：locations 表落地、既有数据无损、版本升 11（5→6 段不重复执行）", async () => {
+  test("v6 库迁移：locations 表落地、既有数据无损、版本升 12（5→6 段不重复执行）", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig6-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "v6.db");
@@ -301,11 +301,11 @@ describe("openDatabase 迁移（SCHEMA_VERSION 11）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(11);
+    ).toBe(12);
     db.close();
   });
 
-  test("v7 库迁移：foreshadows 表落地、既有数据无损、版本升 11", async () => {
+  test("v7 库迁移：foreshadows 表落地、既有数据无损、版本升 12", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig7-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "v7.db");
@@ -328,6 +328,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 11）", () => {
       "planting_method",
       "purpose",
       "appear_chapter_id",
+      "act_node_id",
       "recover_chapter_ids",
       "character_ids",
       "created_at",
@@ -351,11 +352,11 @@ describe("openDatabase 迁移（SCHEMA_VERSION 11）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(11);
+    ).toBe(12);
     db.close();
   });
 
-  test("v9 库迁移：documents 表落地、既有数据无损、版本升 11（真实投产库的升级路径）", async () => {
+  test("v9 库迁移：documents 表落地、既有数据无损、版本升 12（真实投产库的升级路径）", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig9-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "v9.db");
@@ -390,14 +391,16 @@ describe("openDatabase 迁移（SCHEMA_VERSION 11）", () => {
     expect(
       (db.query("SELECT COUNT(*) AS c FROM characters").get() as { c: number }).c,
     ).toBe(1);
+    // v9 库的 foreshadows 为旧表形态（无 act_node_id），11→12 段经 ALTER 补列
+    expect(tableColumns(db, "foreshadows")).toContain("act_node_id");
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(11);
+    ).toBe(12);
     db.close();
   });
 
-  test("v10 库迁移：存量正文按小说/部/章层级落文件、file_path 回填、content 列移除、版本升 11", async () => {
+  test("v10 库迁移：存量正文按小说/部/章层级落文件、file_path 回填、content 列移除、版本升 12", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig10-"));
     tempDirs.push(dir);
     const dbPath = join(dir, "v10.db");
@@ -447,8 +450,39 @@ describe("openDatabase 迁移（SCHEMA_VERSION 11）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(11);
+    ).toBe(12);
     db.close();
+  });
+
+  test("v11 库升 12：foreshadows 增 act_node_id 列，存量伏笔数据无损", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-db-mig-v12-"));
+    const dbPath = join(dir, "test.db");
+    const raw = new Database(dbPath);
+    raw.exec("PRAGMA foreign_keys = ON;");
+    raw.exec(`CREATE TABLE novels (id TEXT PRIMARY KEY, name TEXT, author TEXT, description TEXT, pinned INTEGER NOT NULL DEFAULT 0, favorite INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`);
+    raw.exec(`CREATE TABLE foreshadows (
+      id TEXT PRIMARY KEY, novel_id TEXT NOT NULL REFERENCES novels(id),
+      surface_action TEXT NOT NULL, hidden_truth TEXT NOT NULL,
+      attention_level INTEGER NOT NULL CHECK (attention_level BETWEEN 1 AND 10),
+      recovery_status TEXT NOT NULL DEFAULT 'unrecovered' CHECK (recovery_status IN ('unrecovered','partial','recovered')),
+      planting_method TEXT, purpose TEXT, appear_chapter_id TEXT, recover_chapter_ids TEXT, character_ids TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`);
+    raw.exec("INSERT INTO novels (id, created_at, updated_at) VALUES ('n-1', '2026-01-01', '2026-01-01');");
+    raw.exec("INSERT INTO foreshadows (id, novel_id, surface_action, hidden_truth, attention_level, created_at, updated_at) VALUES ('f-1', 'n-1', '表面', '真相', 4, '2026-01-01', '2026-01-01');");
+    raw.exec("PRAGMA user_version = 11;");
+    raw.close();
+
+    const db = openDatabase(dbPath);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(12);
+    const columns = (db.query("PRAGMA table_info(foreshadows)").all() as { name: string }[]).map((c) => c.name);
+    expect(columns).toContain("act_node_id");
+    const row = db.query("SELECT surface_action, hidden_truth, attention_level, act_node_id FROM foreshadows WHERE id = 'f-1';").get() as Record<string, unknown>;
+    expect(row.surface_action).toBe("表面");
+    expect(row.hidden_truth).toBe("真相");
+    expect(row.attention_level).toBe(4);
+    expect(row.act_node_id).toBeNull();
+    db.close();
+    await rm(dir, { recursive: true, force: true });
   });
 
   test("v4 库跨版本直升：novels 与 outlines 两段列同批补齐、数据保留", async () => {
@@ -473,11 +507,11 @@ describe("openDatabase 迁移（SCHEMA_VERSION 11）", () => {
     ).toBe(1);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(11);
+    ).toBe(12);
     db.close();
   });
 
-  test("全新库：建表即含内容列与 locations / foreshadows / documents（file_path）表、版本为 11", async () => {
+  test("全新库：建表即含内容列与 locations / foreshadows / documents（file_path）表、版本为 12", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-fresh-"));
     tempDirs.push(dir);
     const db = openDatabase(join(dir, "fresh.db"));
@@ -491,7 +525,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 11）", () => {
     expect(tableColumns(db, "documents")).toContain("word_count");
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(11);
+    ).toBe(12);
     db.close();
   });
 });

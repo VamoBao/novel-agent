@@ -5,8 +5,16 @@ export {
   foreshadowRecoveryStatusSchema,
   foreshadowSchema,
   foreshadowPatchSchema,
+  newForeshadowSchema,
+  outlineNewForeshadowSchema,
+  chapterNewForeshadowSchema,
+  foreshadowBindingSchema,
   type Foreshadow,
   type ForeshadowPatch,
+  type NewForeshadow,
+  type OutlineNewForeshadow,
+  type ChapterNewForeshadow,
+  type ForeshadowBinding,
 } from "./foreshadow";
 export { coreConflictSchema, type CoreConflict } from "./conflict";
 export { outlineSchema, newCharacterSchema, type Outline, type NewCharacterOutline } from "./outline";

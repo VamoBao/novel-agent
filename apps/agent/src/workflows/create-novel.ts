@@ -9,11 +9,13 @@ import { getDefaultCharacterStore, type CharacterStore } from "../state/characte
 import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
 import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
 import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
+import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
 import { saveOutline } from "../output/outline-writer";
 import { collectWorldview } from "./agents/worldview-agent";
 import { createCharacter } from "./agents/character-agent";
 import { createOutline } from "./agents/outline-agent";
 import { autoCreateCharacters, filterNewCharacters } from "./agents/auto-character-agent";
+import { plantOutlineForeshadows } from "./foreshadow-intake";
 
 /** 常见热门类型（用户也可自定义输入） */
 const GENRES = [
@@ -45,6 +47,8 @@ export interface CreateNovelOptions {
   novelStore?: NovelStore;
   /** 大纲树持久化 store；缺省用默认 SQLite store（data/novel.db） */
   outlineStore?: OutlineStore;
+  /** 伏笔持久化 store；缺省用默认 SQLite store（data/novel.db） */
+  foreshadowStore?: ForeshadowStore;
 }
 
 /**
@@ -52,6 +56,8 @@ export interface CreateNovelOptions {
  *
  * ID 在调用任何 Agent 之前生成，作为 state 存入数据库时的唯一标识；
  * 若 id 无对应 state 存储，视为新创作的小说并执行初始化。
+ * 大纲确认后新增角色自动入库，newForeshadows 伏笔清单随之按幕名/服务角色名
+ * 确定性解析入库（未匹配跳过，置于角色入库之后）。
  * 全部交互（提问/确认/展示）经注入的 UiChannel 进行。
  */
 export async function createNovel(options: CreateNovelOptions): Promise<NovelState> {
@@ -61,6 +67,7 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
   const worldviewStore = options.worldviewStore ?? getDefaultWorldviewStore();
   const novelStore = options.novelStore ?? getDefaultNovelStore();
   const outlineStore = options.outlineStore ?? getDefaultOutlineStore();
+  const foreshadowStore = options.foreshadowStore ?? getDefaultForeshadowStore();
   const id = options.id ?? generateNovelId();
 
   channel.notify("📖 novel-agent —— 小说创作向导");
@@ -235,6 +242,27 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
     });
     channel.notify(
       `✨ 本次大纲新增 ${pendingNew.length} 个角色已自动入库：${pendingNew.map((c) => c.name).join("、")}`,
+    );
+  }
+
+  // 大纲伏笔入库：确定性代码创建（角色已入库，服务角色名可解析）；幕名/角色名未匹配逐条跳过并警告。
+  // 置于角色自动入库块之后：伏笔清单可能引用本轮自动入库的新角色（服务角色 ID 需角色先入库）。
+  if (submission.newForeshadows.length > 0) {
+    channel.notify(`\n✨ 大纲安排了 ${submission.newForeshadows.length} 处伏笔，正在入库…`);
+    const actNodes = outlineStore
+      .listOutlineNodes(id, { currentOnly: true })
+      .filter((n) => n.node.type === "act")
+      .map((n) => ({ id: n.id, name: n.node.name }));
+    const { created, skipped } = plantOutlineForeshadows({
+      novelId: id,
+      newForeshadows: submission.newForeshadows,
+      characters: characterStore.listCharacters(id),
+      actNodes,
+      channel,
+      foreshadowStore,
+    });
+    channel.notify(
+      `✨ 本次大纲伏笔已入库 ${created} 处${skipped > 0 ? `（${skipped} 处因幕名/角色名未匹配跳过）` : ""}`,
     );
   }
 

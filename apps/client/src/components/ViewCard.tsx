@@ -79,6 +79,16 @@ export function ViewCard({ view }: { view: View }) {
               ))}
             </>
           ) : null}
+          {view.detail === "confirm" && view.newForeshadows && view.newForeshadows.length > 0 ? (
+            <>
+              <p className="part-name">✨ 本次大纲伏笔（确认后自动入库）</p>
+              {view.newForeshadows.map((f) => (
+                <p key={`${f.actName}-${f.surfaceAction}`} className="act">
+                  · [{f.actName}] {f.surfaceAction} ⇢ {f.hiddenTruth}（注意度 {f.attentionLevel}，服务：{f.characterNames.join("、")}）
+                </p>
+              ))}
+            </>
+          ) : null}
         </section>
       );
     case "chapter-plan":
@@ -109,6 +119,26 @@ export function ViewCard({ view }: { view: View }) {
               {view.newCharacters.map((c) => (
                 <p key={c.name} className="act">
                   · {c.name}——{c.role}
+                </p>
+              ))}
+            </>
+          ) : null}
+          {view.newForeshadows && view.newForeshadows.length > 0 ? (
+            <>
+              <p className="part-name">✨ 本次规划新增伏笔（确认后自动入库）</p>
+              {view.newForeshadows.map((f) => (
+                <p key={`${f.chapterName}-${f.surfaceAction}`} className="act">
+                  · [{f.chapterName}] {f.surfaceAction} ⇢ {f.hiddenTruth}（注意度 {f.attentionLevel}，服务：{f.characterNames.join("、")}）
+                </p>
+              ))}
+            </>
+          ) : null}
+          {view.foreshadowBindings && view.foreshadowBindings.length > 0 ? (
+            <>
+              <p className="part-name">🔗 伏笔绑定（确认后生效）</p>
+              {view.foreshadowBindings.map((b) => (
+                <p key={`${b.index}-${b.chapterName}`} className="plot">
+                  {b.index}) → {b.chapterName}
                 </p>
               ))}
             </>

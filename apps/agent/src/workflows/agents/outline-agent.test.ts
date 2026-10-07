@@ -54,16 +54,16 @@ describe("saveOutlineInputSchemaFor", () => {
   const submission = { ...fourActTwoPartOutline, newCharacters: [{ name: "萧无咎", role: "反派·血宗宗主" }] };
 
   test("大纲 + 新增角色清单均合规时通过", () => {
-    const parsed = saveOutlineInputSchemaFor(4, 2).parse(submission);
+    const parsed = saveOutlineInputSchemaFor(4, 2).parse({ ...submission, newForeshadows: [] });
     expect(parsed.newCharacters).toHaveLength(1);
     // 空清单合法：大纲未引入新角色是正常路径
-    expect(saveOutlineInputSchemaFor(4, 2).parse({ ...fourActTwoPartOutline, newCharacters: [] }).newCharacters).toEqual([]);
+    expect(saveOutlineInputSchemaFor(4, 2).parse({ ...fourActTwoPartOutline, newCharacters: [], newForeshadows: [] }).newCharacters).toEqual([]);
   });
 
   test("newCharacters 缺失或项内字段空串被拒绝", () => {
     expect(() => saveOutlineInputSchemaFor(4, 2).parse(fourActTwoPartOutline)).toThrow();
-    expect(() => saveOutlineInputSchemaFor(4, 2).parse({ ...fourActTwoPartOutline, newCharacters: [{ name: "萧无咎" }] })).toThrow();
-    expect(() => saveOutlineInputSchemaFor(4, 2).parse({ ...fourActTwoPartOutline, newCharacters: [{ name: "", role: "反派" }] })).toThrow();
+    expect(() => saveOutlineInputSchemaFor(4, 2).parse({ ...fourActTwoPartOutline, newCharacters: [{ name: "萧无咎" }], newForeshadows: [] })).toThrow();
+    expect(() => saveOutlineInputSchemaFor(4, 2).parse({ ...fourActTwoPartOutline, newCharacters: [{ name: "", role: "反派" }], newForeshadows: [] })).toThrow();
   });
 
   test("清单内名字重复被拒绝", () => {
@@ -74,12 +74,30 @@ describe("saveOutlineInputSchemaFor", () => {
           { name: "萧无咎", role: "反派·血宗宗主" },
           { name: "萧无咎", role: "同一人重复列出" },
         ],
+        newForeshadows: [],
       }),
     ).toThrow("不得重复");
   });
 
   test("部/幕强校验仍然生效", () => {
-    expect(() => saveOutlineInputSchemaFor(5, 2).parse(submission)).toThrow("5 幕");
-    expect(() => saveOutlineInputSchemaFor(4, 1).parse(submission)).toThrow("1 部");
+    expect(() => saveOutlineInputSchemaFor(5, 2).parse({ ...submission, newForeshadows: [] })).toThrow("5 幕");
+    expect(() => saveOutlineInputSchemaFor(4, 1).parse({ ...submission, newForeshadows: [] })).toThrow("1 部");
+  });
+
+  const outlineFs = { surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], actName: "第一幕" };
+
+  test("newForeshadows 缺省省略不合法（必填数组）、空数组合法、完整条目通过", () => {
+    expect(() => saveOutlineInputSchemaFor(4, 2).parse(submission)).toThrow(); // submission 不含伏笔字段
+    expect(saveOutlineInputSchemaFor(4, 2).parse({ ...submission, newForeshadows: [] }).newForeshadows).toEqual([]);
+    expect(saveOutlineInputSchemaFor(4, 2).parse({ ...submission, newForeshadows: [outlineFs] }).newForeshadows).toHaveLength(1);
+  });
+
+  test("伏笔清单内表面行为重复被拒绝", () => {
+    expect(() =>
+      saveOutlineInputSchemaFor(4, 2).parse({
+        ...submission,
+        newForeshadows: [outlineFs, { ...outlineFs, actName: "第二幕" }],
+      }),
+    ).toThrow("不得重复");
   });
 });

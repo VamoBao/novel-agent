@@ -9,11 +9,14 @@ import {
   closePrompt,
 } from "../cli/prompt";
 import type {
+  ChapterNewForeshadow,
   ChapterPlanView,
   Character,
   CoreConflict,
+  ForeshadowBinding,
   NewCharacterOutline,
   Outline,
+  OutlineNewForeshadow,
   Stage,
   View,
   Worldview,
@@ -80,10 +83,10 @@ export function renderView(view: View): string {
       return formatCharacterCard(view.character);
     case "outline":
       return view.detail === "confirm"
-        ? formatOutlineForConfirm(view.outline, view.newCharacters)
+        ? formatOutlineForConfirm(view.outline, view.newCharacters, view.newForeshadows)
         : formatOutlineFull(view.outline);
     case "chapter-plan":
-      return formatChapterPlan(view, view.newCharacters);
+      return formatChapterPlan(view, view.newCharacters, view.newForeshadows, view.foreshadowBindings);
     case "worldview":
       return formatWorldview(view.worldview);
     case "conflict":
@@ -110,8 +113,12 @@ function formatCharacterCard(c: Character): string {
   return lines.join("\n");
 }
 
-/** 确认视图：剧情梗概、主题、两级部/幕名称与概述 + 新增角色清单（详细情节点在保存后完整展示） */
-function formatOutlineForConfirm(o: Outline, newCharacters?: NewCharacterOutline[]): string {
+/** 确认视图：剧情梗概、主题、两级部/幕名称与概述 + 新增角色/伏笔清单（详细情节点在保存后完整展示） */
+function formatOutlineForConfirm(
+  o: Outline,
+  newCharacters?: NewCharacterOutline[],
+  newForeshadows?: OutlineNewForeshadow[],
+): string {
   const lines = [`📖 大纲草稿：《${o.title}》`, `  剧情梗概：${o.logline}`];
   if (o.theme) lines.push(`  主题：${o.theme}`);
   for (const part of o.parts) {
@@ -124,6 +131,12 @@ function formatOutlineForConfirm(o: Outline, newCharacters?: NewCharacterOutline
     lines.push(`  ✨ 本次大纲新增角色（确认后自动入库）：`);
     for (const c of newCharacters) {
       lines.push(`    · ${c.name}——${c.role}`);
+    }
+  }
+  if (newForeshadows && newForeshadows.length > 0) {
+    lines.push(`  ✨ 本次大纲伏笔（确认后自动入库）：`);
+    for (const f of newForeshadows) {
+      lines.push(`    · [${f.actName}] ${f.surfaceAction} ⇢ ${f.hiddenTruth}（注意度 ${f.attentionLevel}，服务：${f.characterNames.join("、")}）`);
     }
   }
   return lines.join("\n");
@@ -143,8 +156,13 @@ function formatOutlineFull(o: Outline): string {
   return lines.join("\n");
 }
 
-/** 章节规划确认视图：本幕梗概、关键情节点与推荐章节列表 + 新增角色清单（拼入 save_chapters 最终确认提示） */
-function formatChapterPlan(view: ChapterPlanView, newCharacters?: NewCharacterOutline[]): string {
+/** 章节规划确认视图：本幕梗概、关键情节点与推荐章节列表 + 新增角色/伏笔清单与伏笔绑定（拼入 save_chapters 最终确认提示） */
+function formatChapterPlan(
+  view: ChapterPlanView,
+  newCharacters?: NewCharacterOutline[],
+  newForeshadows?: ChapterNewForeshadow[],
+  foreshadowBindings?: ForeshadowBinding[],
+): string {
   const lines = [
     `📑 章节规划草稿（${view.actName}）`,
     `  本幕梗概：${view.actSummary}`,
@@ -157,6 +175,18 @@ function formatChapterPlan(view: ChapterPlanView, newCharacters?: NewCharacterOu
     lines.push(`  ✨ 本次规划新增角色（确认后自动入库）：`);
     for (const c of newCharacters) {
       lines.push(`    · ${c.name}——${c.role}`);
+    }
+  }
+  if (newForeshadows && newForeshadows.length > 0) {
+    lines.push(`  ✨ 本次规划新增伏笔（确认后自动入库）：`);
+    for (const f of newForeshadows) {
+      lines.push(`    · [${f.chapterName}] ${f.surfaceAction} ⇢ ${f.hiddenTruth}（注意度 ${f.attentionLevel}，服务：${f.characterNames.join("、")}）`);
+    }
+  }
+  if (foreshadowBindings && foreshadowBindings.length > 0) {
+    lines.push(`  🔗 伏笔绑定（确认后生效）：`);
+    for (const b of foreshadowBindings) {
+      lines.push(`    ${b.index}) → ${b.chapterName}`);
     }
   }
   return lines.join("\n");

@@ -79,3 +79,38 @@ export const foreshadowPatchSchema = z.object({
 });
 
 export type ForeshadowPatch = z.infer<typeof foreshadowPatchSchema>;
+
+/**
+ * 大纲 / 章节规划结构化输出的「未创建伏笔」项：创建入库由代码完成（无需 LLM），
+ * characterNames / actName / chapterName 在入库时解析为 ID。
+ */
+export const newForeshadowSchema = z.object({
+  surfaceAction: z.string().min(1).describe("表面行为：伏笔的表面表现，如某角色被派去执行危险任务"),
+  hiddenTruth: z.string().min(1).describe("隐藏的真相：伏笔真正要反映的剧情体现"),
+  attentionLevel: z.number().int().min(1).max(10).describe("读者注意度：1 最容易被读者发现，10 最难发现"),
+  characterNames: z.array(z.string().min(1)).min(1).describe("服务角色名（引用角色库名或本次新增角色清单名）"),
+});
+
+export type NewForeshadow = z.infer<typeof newForeshadowSchema>;
+
+/** 大纲阶段变体：埋设幕名（入库时解析为幕节点 ID） */
+export const outlineNewForeshadowSchema = newForeshadowSchema.extend({
+  actName: z.string().min(1).describe("埋设幕名（必须是大纲中真实的幕名）"),
+});
+
+export type OutlineNewForeshadow = z.infer<typeof outlineNewForeshadowSchema>;
+
+/** 章节规划阶段变体：登场章名（入库时解析为章节点 ID） */
+export const chapterNewForeshadowSchema = newForeshadowSchema.extend({
+  chapterName: z.string().min(1).describe("登场章名（必须是本次规划中的真实章名）"),
+});
+
+export type ChapterNewForeshadow = z.infer<typeof chapterNewForeshadowSchema>;
+
+/** 章节规划时「既有未绑伏笔 → 登场章」的绑定指令（index 对应回传清单序号，1-based） */
+export const foreshadowBindingSchema = z.object({
+  index: z.number().int().min(1).describe("回传伏笔清单中的序号（从 1 起）"),
+  chapterName: z.string().min(1).describe("登场章名（必须是本次规划中的真实章名）"),
+});
+
+export type ForeshadowBinding = z.infer<typeof foreshadowBindingSchema>;

@@ -106,6 +106,31 @@ describe("renderView", () => {
     expect(withoutNew).not.toContain("新增角色");
   });
 
+  test("outline confirm：携带 newForeshadows 时渲染伏笔区块，缺失不渲染", () => {
+    const withFs = renderView({
+      kind: "outline", detail: "confirm", outline,
+      newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], actName: "第一幕" }],
+    } as never);
+    expect(withFs).toContain("本次大纲伏笔");
+    expect(withFs).toContain("[第一幕] 送信伏笔");
+    expect(renderView({ kind: "outline", detail: "confirm", outline } as never)).not.toContain("本次大纲伏笔");
+  });
+
+  test("chapter-plan：携带 newForeshadows / foreshadowBindings 时渲染两区块，缺失不渲染", () => {
+    const view = {
+      kind: "chapter-plan", actName: "第2幕", actSummary: "梗概", keyPlotPoints: ["情节点"],
+      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+      newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], chapterName: "第一章·雨夜" }],
+      foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }],
+    };
+    const rendered = renderView(view as never);
+    expect(rendered).toContain("本次规划新增伏笔");
+    expect(rendered).toContain("送信伏笔");
+    expect(rendered).toContain("伏笔绑定");
+    expect(rendered).toContain("1) → 第一章·雨夜");
+    expect(renderView({ ...view, newForeshadows: undefined, foreshadowBindings: undefined } as never)).not.toContain("伏笔");
+  });
+
   test("worldview：可选行缺省不渲染", () => {
     const text = renderView({
       kind: "worldview",

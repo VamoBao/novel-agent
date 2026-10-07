@@ -12,6 +12,8 @@ import { generateUuidV7 } from "./id";
 export interface StoredForeshadow {
   id: string;
   novelId: string;
+  /** 埋设幕节点（outlines 幕节点 ID，可空裸列——章节规划按幕圈定回传未绑章伏笔） */
+  actNodeId: string | null;
   createdAt: string;
   updatedAt: string;
   foreshadow: Foreshadow;
@@ -28,6 +30,7 @@ interface ForeshadowRow {
   planting_method: string | null;
   purpose: string | null;
   appear_chapter_id: string | null;
+  act_node_id: string | null;
   recover_chapter_ids: string | null;
   character_ids: string | null;
   created_at: string;
@@ -37,21 +40,21 @@ interface ForeshadowRow {
 const INSERT_SQL = `
   INSERT INTO foreshadows (
     id, novel_id, surface_action, hidden_truth, attention_level, recovery_status,
-    planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids,
+    planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids, act_node_id,
     created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 `;
 
 const SELECT_BY_NOVEL_SQL = `
   SELECT id, novel_id, surface_action, hidden_truth, attention_level, recovery_status,
-         planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids,
+         planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids, act_node_id,
          created_at, updated_at
   FROM foreshadows WHERE novel_id = ? ORDER BY created_at ASC, id ASC;
 `;
 
 const SELECT_BY_ID_SQL = `
   SELECT id, novel_id, surface_action, hidden_truth, attention_level, recovery_status,
-         planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids,
+         planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids, act_node_id,
          created_at, updated_at
   FROM foreshadows WHERE id = ?;
 `;
@@ -100,6 +103,7 @@ function rowToStored(row: ForeshadowRow): StoredForeshadow {
   return {
     id: row.id,
     novelId: row.novel_id,
+    actNodeId: row.act_node_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     foreshadow: rowToForeshadow(row),
@@ -134,16 +138,17 @@ export class ForeshadowStore {
     return new ForeshadowStore(openDatabase(path));
   }
 
-  /** 写入伏笔（先过 schema 校验；携带服务角色时角色须存在且属于同一小说），返回带库表元信息的记录 */
-  addForeshadow(novelId: string, foreshadow: Foreshadow): StoredForeshadow {
+  /** 写入伏笔（先过 schema 校验；携带服务角色时角色须存在且属于同一小说；actNodeId 为
+   *  埋设幕节点，缺省 NULL），返回带库表元信息的记录 */
+  addForeshadow(novelId: string, foreshadow: Foreshadow, actNodeId?: string): StoredForeshadow {
     const validated = foreshadowSchema.parse(foreshadow);
     this.assertCharactersInNovel(novelId, validated.characterIds);
     const id = generateUuidV7();
     const now = new Date().toISOString();
     this.db
       .prepare(INSERT_SQL)
-      .run(id, novelId, ...foreshadowToColumns(validated), now, now);
-    return { id, novelId, createdAt: now, updatedAt: now, foreshadow: validated };
+      .run(id, novelId, ...foreshadowToColumns(validated), actNodeId ?? null, now, now);
+    return { id, novelId, actNodeId: actNodeId ?? null, createdAt: now, updatedAt: now, foreshadow: validated };
   }
 
   /** 取某本小说的全部伏笔（按入库顺序） */
@@ -151,6 +156,21 @@ export class ForeshadowStore {
     const rows = this.db
       .prepare(SELECT_BY_NOVEL_SQL)
       .all(novelId) as ForeshadowRow[];
+    return rows.map(rowToStored);
+  }
+
+  /** 某本小说指定幕下「未绑登场章」的伏笔（章节规划回传清单，按入库顺序） */
+  listUnboundByAct(novelId: string, actNodeId: string): StoredForeshadow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, novel_id, surface_action, hidden_truth, attention_level, recovery_status,
+                planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids, act_node_id,
+                created_at, updated_at
+         FROM foreshadows
+         WHERE novel_id = ? AND act_node_id = ? AND appear_chapter_id IS NULL
+         ORDER BY created_at ASC, id ASC;`,
+      )
+      .all(novelId, actNodeId) as ForeshadowRow[];
     return rows.map(rowToStored);
   }
 

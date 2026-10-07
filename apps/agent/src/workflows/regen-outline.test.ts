@@ -10,8 +10,9 @@ import { NovelStore } from "../state/novel-store";
 import { WorldviewStore } from "../state/worldview-store";
 import { CharacterStore } from "../state/character-store";
 import { OutlineStore } from "../state/outline-store";
+import { ForeshadowStore } from "../state/foreshadow-store";
 import { FakeChannel } from "../ui/fake-channel";
-import type { Character, NewCharacterOutline, Worldview } from "@novel/shared";
+import type { Character, NewCharacterOutline, OutlineNewForeshadow, Worldview } from "@novel/shared";
 
 /**
  * regenerateOutline 集成测试：mock 掉 'ai' 模块（大纲 Agent 的 generateText
@@ -87,6 +88,7 @@ function newOutlineFixture(
   actCount: number,
   title = "灵脉遗孤·新版",
   newCharacters: NewCharacterOutline[] = [],
+  newForeshadows: OutlineNewForeshadow[] = [],
 ) {
   const perPart = Math.floor(actCount / partCount);
   const remainder = actCount - perPart * partCount;
@@ -95,6 +97,7 @@ function newOutlineFixture(
     logline: "散修少年重夺灵脉的新版故事线",
     theme: "破而后立",
     newCharacters,
+    newForeshadows,
     parts: Array.from({ length: partCount }, (_, i) => ({
       name: `新${i + 1}部`,
       summary: `新${i + 1}部梗概`,
@@ -114,6 +117,7 @@ interface Seeded {
   worldviewStore: WorldviewStore;
   characterStore: CharacterStore;
   outlineStore: OutlineStore;
+  foreshadowStore: ForeshadowStore;
 }
 
 let openDbs: Database[] = [];
@@ -134,6 +138,7 @@ async function seed(withWorldview = true, withCharacters = true): Promise<Seeded
     worldviewStore: new WorldviewStore(db),
     characterStore: new CharacterStore(db),
     outlineStore: new OutlineStore(db),
+    foreshadowStore: new ForeshadowStore(db),
   };
   world.novelStore.createNovel({ id: NOVEL_ID, name: "灵脉遗孤", description: "旧 logline" });
   if (withWorldview) world.worldviewStore.saveWorldview(NOVEL_ID, worldviewFixture);
@@ -161,15 +166,18 @@ function optionsFor(world: Seeded, channel: FakeChannel) {
     worldviewStore: world.worldviewStore,
     characterStore: world.characterStore,
     outlineStore: world.outlineStore,
+    foreshadowStore: world.foreshadowStore,
   };
 }
 
 describe("regenerateOutline（FakeChannel + mock LLM 集成）", () => {
   test("确认后新版本入库：旧树旧章降级归档，产物覆盖，description 回填", async () => {
     const world = await seed();
-    // LLM 脚本：大纲 Agent 一次 save_outline（携带新增角色清单）；auto-character Agent 一轮入库萧无咎
+    // LLM 脚本：大纲 Agent 一次 save_outline（携带新增角色清单 + 伏笔清单）；auto-character Agent 一轮入库萧无咎
     textScript = [
-      [[{ tool: "save_outline", args: newOutlineFixture(1, 5, "灵脉遗孤·新版", [{ name: "萧无咎", role: "反派·血宗宗主" }]) }]],
+      [[{ tool: "save_outline", args: newOutlineFixture(1, 5, "灵脉遗孤·新版", [{ name: "萧无咎", role: "反派·血宗宗主" }], [
+        { surfaceAction: "新版伏笔", hiddenTruth: "新真相", attentionLevel: 5, characterNames: ["林恒"], actName: "新1部·第1幕" },
+      ]) }]],
       [[{ tool: "save_character", args: autoCard }]],
     ];
     const channel = new FakeChannel([5, 1, true]);
@@ -203,6 +211,17 @@ describe("regenerateOutline（FakeChannel + mock LLM 集成）", () => {
       characterStore.listCharacters(NOVEL_ID).map((c) => c.character.basicInfo.name),
     ).toContain("萧无咎");
     expect(channel.notifies.some((n) => n.includes("新增 1 个角色已自动入库"))).toBe(true);
+
+    // 新版大纲伏笔入库：actNodeId 解析到新版（第 2 版）树的幕节点，而非旧版归档节点
+    const foreshadowRows = world.foreshadowStore.listForeshadows(NOVEL_ID);
+    expect(foreshadowRows.map((f) => f.foreshadow.surfaceAction)).toEqual(["新版伏笔"]);
+    const newFirstAct = world.outlineStore
+      .listOutlineNodes(NOVEL_ID, { currentOnly: true })
+      .find((n) => n.node.type === "act");
+    expect(newFirstAct).toBeDefined();
+    expect(foreshadowRows[0]!.actNodeId).toBe(newFirstAct!.id);
+    expect(channel.notifies.some((n) => n.includes("新版大纲安排了 1 处伏笔"))).toBe(true);
+    expect(channel.notifies.some((n) => n.includes("本次大纲伏笔已入库 1 处"))).toBe(true);
   });
 
   test("确认循环：用户拒绝并给反馈 → Agent 修订后再次提交才入库", async () => {

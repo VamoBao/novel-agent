@@ -1,14 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import {
   audienceSuggestionSchema,
+  chapterNewForeshadowSchema,
   chapterPlanSchema,
   chapterPlanViewSchema,
   characterSchema,
   coreConflictSchema,
+  foreshadowBindingSchema,
   foreshadowPatchSchema,
   foreshadowSchema,
   locationSchema,
   newCharacterSchema,
+  newForeshadowSchema,
+  outlineNewForeshadowSchema,
   outlineNodePatchSchema,
   outlineNodeSchema,
   outlineSchema,
@@ -401,5 +405,79 @@ describe("chapterPlanViewSchema 的 newCharacters 可选字段", () => {
   test("不携带 newCharacters 的视图仍通过（旧消息兼容）", () => {
     const view = chapterPlanViewSchema.parse(baseView);
     expect(view.newCharacters).toBeUndefined();
+  });
+});
+
+describe("newForeshadowSchema 及变体", () => {
+  const base = {
+    surfaceAction: "老周把主角派去北境送信",
+    hiddenTruth: "暗示老周已经投敌，借刀除掉主角",
+    attentionLevel: 4,
+    characterNames: ["林恒", "萧无咎"],
+  };
+
+  test("基础项通过；大纲变体带 actName、章节变体带 chapterName 各自通过", () => {
+    expect(newForeshadowSchema.parse(base).attentionLevel).toBe(4);
+    expect(outlineNewForeshadowSchema.parse({ ...base, actName: "第1幕" }).actName).toBe("第1幕");
+    expect(chapterNewForeshadowSchema.parse({ ...base, chapterName: "第一章·雨夜" }).chapterName).toBe("第一章·雨夜");
+  });
+
+  test("注意度越界 / 非整数、characterNames 空数组或缺字段被拒绝", () => {
+    expect(() => newForeshadowSchema.parse({ ...base, attentionLevel: 0 })).toThrow();
+    expect(() => newForeshadowSchema.parse({ ...base, attentionLevel: 11 })).toThrow();
+    expect(() => newForeshadowSchema.parse({ ...base, attentionLevel: 4.5 })).toThrow();
+    expect(() => newForeshadowSchema.parse({ ...base, characterNames: [] })).toThrow();
+    expect(() => newForeshadowSchema.parse({ ...base, hiddenTruth: "" })).toThrow();
+  });
+
+  test("变体缺归属字段被拒绝（大纲缺 actName / 章节缺 chapterName）", () => {
+    expect(() => outlineNewForeshadowSchema.parse(base)).toThrow();
+    expect(() => chapterNewForeshadowSchema.parse(base)).toThrow();
+  });
+
+  test("foreshadowBindingSchema：合法通过；序号 0 或章名空串被拒绝", () => {
+    expect(foreshadowBindingSchema.parse({ index: 1, chapterName: "第一章·雨夜" }).index).toBe(1);
+    expect(() => foreshadowBindingSchema.parse({ index: 0, chapterName: "第一章" })).toThrow();
+    expect(() => foreshadowBindingSchema.parse({ index: 1, chapterName: "" })).toThrow();
+  });
+});
+
+describe("两确认视图的伏笔可选字段", () => {
+  const baseOutlineView = {
+    kind: "outline",
+    detail: "confirm",
+    outline: {
+      title: "灵脉遗孤",
+      logline: "散修少年夺回灵脉",
+      parts: [{ name: "第一部", summary: "概述", acts: [{ name: "第一幕", summary: "梗概", keyPlotPoints: ["情节点"] }] }],
+    },
+  };
+  const fs = {
+    surfaceAction: "老周把主角派去北境送信",
+    hiddenTruth: "暗示老周已投敌",
+    attentionLevel: 4,
+    characterNames: ["林恒"],
+  };
+
+  test("outline 视图携带 newForeshadows 通过；缺失仍通过", () => {
+    expect(outlineViewSchema.parse({ ...baseOutlineView, newForeshadows: [{ ...fs, actName: "第一幕" }] }).newForeshadows).toHaveLength(1);
+    expect(outlineViewSchema.parse(baseOutlineView).newForeshadows).toBeUndefined();
+  });
+
+  test("chapter-plan 视图携带 newForeshadows 与 foreshadowBindings 通过；缺失仍通过", () => {
+    const base = {
+      kind: "chapter-plan",
+      actName: "第1幕",
+      actSummary: "梗概",
+      keyPlotPoints: ["情节点"],
+      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+    };
+    const view = chapterPlanViewSchema.parse({
+      ...base,
+      newForeshadows: [{ ...fs, chapterName: "第一章·雨夜" }],
+      foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }],
+    });
+    expect(view.foreshadowBindings).toHaveLength(1);
+    expect(chapterPlanViewSchema.parse(base).newForeshadows).toBeUndefined();
   });
 });

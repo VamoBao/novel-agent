@@ -2,6 +2,11 @@ import { z } from "zod";
 import { characterSchema } from "./character";
 import { chapterPlanSchema } from "./chapter";
 import { coreConflictSchema } from "./conflict";
+import {
+  chapterNewForeshadowSchema,
+  foreshadowBindingSchema,
+  outlineNewForeshadowSchema,
+} from "./foreshadow";
 import { newCharacterSchema, outlineSchema } from "./outline";
 import { worldviewSchema } from "./worldview";
 
@@ -29,6 +34,8 @@ export const outlineViewSchema = z.object({
   outline: outlineSchema,
   /** 确认门携带的「新增角色清单」（名字+一句话定位）；full 展示与旧消息不带 */
   newCharacters: z.array(newCharacterSchema).optional(),
+  /** 确认门携带的伏笔清单；旧消息不带 */
+  newForeshadows: z.array(outlineNewForeshadowSchema).optional(),
 });
 
 export const worldviewViewSchema = z.object({
@@ -45,6 +52,10 @@ export const chapterPlanViewSchema = z.object({
   plan: chapterPlanSchema.describe("推荐的本幕章节规划"),
   /** 确认门携带的「新增角色清单」（名字+一句话定位）；旧消息不带 */
   newCharacters: z.array(newCharacterSchema).optional(),
+  /** 确认门携带的伏笔清单；旧消息不带 */
+  newForeshadows: z.array(chapterNewForeshadowSchema).optional(),
+  /** 确认门携带的伏笔绑定指令（既有伏笔→登场章）；旧消息不带 */
+  foreshadowBindings: z.array(foreshadowBindingSchema).optional(),
 });
 
 export const conflictViewSchema = z.object({

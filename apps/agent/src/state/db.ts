@@ -7,7 +7,7 @@ export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 /**
  * 打开（必要时创建）数据库并完成建表。
@@ -26,7 +26,8 @@ const SCHEMA_VERSION = 11;
  * - locations：小说世界的地理位置（坐标/图层/人口），parent_id 自引用外键（城市→大陆层级），
  *   population 可空（无人/未设定）
  * - foreshadows：伏笔（表面行为/隐藏真相/读者注意度 1-10/回收状态枚举），
- *   出现章节 ID 为可空裸列（chapter 节点写作期落地后补约束，先例 document_id），
+ *   出现章节 ID 与埋设幕节点 ID（act_node_id，章节规划按幕圈定回传的依据）均为
+ *   可空裸列（chapter 节点写作期落地后补约束，先例 document_id），
  *   回收章节 IDs 与服务角色 IDs 存 JSON 文本
  */
 /**
@@ -136,9 +137,16 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
         // 存量行的 content 先按「小说名/部名/章名」层级落文件（保数据），见 migrateDocumentsToFile
         migrateDocumentsToFile(db);
       }
+      if (version >= 8 && version <= 11) {
+        // 11→12：foreshadows 增列 act_node_id（埋设幕节点，可空裸列——章节规划按幕圈定回传
+        // 未绑章伏笔；SQLite 不支持 ALTER 补外键，一致性由写入方保证，先例 outlines.document_id）。
+        // 守卫须覆盖 8~11：foreshadows 表自 v8 起已存在（不同于 10→11 时 documents 尚不存在），
+        // 这些版本的库都持无此列的旧表形态，CREATE TABLE IF NOT EXISTS 对其不生效
+        db.exec("ALTER TABLE foreshadows ADD COLUMN act_node_id TEXT;");
+      }
       // 9→10：新增 documents 表，无 ALTER——由下方 CREATE TABLE IF NOT EXISTS 幂等落地
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>11 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>12 的库被旧代码打开）：重建兜底
       db.exec("DROP TABLE IF EXISTS documents;");
       db.exec("DROP TABLE IF EXISTS outlines;");
       db.exec("DROP TABLE IF EXISTS locations;");
@@ -290,6 +298,7 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       planting_method TEXT,
       purpose TEXT,
       appear_chapter_id TEXT,
+      act_node_id TEXT,
       recover_chapter_ids TEXT,
       character_ids TEXT,
       created_at TEXT NOT NULL,

@@ -188,3 +188,29 @@ describe("ForeshadowStore", () => {
     store.close();
   });
 });
+
+describe("act_node_id 与 listUnboundByAct", () => {
+  test("addForeshadow 第三参写入 act_node_id，缺省为 null", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-fs-act-"));
+    const store = setup(join(dir, "t.db"));
+    const stored = store.addForeshadow(NOVEL_A, makeForeshadow(), "act-node-1");
+    expect(stored.actNodeId).toBe("act-node-1");
+    expect(store.addForeshadow(NOVEL_A, makeForeshadow({ surfaceAction: "另一处伏笔" })).actNodeId).toBeNull();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("listUnboundByAct：命中本幕未绑章；排除他幕 / 已绑章 / 无 act", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-fs-unbound-"));
+    const store = setup(join(dir, "t.db"));
+    store.addForeshadow(NOVEL_A, makeForeshadow(), "act-1");                                     // 命中
+    store.addForeshadow(NOVEL_A, makeForeshadow({ surfaceAction: "已绑章的伏笔", appearChapterId: "ch-1" }), "act-1"); // 已绑章排除
+    store.addForeshadow(NOVEL_A, makeForeshadow({ surfaceAction: "他幕的伏笔" }), "act-2");       // 他幕排除
+    store.addForeshadow(NOVEL_A, makeForeshadow({ surfaceAction: "无幕的伏笔" }));               // 无 act 排除
+    const unbound = store.listUnboundByAct(NOVEL_A, "act-1");
+    expect(unbound.map((f) => f.foreshadow.surfaceAction)).toEqual(["老周把主角派去北境送信"]);
+    expect(unbound[0]?.actNodeId).toBe("act-1");
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+});

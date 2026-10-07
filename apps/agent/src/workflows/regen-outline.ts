@@ -3,9 +3,11 @@ import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
 import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
 import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
 import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
+import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
 import { saveOutline } from "../output/outline-writer";
 import { createOutline } from "./agents/outline-agent";
 import { autoCreateCharacters, filterNewCharacters } from "./agents/auto-character-agent";
+import { plantOutlineForeshadows } from "./foreshadow-intake";
 
 export interface RegenOutlineOptions {
   /** 交互通道（终端 / 协议 / 测试替身），业务交互的唯一出口 */
@@ -16,6 +18,8 @@ export interface RegenOutlineOptions {
   worldviewStore?: WorldviewStore;
   characterStore?: CharacterStore;
   outlineStore?: OutlineStore;
+  /** 伏笔持久化 store；缺省用默认 SQLite store（data/novel.db） */
+  foreshadowStore?: ForeshadowStore;
 }
 
 export interface RegenOutlineResult {
@@ -33,7 +37,8 @@ export interface RegenOutlineResult {
  * 确认后以新版本入库——旧大纲树与已生成章节整体降级为历史版本（行保留，
  * 版本迭代记录），并覆盖 output 产物、回填 novels.description（logline）。
  * 新版大纲 newCharacters 清单中的新增角色经兜底 diff 后自动填充角色卡入库
- * （空清单跳过，同 createNovel 收尾动作）。
+ * （空清单跳过，同 createNovel 收尾动作）；newForeshadows 伏笔清单在角色入库后
+ * 确定性解析入库（幕名→新版幕节点、服务角色名→ID，未匹配跳过，同 createNovel）。
  * 校验失败（小说不存在 / 世界观未确认 / 无角色）抛可读错误，
  * 由调用方（协议入口）转为 fatal error 消息。
  */
@@ -43,6 +48,7 @@ export async function regenerateOutline(options: RegenOutlineOptions): Promise<R
   const worldviewStore = options.worldviewStore ?? getDefaultWorldviewStore();
   const characterStore = options.characterStore ?? getDefaultCharacterStore();
   const outlineStore = options.outlineStore ?? getDefaultOutlineStore();
+  const foreshadowStore = options.foreshadowStore ?? getDefaultForeshadowStore();
 
   const novel = novelStore.getNovel(novelId);
   if (!novel) {
@@ -107,6 +113,28 @@ export async function regenerateOutline(options: RegenOutlineOptions): Promise<R
     });
     channel.notify(
       `✨ 本次大纲新增 ${pendingNew.length} 个角色已自动入库：${pendingNew.map((c) => c.name).join("、")}`,
+    );
+  }
+
+  // 大纲伏笔入库：确定性代码创建（角色已入库，服务角色名可解析）；幕名/角色名未匹配逐条跳过并警告。
+  // 置于角色自动入库块之后：伏笔清单可能引用本轮自动入库的新角色（服务角色 ID 需角色先入库）；
+  // actNodes 取当前版本树（saveOutlineTreeNewVersion 后即新版），伏笔随新版幕挂接。
+  if (submission.newForeshadows.length > 0) {
+    channel.notify(`\n✨ 新版大纲安排了 ${submission.newForeshadows.length} 处伏笔，正在入库…`);
+    const actNodes = outlineStore
+      .listOutlineNodes(novelId, { currentOnly: true })
+      .filter((n) => n.node.type === "act")
+      .map((n) => ({ id: n.id, name: n.node.name }));
+    const { created, skipped } = plantOutlineForeshadows({
+      novelId,
+      newForeshadows: submission.newForeshadows,
+      characters: characterStore.listCharacters(novelId),
+      actNodes,
+      channel,
+      foreshadowStore,
+    });
+    channel.notify(
+      `✨ 本次大纲伏笔已入库 ${created} 处${skipped > 0 ? `（${skipped} 处因幕名/角色名未匹配跳过）` : ""}`,
     );
   }
   return { novelId, version, partCount: partTotal, actCount: actTotal };
