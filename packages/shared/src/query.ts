@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { characterSchema } from "./character";
+import { foreshadowSchema } from "./foreshadow";
 import { outlineNodeTypeSchema } from "./outline-node";
 import { worldviewSchema } from "./worldview";
 
@@ -58,7 +59,14 @@ export const documentEntrySchema = z.object({
 });
 export type DocumentEntry = z.infer<typeof documentEntrySchema>;
 
-/** 单本小说全量资料：三类结构数据均可缺失（对应创作中途尚未落库的部分） */
+/** 伏笔条目：foreshadows 表当前行（章卡按 appearChapterId / recoverChapterIds 取用）；
+ *  服务角色为 ID，客户端经详情 characters 解析名字 */
+export const foreshadowEntrySchema = foreshadowSchema.extend({
+  id: z.string().min(1).describe("foreshadows 表主键（UUIDv7）"),
+});
+export type ForeshadowEntry = z.infer<typeof foreshadowEntrySchema>;
+
+/** 单本小说全量资料：结构数据（世界观 / 角色 / 大纲节点 / 正文 / 伏笔）均可缺失（对应创作中途尚未落库的部分） */
 export const novelDetailSchema = z.object({
   novel: novelListItemSchema,
   worldview: worldviewSchema.nullable().describe("世界观，未确认为 null"),
@@ -69,6 +77,9 @@ export const novelDetailSchema = z.object({
   documents: z
     .array(documentEntrySchema)
     .describe("章节正文（一章一份，未生成为空数组；章节点预览按 chapterId 取用）"),
+  foreshadows: z
+    .array(foreshadowEntrySchema)
+    .describe("全部伏笔（按入库顺序，未生成为空数组；章节点预览按 appearChapterId / recoverChapterIds 取用）"),
 });
 export type NovelDetail = z.infer<typeof novelDetailSchema>;
 

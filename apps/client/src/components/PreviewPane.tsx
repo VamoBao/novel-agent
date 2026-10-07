@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import type { CharacterEntry, NovelDetail, OutlineNodeEntry, View } from "@novel/shared";
+import type {
+  CharacterEntry,
+  ForeshadowEntry,
+  NovelDetail,
+  OutlineNodeEntry,
+  View,
+} from "@novel/shared";
 import { CharacterEditForm } from "./CharacterEditForm";
 import { ViewCard } from "./ViewCard";
 import { OutlineNodeCard } from "./OutlineNodeCard";
+import type { ChapterForeshadow } from "./OutlineNodeCard";
 import type { Selection } from "./StructureTreePanel";
 
 interface PreviewPaneProps {
@@ -22,6 +29,37 @@ interface PreviewPaneProps {
   onCharacterSaved?: () => void;
   /** 章节正文生成完成（run_finished）后刷新详情（章节点 id 稳定，选中保持） */
   onDocumentSaved?: () => void;
+}
+
+/** 伏笔条目 → 章卡显示模型（badge 区分登场/回收；服务角色 ID 经详情 characters 解析名字，未匹配兜底原 ID） */
+function toChapterForeshadow(
+  f: ForeshadowEntry,
+  badge: ChapterForeshadow["badge"],
+  nameById: Map<string, string>,
+): ChapterForeshadow {
+  return {
+    key: `${f.id}-${badge}`,
+    badge,
+    surfaceAction: f.surfaceAction,
+    hiddenTruth: f.hiddenTruth,
+    attentionLevel: f.attentionLevel,
+    characterNames: (f.characterIds ?? []).map((id) => nameById.get(id) ?? id),
+  };
+}
+
+/** 章节点 → 涉及的伏笔（登场 appearChapterId / 回收 recoverChapterIds 含本章；同一伏笔可两组各显示一条） */
+function toChapterForeshadows(detail: NovelDetail, chapterId: string): ChapterForeshadow[] {
+  const nameById = new Map(detail.characters.map((c) => [c.id, c.basicInfo.name]));
+  const items: ChapterForeshadow[] = [];
+  for (const f of detail.foreshadows) {
+    if (f.appearChapterId === chapterId) {
+      items.push(toChapterForeshadow(f, "登场", nameById));
+    }
+    if (f.recoverChapterIds?.includes(chapterId)) {
+      items.push(toChapterForeshadow(f, "回收", nameById));
+    }
+  }
+  return items;
 }
 
 /** worldview 选中项 → 只读视图（角色预览带编辑入口自成一节；大纲节点不经此处） */
@@ -158,6 +196,9 @@ export function PreviewPane({
           )}
           onPlanChapters={onPlanChapters ? () => onPlanChapters(node) : undefined}
           document={detail.documents.find((d) => d.chapterId === node.id)}
+          foreshadows={
+            node.type === "chapter" ? toChapterForeshadows(detail, node.id) : undefined
+          }
           writing={writingNodeId !== null}
           onWriteChapter={
             node.type === "chapter"

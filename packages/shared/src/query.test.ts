@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   characterEntrySchema,
+  foreshadowEntrySchema,
   novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
@@ -173,6 +174,7 @@ describe("novelDetailSchema", () => {
       ],
       outlineNodes: validOutlineNodes,
       documents: validDocuments,
+      foreshadows: [],
     });
     expect(detail.characters).toHaveLength(1);
     expect(detail.outlineNodes).toHaveLength(2);
@@ -189,6 +191,7 @@ describe("novelDetailSchema", () => {
       characters: [],
       outlineNodes: [],
       documents: [],
+      foreshadows: [],
     });
     expect(detail.worldview).toBeNull();
     expect(detail.outlineNodes).toHaveLength(0);
@@ -202,6 +205,7 @@ describe("novelDetailSchema", () => {
       characters: [],
       outlineNodes: [],
       documents: [{ ...validDocuments[0], content: null }],
+      foreshadows: [],
     });
     expect(detail.documents[0]?.content).toBeNull();
     expect(detail.documents[0]?.wordCount).toBe(22);
@@ -238,5 +242,43 @@ describe("novelDetailSchema", () => {
         documents: [{ ...validDocuments[0], wordCount: -1 }],
       }),
     ).toThrow();
+  });
+});
+
+describe("foreshadowEntrySchema 与 novelDetail.foreshadows", () => {
+  const entry = {
+    id: "cccccccc-0000-7000-8000-000000000001",
+    surfaceAction: "老周把主角派去北境送信",
+    hiddenTruth: "暗示老周已经投敌",
+    attentionLevel: 4,
+    appearChapterId: "ch-1",
+    recoverChapterIds: ["ch-9"],
+    characterIds: ["char-1", "char-2"],
+  };
+
+  test("完整伏笔条目通过；recoveryStatus 缺省补 unrecovered", () => {
+    const parsed = foreshadowEntrySchema.parse(entry);
+    expect(parsed.recoveryStatus).toBe("unrecovered");
+    expect(parsed.appearChapterId).toBe("ch-1");
+  });
+
+  test("novelDetail 携带 foreshadows 数组通过契约校验", () => {
+    const detail = novelDetailSchema.parse({
+      novel: {
+        id: "aaaaaaaa-0000-7000-8000-000000000001",
+        name: "灵脉破晓",
+        pinned: false,
+        favorite: false,
+        createdAt: "2026-10-07T00:00:00Z",
+        updatedAt: "2026-10-07T00:00:00Z",
+      },
+      worldview: null,
+      characters: [],
+      outlineNodes: [],
+      documents: [],
+      foreshadows: [{ ...entry, recoveryStatus: "unrecovered" }],
+    });
+    expect(detail.foreshadows).toHaveLength(1);
+    expect(detail.foreshadows[0]?.characterIds).toEqual(["char-1", "char-2"]);
   });
 });

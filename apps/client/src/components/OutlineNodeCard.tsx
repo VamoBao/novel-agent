@@ -1,5 +1,16 @@
 import type { DocumentEntry, OutlineNodeEntry } from "@novel/shared";
 
+/** 章卡伏笔显示模型（PreviewPane 过滤登场/回收两组并解析角色名后传入，卡片纯渲染） */
+export interface ChapterForeshadow {
+  /** React key（同一伏笔可同时命中登场与回收两组，各显示一条） */
+  key: string;
+  badge: "登场" | "回收";
+  surfaceAction: string;
+  hiddenTruth: string;
+  attentionLevel: number;
+  characterNames: string[];
+}
+
 interface OutlineNodeCardProps {
   node: OutlineNodeEntry;
   /** 幕下已有章节点时不再显示生成入口（重新规划/修订流为后续需求） */
@@ -12,6 +23,8 @@ interface OutlineNodeCardProps {
   writing?: boolean;
   /** 触发本章正文生成（write-chapter 会话）；不传则不显示入口 */
   onWriteChapter?: () => void;
+  /** 本章涉及的伏笔（详情 foreshadows 过滤登场/回收两组；无则不渲染区块） */
+  foreshadows?: ChapterForeshadow[];
 }
 
 /**
@@ -34,6 +47,7 @@ export function OutlineNodeCard({
   document,
   writing = false,
   onWriteChapter,
+  foreshadows,
 }: OutlineNodeCardProps) {
   const legacy = node.summary === null || node.keyPlotPoints === null;
   const showEntry = node.type === "act" && !hasChapters && onPlanChapters !== undefined;
@@ -73,6 +87,17 @@ export function OutlineNodeCard({
             <p className="dim">（正文文件缺失或已被移动）</p>
           )}
           <p className="doc-path">已保存至 output/{document.filePath}</p>
+        </section>
+      ) : null}
+      {node.type === "chapter" && foreshadows && foreshadows.length > 0 ? (
+        <section className="viewcard">
+          <p className="card-label">伏笔</p>
+          {foreshadows.map((f) => (
+            <p key={f.key} className="outline-summary">
+              [{f.badge}] {f.surfaceAction} ⇢ {f.hiddenTruth}（注意度 {f.attentionLevel}
+              {f.characterNames.length > 0 ? `，服务：${f.characterNames.join("、")}` : ""}）
+            </p>
+          ))}
         </section>
       ) : null}
       {showEntry ? (

@@ -9,6 +9,7 @@ import {
   type Character,
   type CharacterEntry,
   type DocumentEntry,
+  type ForeshadowEntry,
   type NovelDeletedResult,
   type NovelDetail,
   type NovelListItem,
@@ -20,6 +21,7 @@ import { NovelStore, type NovelRecord } from "./state/novel-store";
 import { OutlineStore } from "./state/outline-store";
 import { WorldviewStore } from "./state/worldview-store";
 import { DocumentStore } from "./state/document-store";
+import { ForeshadowStore } from "./state/foreshadow-store";
 import { OUTPUT_DIR, outlineFilePath } from "./output/outline-writer";
 import {
   moveDocumentArtifact,
@@ -100,12 +102,17 @@ export function buildNovelDetail(
       updatedAt,
       content: readDocumentArtifact(filePath, outputDir),
     }));
+  // 伏笔条目：foreshadows 表全量行（按入库顺序），章卡按 appearChapterId / recoverChapterIds 取用
+  const foreshadows: ForeshadowEntry[] = new ForeshadowStore(db)
+    .listForeshadows(novelId)
+    .map((f) => ({ id: f.id, ...f.foreshadow }));
   return novelDetailSchema.parse({
     novel: toListItem(novel),
     worldview,
     characters,
     outlineNodes,
     documents,
+    foreshadows,
   });
 }
 

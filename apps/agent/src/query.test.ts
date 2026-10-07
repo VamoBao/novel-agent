@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { CharacterStore } from "./state/character-store";
 import { DocumentStore } from "./state/document-store";
+import { ForeshadowStore } from "./state/foreshadow-store";
 import { openDatabase } from "./state/db";
 import { NovelStore } from "./state/novel-store";
 import { OutlineStore } from "./state/outline-store";
@@ -151,6 +152,54 @@ describe("query CLI（buildNovelList / buildNovelDetail）", () => {
     expect(first.content).toBe("章一正文全文。");
     expect(first.filePath).toBe(join("正文之书", "部一", "章一.md"));
     expect(second.content).toBeNull();
+    db.close();
+  });
+
+  test("get 全量资料携带伏笔条目（登场 / 回收 / 未绑定三形态，按入库顺序）", async () => {
+    const { db } = await newFixture();
+    const id = "bbbbbbbb-0000-7000-8000-00000000000f";
+    new NovelStore(db).createNovel({ id, name: "伏笔之书" });
+    const characters = new CharacterStore(db);
+    const charId = characters.addCharacter(id, character).id;
+    const store = new ForeshadowStore(db);
+    const fs = store.addForeshadow(
+      id,
+      {
+        surfaceAction: "宗主赐下断脉散",
+        hiddenTruth: "药中掺了追踪灵脉的蛊种",
+        attentionLevel: 6,
+        recoveryStatus: "unrecovered",
+        appearChapterId: "ch-1",
+        characterIds: [charId],
+      },
+    );
+    store.addForeshadow(id, {
+      surfaceAction: "半块玉佩",
+      hiddenTruth: "主角身世信物",
+      attentionLevel: 3,
+      recoveryStatus: "unrecovered",
+      recoverChapterIds: ["ch-9"],
+    });
+    store.addForeshadow(id, {
+      surfaceAction: "尚未绑定的伏笔",
+      hiddenTruth: "等待章节规划",
+      attentionLevel: 5,
+      recoveryStatus: "unrecovered",
+    });
+    const detail = buildNovelDetail(db, id);
+    expect(detail.foreshadows.map((f) => f.surfaceAction)).toEqual([
+      "宗主赐下断脉散",
+      "半块玉佩",
+      "尚未绑定的伏笔",
+    ]);
+    expect(detail.foreshadows[0]).toMatchObject({
+      id: fs.id,
+      appearChapterId: "ch-1",
+      characterIds: [charId],
+      recoveryStatus: "unrecovered",
+    });
+    expect(detail.foreshadows[1]?.recoverChapterIds).toEqual(["ch-9"]);
+    expect(detail.foreshadows[2]?.appearChapterId).toBeUndefined();
     db.close();
   });
 
