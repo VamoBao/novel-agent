@@ -1,12 +1,13 @@
 import { useState } from "react";
-import type { NovelDetail, OutlineNodeEntry } from "@novel/shared";
+import type { ForeshadowEntry, NovelDetail, OutlineNodeEntry } from "@novel/shared";
 import type { ReactNode } from "react";
 
-/** 结构树选中项：三类节点（角色 / 大纲节点携带库表主键区分同名人） */
+/** 结构树选中项：四类节点（角色 / 大纲节点 / 伏笔携带库表主键区分同名人） */
 export type Selection =
   | { kind: "worldview" }
   | { kind: "character"; characterId: string }
-  | { kind: "outline"; outlineNodeId: string };
+  | { kind: "outline"; outlineNodeId: string }
+  | { kind: "foreshadow"; foreshadowId: string };
 
 interface StructureTreePanelProps {
   /** null = 未选中小说 */
@@ -114,9 +115,10 @@ function renderOutlineNodes(
 }
 
 /**
- * 中栏结构树：世界观 / 角色 / 大纲（部→幕→章，读 outlines 表当前版本节点）三类组成节点。
- * 角色与大纲分组均可整组收起（组头三角，默认展开、会话内保持），大纲组内部/幕可逐节点
- * 收起（默认全展开）；角色组头附「＋ 新增角色」入口；大纲按节点选中预览（视图粒度 =
+ * 中栏结构树：世界观 / 角色 / 伏笔（按埋设幕分组）/ 大纲（部→幕→章，读 outlines 表当前版本节点）
+ * 四类组成节点。角色与大纲分组均可整组收起（组头三角，默认展开、会话内保持），大纲组内部/幕可
+ * 逐节点收起（默认全展开）；伏笔组头可整组收起、组内幕分组可逐组收起（均默认展开、会话内保持，
+ * 仅分组头不触发选中）；角色组头附「＋ 新增角色」入口；大纲按节点选中预览（视图粒度 =
  * 单节点）；组头刷新按钮触发大纲重新生成（经弹框确认）。
  */
 export function StructureTreePanel({
@@ -134,6 +136,18 @@ export function StructureTreePanel({
   const [groupCollapsed, setGroupCollapsed] = useState(false);
   /** 角色分组整组收起（默认展开），会话内保持 */
   const [charsCollapsed, setCharsCollapsed] = useState(false);
+  /** 伏笔分组整组收起（默认展开），会话内保持 */
+  const [fsGroupCollapsed, setFsGroupCollapsed] = useState(false);
+  /** 收起的伏笔幕分组（actNodeId；未绑幕组键 "__none__"），默认空 = 全展开，会话内保持 */
+  const [fsActCollapsed, setFsActCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleFsAct = (key: string): void => {
+    setFsActCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
   const toggleCollapse = (id: string): void => {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -142,6 +156,27 @@ export function StructureTreePanel({
       return next;
     });
   };
+
+  // 伏笔按埋设幕分组：幕顺序对齐大纲树当前版本 act 顺序；未绑幕归末尾「未绑幕」组
+  //（stale 归档旧幕归未绑幕组，不再静默不可见）
+  const fsGroups: { key: string; label: string; items: ForeshadowEntry[] }[] = detail
+    ? (() => {
+        const actOrder = detail.outlineNodes
+          .filter((n) => n.type === "act")
+          .map((n) => ({ id: n.id, name: n.name }));
+        const groups = actOrder.map((act) => ({
+          key: act.id,
+          label: act.name,
+          items: detail.foreshadows.filter((f) => f.actNodeId === act.id),
+        }));
+        const actIds = new Set(actOrder.map((act) => act.id));
+        const unbound = detail.foreshadows.filter(
+          (f) => f.actNodeId === null || !actIds.has(f.actNodeId),
+        );
+        if (unbound.length > 0) groups.push({ key: "__none__", label: "未绑幕", items: unbound });
+        return groups.filter((g) => g.items.length > 0);
+      })()
+    : [];
 
   return (
     <div className="structure">
@@ -196,6 +231,53 @@ export function StructureTreePanel({
                 }
                 onClick={() => onSelect({ kind: "character", characterId: character.id })}
               />
+            ))
+          )}
+
+          <div className="tree-group">
+            {detail.foreshadows.length > 0 ? (
+              <button
+                className="tree-toggle"
+                title={fsGroupCollapsed ? "展开伏笔" : "收起伏笔"}
+                onClick={() => setFsGroupCollapsed((v) => !v)}
+              >
+                {fsGroupCollapsed ? "▸" : "▾"}
+              </button>
+            ) : null}
+            <span>🔮 伏笔</span>
+          </div>
+          {detail.foreshadows.length === 0 ? (
+            <TreeNode label="（暂无伏笔）" depth={1} muted />
+          ) : fsGroupCollapsed ? null : (
+            fsGroups.map((group) => (
+              <div key={group.key}>
+                <div className="tree-row" style={{ paddingLeft: 16 }}>
+                  <button
+                    className="tree-toggle"
+                    title={fsActCollapsed.has(group.key) ? "展开" : "收起"}
+                    onClick={() => toggleFsAct(group.key)}
+                  >
+                    {fsActCollapsed.has(group.key) ? "▸" : "▾"}
+                  </button>
+                  <span>
+                    {group.label}（{group.items.length}）
+                  </span>
+                </div>
+                {fsActCollapsed.has(group.key)
+                  ? null
+                  : group.items.map((f) => (
+                      <TreeNode
+                        key={f.id}
+                        label={`✦ ${f.surfaceAction}`}
+                        depth={2}
+                        active={
+                          selection?.kind === "foreshadow" &&
+                          selection.foreshadowId === f.id
+                        }
+                        onClick={() => onSelect({ kind: "foreshadow", foreshadowId: f.id })}
+                      />
+                    ))}
+              </div>
             ))
           )}
 

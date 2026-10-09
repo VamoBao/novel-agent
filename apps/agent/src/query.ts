@@ -3,13 +3,16 @@ import { join } from "node:path";
 import {
   characterEntrySchema,
   characterSchema,
+  foreshadowSchema,
   novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
   type Character,
   type CharacterEntry,
   type DocumentEntry,
+  type Foreshadow,
   type ForeshadowEntry,
+  type ForeshadowPatch,
   type NovelDeletedResult,
   type NovelDetail,
   type NovelListItem,
@@ -21,7 +24,7 @@ import { NovelStore, type NovelRecord } from "./state/novel-store";
 import { OutlineStore } from "./state/outline-store";
 import { WorldviewStore } from "./state/worldview-store";
 import { DocumentStore } from "./state/document-store";
-import { ForeshadowStore } from "./state/foreshadow-store";
+import { ForeshadowStore, type StoredForeshadow } from "./state/foreshadow-store";
 import { OUTPUT_DIR, outlineFilePath } from "./output/outline-writer";
 import {
   moveDocumentArtifact,
@@ -45,6 +48,7 @@ import {
  *   output 产物——大纲 JSON 与正文文件）
  *   / `add-character <novelId> <角色卡JSON>`（新增角色，version=1）
  *   / `update-character <novelId> <characterId> <角色卡JSON>`（版本化编辑角色，旧卡快照归档）
+ *   / `update-foreshadow <novelId> <foreshadowId> <伏笔JSON>`（patch 语义编辑伏笔）
  *
  * 连接统一走 openDatabase：4→5 起有保数据迁移，纯浏览路径也须能完成版本升级
  * （readonly 连接会在旧库上因缺列报错）。
@@ -105,7 +109,7 @@ export function buildNovelDetail(
   // 伏笔条目：foreshadows 表全量行（按入库顺序），章卡按 appearChapterId / recoverChapterIds 取用
   const foreshadows: ForeshadowEntry[] = new ForeshadowStore(db)
     .listForeshadows(novelId)
-    .map((f) => ({ id: f.id, ...f.foreshadow }));
+    .map(toForeshadowEntry);
   return novelDetailSchema.parse({
     novel: toListItem(novel),
     worldview,
@@ -235,6 +239,49 @@ export function updateCharacterEntry(
   return toCharacterEntry(new CharacterStore(db).updateCharacter(novelId, characterId, character));
 }
 
+function parseForeshadowJson(json: string): Foreshadow {
+  try {
+    return foreshadowSchema.parse(JSON.parse(json));
+  } catch (error) {
+    throw new Error(`伏笔 JSON 不合法：${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
+  }
+}
+
+function toForeshadowEntry(stored: StoredForeshadow): ForeshadowEntry {
+  return { id: stored.id, ...stored.foreshadow, actNodeId: stored.actNodeId };
+}
+
+/**
+ * 表单完整卡 → patch：必填字段与回收状态直接覆盖；可选项有值传值、缺省传 null
+ * （清空——patch 语义 undefined=不动）；characterIds 空选传 null 清空；
+ * recoverChapterIds 不入 patch（编辑面不含回收章，保留现值）。
+ */
+function toForeshadowPatch(foreshadow: Foreshadow): ForeshadowPatch {
+  return {
+    surfaceAction: foreshadow.surfaceAction,
+    hiddenTruth: foreshadow.hiddenTruth,
+    attentionLevel: foreshadow.attentionLevel,
+    recoveryStatus: foreshadow.recoveryStatus,
+    plantingMethod: foreshadow.plantingMethod ?? null,
+    purpose: foreshadow.purpose ?? null,
+    appearChapterId: foreshadow.appearChapterId ?? null,
+    characterIds: foreshadow.characterIds ?? null,
+  };
+}
+
+/** update-foreshadow 载荷：patch 更新伏笔（服务角色同小说校验在 store 内），返回更新后条目 */
+export function updateForeshadowEntry(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  foreshadowId: string,
+  foreshadowJson: string,
+): ForeshadowEntry {
+  const patch = toForeshadowPatch(parseForeshadowJson(foreshadowJson));
+  return toForeshadowEntry(new ForeshadowStore(db).updateForeshadow(foreshadowId, patch));
+}
+
 function main(argv: string[]): number {
   const [command, novelId, ...rest] = argv;
   const db = openDatabase();
@@ -275,6 +322,10 @@ function main(argv: string[]): number {
         if (!novelId || rest.length !== 2 || !rest[0] || !rest[1]) break;
         process.stdout.write(`${JSON.stringify(updateCharacterEntry(db, novelId, rest[0], rest[1]))}\n`);
         return 0;
+      case "update-foreshadow":
+        if (!novelId || rest.length !== 2 || !rest[0] || !rest[1]) break;
+        process.stdout.write(`${JSON.stringify(updateForeshadowEntry(db, novelId, rest[0], rest[1]))}\n`);
+        return 0;
       default:
         break;
     }
@@ -282,7 +333,7 @@ function main(argv: string[]): number {
     db.close();
   }
   process.stderr.write(
-    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id> | add-character <novelId> <角色卡JSON> | update-character <novelId> <characterId> <角色卡JSON>>\n",
+    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id> | add-character <novelId> <角色卡JSON> | update-character <novelId> <characterId> <角色卡JSON> | update-foreshadow <novelId> <foreshadowId> <伏笔JSON>>\n",
   );
   return 1;
 }

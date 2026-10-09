@@ -248,6 +248,7 @@ describe("novelDetailSchema", () => {
 describe("foreshadowEntrySchema 与 novelDetail.foreshadows", () => {
   const entry = {
     id: "cccccccc-0000-7000-8000-000000000001",
+    actNodeId: "act-1",
     surfaceAction: "老周把主角派去北境送信",
     hiddenTruth: "暗示老周已经投敌",
     attentionLevel: 4,
@@ -260,6 +261,11 @@ describe("foreshadowEntrySchema 与 novelDetail.foreshadows", () => {
     const parsed = foreshadowEntrySchema.parse(entry);
     expect(parsed.recoveryStatus).toBe("unrecovered");
     expect(parsed.appearChapterId).toBe("ch-1");
+  });
+
+  test("actNodeId 值与 null 两态均合法（树分组依据）", () => {
+    expect(foreshadowEntrySchema.parse({ ...entry, actNodeId: "act-1" }).actNodeId).toBe("act-1");
+    expect(foreshadowEntrySchema.parse({ ...entry, actNodeId: null }).actNodeId).toBeNull();
   });
 
   test("novelDetail 携带 foreshadows 数组通过契约校验", () => {

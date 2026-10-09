@@ -19,6 +19,7 @@ import {
   renameNovel,
   setNovelFavorite,
   setNovelPinned,
+  updateForeshadowEntry,
 } from "./query";
 
 const tempDirs: string[] = [];
@@ -304,6 +305,75 @@ describe("query CLI 管理命令（rename / pin / favorite / delete）", () => {
     expect(deleteNovel(db, "aaaaaaaa-0000-7000-8000-000000000014", outputDir).deleted).toBe(
       "aaaaaaaa-0000-7000-8000-000000000014",
     );
+    db.close();
+  });
+});
+
+describe("query CLI update-foreshadow", () => {
+  test("改必填值 / 清空可选项（null 语义）/ 改登场章与服务角色 / 回收章现值保留 / 返回条目含 actNodeId", async () => {
+    const { db } = await newFixture();
+    const id = "dddddddd-0000-7000-8000-000000000001";
+    new NovelStore(db).createNovel({ id, name: "伏笔编辑之书" });
+    const outlineStore = new OutlineStore(db);
+    const tree = outlineStore.saveOutlineTree(id, [
+      { name: "第一部", summary: "概述", acts: [
+        { name: "第1幕", summary: "梗概", keyPlotPoints: ["情节点"] },
+        { name: "第2幕", summary: "梗概", keyPlotPoints: ["情节点"] },
+      ] },
+    ]);
+    const act1 = tree.find((n) => n.node.type === "act")!;
+    const chapters = outlineStore.saveChapters(id, act1.id, [
+      { name: "第一章", summary: "概述" },
+      { name: "第二章", summary: "概述" },
+    ]);
+    const chapter1 = chapters[0]!;
+    const characterStore = new CharacterStore(db);
+    const charA = characterStore.addCharacter(id, character);
+    const charB = characterStore.addCharacter(id, { ...character, basicInfo: { name: "老周", gender: "男" } });
+    const fs = new ForeshadowStore(db).addForeshadow(id, {
+      surfaceAction: "宗主赐下断脉散",
+      hiddenTruth: "药中掺了蛊种",
+      attentionLevel: 6,
+      recoveryStatus: "unrecovered",
+      plantingMethod: "对话",
+      purpose: "引子",
+      appearChapterId: chapter1.id,
+      recoverChapterIds: ["chapter-recover-keep"],
+      characterIds: [charA.id],
+    }, act1.id);
+
+    const updated = updateForeshadowEntry(db, id, fs.id, JSON.stringify({
+      surfaceAction: "宗主赐下的药",
+      hiddenTruth: "药中掺了追踪蛊种",
+      attentionLevel: 8,
+      recoveryStatus: "partial",
+      appearChapterId: chapters[1]!.id,
+      characterIds: [charB.id],
+    }));
+
+    expect(updated.id).toBe(fs.id);
+    expect(updated.actNodeId).toBe(act1.id);          // 幕归属不受编辑影响
+    expect(updated.surfaceAction).toBe("宗主赐下的药");
+    expect(updated.attentionLevel).toBe(8);
+    expect(updated.recoveryStatus).toBe("partial");
+    expect(updated.plantingMethod).toBeUndefined();   // 未携带 → 清空
+    expect(updated.purpose).toBeUndefined();
+    expect(updated.appearChapterId).toBe(chapters[1]!.id);
+    expect(updated.characterIds).toEqual([charB.id]);
+    expect(updated.recoverChapterIds).toEqual(["chapter-recover-keep"]); // 回收章保留现值
+    expect(new ForeshadowStore(db).getForeshadow(fs.id)?.foreshadow.hiddenTruth).toBe("药中掺了追踪蛊种");
+    db.close();
+  });
+
+  test("伏笔不存在：抛可读错误", async () => {
+    const { db } = await newFixture();
+    const id = "dddddddd-0000-7000-8000-000000000002";
+    new NovelStore(db).createNovel({ id });
+    expect(() =>
+      updateForeshadowEntry(db, id, "no-such-fs", JSON.stringify({
+        surfaceAction: "x", hiddenTruth: "y", attentionLevel: 1, recoveryStatus: "unrecovered",
+      })),
+    ).toThrow("伏笔不存在");
     db.close();
   });
 });

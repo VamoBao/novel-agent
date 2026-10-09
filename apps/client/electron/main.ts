@@ -5,6 +5,7 @@ import * as path from "node:path";
 import {
   agentMessageSchema,
   characterEntrySchema,
+  foreshadowEntrySchema,
   novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
@@ -12,6 +13,8 @@ import {
   type AgentStartOptions,
   type Character,
   type CharacterEntry,
+  type Foreshadow,
+  type ForeshadowEntry,
   type NovelDetail,
   type NovelListItem,
 } from "@novel/shared";
@@ -399,6 +402,23 @@ ipcMain.handle(
   "library:updateCharacter",
   (_event, novelId: string, characterId: string, character: Character): Promise<CharacterEntry> =>
     handleCharacterMutation(["update-character", novelId, characterId, JSON.stringify(character)]),
+);
+
+/** 伏笔管理（编辑）：操作成功返回伏笔条目（含 actNodeId） */
+function handleForeshadowMutation(args: string[]): Promise<ForeshadowEntry> {
+  return runLibraryQuery(args).then((raw) => {
+    const result = foreshadowEntrySchema.safeParse(raw);
+    if (!result.success) {
+      throw new Error(`伏笔结果不合查询 schema：${result.error.issues[0]?.message ?? "未知错误"}`);
+    }
+    return result.data;
+  });
+}
+
+ipcMain.handle(
+  "library:updateForeshadow",
+  (_event, novelId: string, foreshadowId: string, foreshadow: Foreshadow): Promise<ForeshadowEntry> =>
+    handleForeshadowMutation(["update-foreshadow", novelId, foreshadowId, JSON.stringify(foreshadow)]),
 );
 
 app.whenReady().then(() => {

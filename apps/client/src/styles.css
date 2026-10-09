@@ -696,6 +696,37 @@ button.danger {
   font-size: 13px;
 }
 
+/* 伏笔编辑表单（ForeshadowEditForm，与 CharacterEditForm 共用 character-form 字段样式）：
+   下拉对齐 input 外观；勾选行内排布——复选框还原原生尺寸（豁免上面 input 的 width:100% 规则） */
+.character-form .field select {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.5;
+  background: var(--bg-panel);
+  color: var(--fg-default);
+}
+
+.character-form .field .checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--fg-default);
+  margin: 2px 0;
+  cursor: pointer;
+}
+
+.character-form .field input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 /* 角色卡预览的编辑入口行（卡片上方右对齐） */
 .preview-actions {
   display: flex;

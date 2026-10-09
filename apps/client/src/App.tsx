@@ -142,6 +142,11 @@ export function App() {
     if (selectedId) void reloadDetail(selectedId);
   };
 
+  /** 伏笔编辑提交成功：刷新详情（伏笔 id 稳定，选中与编辑态由 PreviewPane 收口） */
+  const handleForeshadowSaved = (): void => {
+    if (selectedId) void reloadDetail(selectedId);
+  };
+
   /** 创作完成：回浏览页 → 刷新书库 → 自动选中新作（列表已含新作时） */
   const handleFinished = (novelId: string): void => {
     setCreating(false);
@@ -346,6 +351,7 @@ export function App() {
             onCreateCharacterSubmitted={handleCharacterCreated}
             onCreateCharacterCancelled={() => setCreatingCharacter(false)}
             onCharacterSaved={handleCharacterSaved}
+            onForeshadowSaved={handleForeshadowSaved}
             onDocumentSaved={handleDocumentSaved}
           />
         </main>

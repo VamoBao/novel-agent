@@ -1,3 +1,10 @@
+## 2026-10-07 结构树伏笔组与预览编辑：patch 编辑语义与按幕分组（两项范围决策经用户确认，SDD 计划 `docs/superpowers/plans/2026-10-07-foreshadow-tree-edit.md`）
+
+- **背景**：伏笔已入库并可在章卡按章查看，但结构树无伏笔入口——无法按幕总览、无法点击单条查看与修改；`ForeshadowStore.updateForeshadow` 的 patch 能力（含服务角色同小说校验）闲置。本需求补齐结构树伏笔组 + 右栏预览编辑；两项关键取舍落盘。
+- **决策一：编辑走「完整卡转 patch」而非全量覆盖——可选空=null 清空、回收章不入 patch 保留现值**：`updateForeshadow` 的 patch 语义是 undefined=不动 / null=清空 / 值=覆盖，与角色编辑的全量覆盖（updateCharacter 整卡替换）天然不同——若表单可选项空值映射为 undefined，用户「清空埋线方式」会被静默忽略（不动旧值）；映射为 null 才真实清空。`recoverChapterIds` 不入 patch：回收章绑定属写作期回收流（多步回收、状态流转），编辑面暂不暴露，保留现值避免表单无意清掉回收记录。登场章（appearChapterId）与服务角色（characterIds）纳入编辑——绑定修正正是伏笔编辑的主要用途（错绑唯一的人工修正手段）。
+- **决策二：结构树伏笔按埋设幕两级分组，幕分组行不触发选中、stale 归档旧幕归「未绑幕」组**：按幕分组（actNodeId）对齐数据的天然归属（大纲阶段挂幕入库），幕顺序对齐当前大纲树——导航上下文清晰；幕分组行仅作收起控制不触发选中，避免伏笔组内点击跳转到大纲预览的语义混乱。actNodeId 为 null **或不在当前版本 act 列表**（归档旧幕）的伏笔统一归「未绑幕」组——归档旧幕的伏笔若静默不可见，库中有数据树上看不到（用户无从知晓）；归组可见 + 预览兜底显示原 ID，历史数据可追溯。
+- **结论**：shared `foreshadowEntry` 增 `actNodeId: string | null`；query CLI `update-foreshadow <novelId> <foreshadowId> <伏笔JSON>`（`toForeshadowPatch` 转换，返回更新后条目）；Electron `library:updateForeshadow` IPC 链；StructureTreePanel 伏笔组（两级收起）+ ForeshadowPreview 只读卡 + ForeshadowEditForm（全字段含登场章下拉与服务角色多选）。AC：typecheck 3 工程 / lint / 268 用例全过（净增 3）；GUI（树分组、预览、编辑流）待用户人工验收。
+
 ## 2026-10-07 章节预览伏笔展示：登场 + 回收两组都展示、幕卡不动（范围决策经用户确认，设计规格 `docs/superpowers/specs/2026-10-07-chapter-foreshadow-preview-design.md`）
 
 - **背景**：伏笔已随大纲与章节规划确定性入库（登场章经 `appearChapterId` 绑定），但 `novelDetail` 查询契约不含伏笔、客户端零展示——用户预览章节时无从看到「本章埋了什么、回收了什么」，正文写作与核对无从对齐。两项范围决策经用户确认，无新架构取舍，仅落盘范围界定。

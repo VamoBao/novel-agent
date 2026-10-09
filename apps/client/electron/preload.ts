@@ -5,6 +5,8 @@ import type {
   AgentStartOptions,
   Character,
   CharacterEntry,
+  Foreshadow,
+  ForeshadowEntry,
   NovelDetail,
   NovelListItem,
 } from "@novel/shared";
@@ -48,6 +50,8 @@ contextBridge.exposeInMainWorld("agent", {
     ipcRenderer.invoke("library:addCharacter", novelId, character),
   updateCharacter: (novelId: string, characterId: string, character: Character): Promise<CharacterEntry> =>
     ipcRenderer.invoke("library:updateCharacter", novelId, characterId, character),
+  updateForeshadow: (novelId: string, foreshadowId: string, foreshadow: Foreshadow): Promise<ForeshadowEntry> =>
+    ipcRenderer.invoke("library:updateForeshadow", novelId, foreshadowId, foreshadow),
   /** 模型设置读写（设置弹窗）：明文 JSON 于 userData（优先级 设置 > .env > 继承环境变量） */
   getSettings: (): Promise<{ settings: AppSettings; filePath: string }> =>
     ipcRenderer.invoke("settings:get"),

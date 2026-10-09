@@ -5,6 +5,8 @@ import type {
   AgentStartOptions,
   Character,
   CharacterEntry,
+  Foreshadow,
+  ForeshadowEntry,
   NovelDetail,
   NovelListItem,
 } from "@novel/shared";
@@ -29,6 +31,7 @@ declare global {
         characterId: string,
         character: Character,
       ) => Promise<CharacterEntry>;
+      updateForeshadow: (novelId: string, foreshadowId: string, foreshadow: Foreshadow) => Promise<ForeshadowEntry>;
       getSettings: () => Promise<{ settings: AppSettings; filePath: string }>;
       saveSettings: (settings: AppSettings) => Promise<{ settings: AppSettings; filePath: string }>;
       isAutostart: () => boolean;

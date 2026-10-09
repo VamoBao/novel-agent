@@ -63,6 +63,11 @@ export type DocumentEntry = z.infer<typeof documentEntrySchema>;
  *  服务角色为 ID，客户端经详情 characters 解析名字 */
 export const foreshadowEntrySchema = foreshadowSchema.extend({
   id: z.string().min(1).describe("foreshadows 表主键（UUIDv7）"),
+  actNodeId: z
+    .string()
+    .min(1)
+    .nullable()
+    .describe("埋设幕节点 ID（outlines 表 act 节点）；未绑幕 / 旧数据为 null"),
 });
 export type ForeshadowEntry = z.infer<typeof foreshadowEntrySchema>;
 
