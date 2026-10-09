@@ -121,14 +121,12 @@ export function NovelListPanel({
                   setConfirmDeleteId(null);
                   setMenu({ novelId: novel.id, x: event.clientX, y: event.clientY });
                 }}
-                title={novel.id}
               >
                 <span className="novel-name">
                   {novel.pinned ? "📌 " : ""}
                   {novel.name ?? "未命名小说"}
                   {novel.favorite ? " ⭐" : ""}
                 </span>
-                <span className="novel-id">{novel.id.slice(0, 8)}</span>
               </button>
             </li>
           ),

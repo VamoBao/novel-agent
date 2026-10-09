@@ -42,7 +42,7 @@ export function DeleteNovelDialog({ novel, onCancel, onConfirm }: DeleteNovelDia
       >
         <h3>🗑 删除小说</h3>
         <p className="dialog-lead">
-          即将删除 <strong>《{phrase}》</strong>（{novel.id.slice(0, 8)}）。
+          即将删除 <strong>《{phrase}》</strong>。
           世界观、角色、大纲节点及 output 产物文件将一并清除，<strong>此操作不可恢复</strong>。
         </p>
         <p className="dialog-hint">

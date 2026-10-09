@@ -248,12 +248,6 @@ body {
   text-overflow: ellipsis;
 }
 
-.novel-item .novel-id {
-  display: block;
-  font-size: 11px;
-  color: var(--fg-subtle);
-}
-
 .tree-node {
   display: block;
   width: calc(100% - 8px);
@@ -611,14 +605,6 @@ button.danger {
   line-height: 1.9;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-/* 正文卡内文件路径提示（小字灰） */
-.viewcard .doc-path {
-  margin: 8px 0 0;
-  font-size: 12px;
-  color: var(--fg-muted);
-  word-break: break-all;
 }
 
 /* ViewCard（创作流大纲/章节视图）情节点行——与 plot-list 独立 */
