@@ -1,6 +1,6 @@
 export { worldviewSchema, type Worldview } from "./worldview";
 export { characterSchema, type Character } from "./character";
-export { locationSchema, type Location } from "./location";
+export { locationSchema, newLocationSchema, type Location, type NewLocation } from "./location";
 export {
   foreshadowRecoveryStatusSchema,
   foreshadowSchema,
@@ -65,6 +65,7 @@ export {
   outlineNodeEntrySchema,
   documentEntrySchema,
   foreshadowEntrySchema,
+  locationEntrySchema,
   novelDetailSchema,
   novelDeletedResultSchema,
   type NovelListItem,
@@ -72,6 +73,7 @@ export {
   type OutlineNodeEntry,
   type DocumentEntry,
   type ForeshadowEntry,
+  type LocationEntry,
   type NovelDetail,
   type NovelDeletedResult,
 } from "./query";

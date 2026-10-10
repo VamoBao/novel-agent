@@ -254,7 +254,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(12);
+    ).toBe(13);
     db.close();
   });
 
@@ -277,6 +277,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
       "novel_id",
       "parent_id",
       "name",
+      "description",
       "x",
       "y",
       "layer",
@@ -301,7 +302,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(12);
+    ).toBe(13);
     db.close();
   });
 
@@ -343,6 +344,8 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
       .get() as { name: string; layer: string };
     expect(loc.name).toBe("北境大陆");
     expect(loc.layer).toBe("地面");
+    // v7 的 locations 亦随 12→13 重建：description 列落地
+    expect(tableColumns(db, "locations")).toContain("description");
     const outline = db
       .query(
         "SELECT summary FROM outlines WHERE id = 'bbbbbbbb-0000-7000-8000-000000000004'",
@@ -352,7 +355,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(12);
+    ).toBe(13);
     db.close();
   });
 
@@ -396,7 +399,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(12);
+    ).toBe(13);
     db.close();
   });
 
@@ -450,7 +453,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(12);
+    ).toBe(13);
     db.close();
   });
 
@@ -473,7 +476,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
     raw.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(12);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(13);
     const columns = (db.query("PRAGMA table_info(foreshadows)").all() as { name: string }[]).map((c) => c.name);
     expect(columns).toContain("act_node_id");
     const row = db.query("SELECT surface_action, hidden_truth, attention_level, act_node_id FROM foreshadows WHERE id = 'f-1';").get() as Record<string, unknown>;
@@ -483,6 +486,96 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
     expect(row.act_node_id).toBeNull();
     db.close();
     await rm(dir, { recursive: true, force: true });
+  });
+
+  test("v12 库升 13：locations 重建——description 列落地、x/y/layer 可空、存量数据无损", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-db-mig13-"));
+    tempDirs.push(dir);
+    const dbPath = join(dir, "v12.db");
+    // 手工构造 v12 形态：novels + 旧形态 locations（x/y/layer NOT NULL、无 description）
+    const legacy = new Database(dbPath, { create: true });
+    legacy.exec("PRAGMA foreign_keys = ON;");
+    legacy.exec(`CREATE TABLE novels (
+      id TEXT PRIMARY KEY, name TEXT, author TEXT, description TEXT,
+      pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+      favorite INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0, 1)),
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`);
+    legacy.exec(`CREATE TABLE locations (
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL REFERENCES novels(id),
+      parent_id TEXT REFERENCES locations(id),
+      name TEXT NOT NULL,
+      x REAL NOT NULL,
+      y REAL NOT NULL,
+      layer TEXT NOT NULL,
+      population INTEGER CHECK (population IS NULL OR population >= 0),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL);`);
+    legacy.exec("CREATE INDEX idx_locations_novel_id ON locations(novel_id);");
+    legacy.exec("CREATE INDEX idx_locations_parent_id ON locations(parent_id);");
+    legacy
+      .prepare("INSERT INTO novels (id, name, created_at, updated_at) VALUES (?, ?, ?, ?);")
+      .run(NOVEL_ID, "旧世界之书", NOW, NOW);
+    legacy
+      .prepare(
+        `INSERT INTO locations (id, novel_id, parent_id, name, x, y, layer, population, created_at, updated_at)
+         VALUES ('dddddddd-0000-7000-8000-000000000007', ?, NULL, '北境大陆', 1.5, 2.5, '地面', 3000, ?, ?);`,
+      )
+      .run(NOVEL_ID, NOW, NOW);
+    legacy
+      .prepare(
+        `INSERT INTO locations (id, novel_id, parent_id, name, x, y, layer, population, created_at, updated_at)
+         VALUES ('dddddddd-0000-7000-8000-000000000008', ?, 'dddddddd-0000-7000-8000-000000000007', '青云城', 0, 0, '地面', NULL, ?, ?);`,
+      )
+      .run(NOVEL_ID, NOW, NOW);
+    legacy.exec("PRAGMA user_version = 12;");
+    legacy.close();
+
+    const db = openDatabase(dbPath);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(13);
+    expect(tableColumns(db, "locations")).toEqual([
+      "id",
+      "novel_id",
+      "parent_id",
+      "name",
+      "description",
+      "x",
+      "y",
+      "layer",
+      "population",
+      "created_at",
+      "updated_at",
+    ]);
+    // 存量两行无损（父级指向保持，坐标与图层保留，description 为 null）
+    const parent = db
+      .query("SELECT name, description, x, y, layer, population FROM locations WHERE parent_id IS NULL;")
+      .get() as Record<string, unknown>;
+    expect(parent).toEqual({
+      name: "北境大陆",
+      description: null,
+      x: 1.5,
+      y: 2.5,
+      layer: "地面",
+      population: 3000,
+    });
+    const child = db
+      .query("SELECT name, parent_id FROM locations WHERE id = 'dddddddd-0000-7000-8000-000000000008';")
+      .get() as { name: string; parent_id: string };
+    expect(child.name).toBe("青云城");
+    expect(child.parent_id).toBe("dddddddd-0000-7000-8000-000000000007");
+    // 可空实证：无坐标行可直插（旧形态 NOT NULL 会拒绝）
+    db.prepare(
+      `INSERT INTO locations (id, novel_id, parent_id, name, description, x, y, layer, population, created_at, updated_at)
+       VALUES ('dddddddd-0000-7000-8000-000000000009', ?, NULL, '落霞谷', '隐世疗伤地', NULL, NULL, NULL, NULL, ?, ?);`,
+    ).run(NOVEL_ID, NOW, NOW);
+    // 索引随重建落地（旧索引随改名表 DROP，底部 CREATE INDEX 重建）
+    const indexes = db
+      .query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'locations';")
+      .all() as Array<{ name: string }>;
+    expect(indexes.map((i) => i.name)).toEqual(
+      expect.arrayContaining(["idx_locations_novel_id", "idx_locations_parent_id"]),
+    );
+    db.close();
   });
 
   test("v4 库跨版本直升：novels 与 outlines 两段列同批补齐、数据保留", async () => {
@@ -507,7 +600,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
     ).toBe(1);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(12);
+    ).toBe(13);
     db.close();
   });
 
@@ -525,7 +618,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
     expect(tableColumns(db, "documents")).toContain("word_count");
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(12);
+    ).toBe(13);
     db.close();
   });
 });

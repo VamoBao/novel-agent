@@ -89,6 +89,16 @@ export function ViewCard({ view }: { view: View }) {
               ))}
             </>
           ) : null}
+          {view.detail === "confirm" && view.newLocations && view.newLocations.length > 0 ? (
+            <>
+              <p className="part-name">✨ 本次大纲新增地点（确认后自动入库）</p>
+              {view.newLocations.map((l) => (
+                <p key={l.name} className="act">
+                  · {l.name}——{l.description}
+                </p>
+              ))}
+            </>
+          ) : null}
         </section>
       );
     case "chapter-plan":
@@ -139,6 +149,16 @@ export function ViewCard({ view }: { view: View }) {
               {view.foreshadowBindings.map((b) => (
                 <p key={`${b.index}-${b.chapterName}`} className="plot">
                   {b.index}) → {b.chapterName}
+                </p>
+              ))}
+            </>
+          ) : null}
+          {view.newLocations && view.newLocations.length > 0 ? (
+            <>
+              <p className="part-name">✨ 本次规划新增地点（确认后自动入库）</p>
+              {view.newLocations.map((l) => (
+                <p key={l.name} className="act">
+                  · {l.name}——{l.description}
                 </p>
               ))}
             </>

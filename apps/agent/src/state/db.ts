@@ -7,7 +7,7 @@ export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 
 /**
  * 打开（必要时创建）数据库并完成建表。
@@ -23,8 +23,9 @@ const SCHEMA_VERSION = 12;
  * - documents：章节正文元数据（一章一份，chapter_id 唯一外键挂 outlines 章节点；
  *   file_path 为正文文件相对路径——内容存文件系统 `<output>/<小说名>/<部名>/<章名>.md`，
  *   与 outlines.document_id 绑定回写列同事务维护），长文本不进库
- * - locations：小说世界的地理位置（坐标/图层/人口），parent_id 自引用外键（城市→大陆层级），
- *   population 可空（无人/未设定）
+ * - locations：小说世界的地理位置（名称 / 定位描述 / 坐标 / 图层 / 人口——
+ *   x/y/layer/population 可空：自动入库只产生「名字+定位」，地图向字段留给未来编辑），
+ *   parent_id 自引用外键（城市→大陆层级）
  * - foreshadows：伏笔（表面行为/隐藏真相/读者注意度 1-10/回收状态枚举），
  *   出现章节 ID 与埋设幕节点 ID（act_node_id，章节规划按幕圈定回传的依据）均为
  *   可空裸列（chapter 节点写作期落地后补约束，先例 document_id），
@@ -144,9 +145,46 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
         // 这些版本的库都持无此列的旧表形态，CREATE TABLE IF NOT EXISTS 对其不生效
         db.exec("ALTER TABLE foreshadows ADD COLUMN act_node_id TEXT;");
       }
+      if (version >= 7 && version <= 12) {
+        // 12→13：locations 放宽 x/y/layer 可空 + 新增 description（地点自动入库只产生
+        // 「名字+定位」，坐标是地图向字段）。SQLite 无法 ALTER 放宽 NOT NULL，按官方
+        // 重建流程迁移：FK 关闭 → 改名旧表 → 建新表 → 拷数据 → 删旧表 → FK 重开
+        // （自引用外键下拷贝顺序无关化）。守卫覆盖 7~12：表自 v7 已存在，均持旧形态
+        // （表异常缺失时跳过重建，由下方 CREATE TABLE IF NOT EXISTS 直建新形态）；
+        // 随改名旧表 DROP 的旧索引由下方 CREATE INDEX IF NOT EXISTS 重建
+        const hasLocations =
+          db
+            .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'locations'")
+            .get() !== null;
+        if (hasLocations) {
+          db.exec("PRAGMA foreign_keys = OFF;");
+          db.exec("ALTER TABLE locations RENAME TO locations_v12;");
+          db.exec(`
+            CREATE TABLE locations (
+              id TEXT PRIMARY KEY,
+              novel_id TEXT NOT NULL REFERENCES novels(id),
+              parent_id TEXT REFERENCES locations(id),
+              name TEXT NOT NULL,
+              description TEXT,
+              x REAL,
+              y REAL,
+              layer TEXT,
+              population INTEGER CHECK (population IS NULL OR population >= 0),
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+          `);
+          db.exec(`
+            INSERT INTO locations (id, novel_id, parent_id, name, description, x, y, layer, population, created_at, updated_at)
+            SELECT id, novel_id, parent_id, name, NULL, x, y, layer, population, created_at, updated_at FROM locations_v12;
+          `);
+          db.exec("DROP TABLE locations_v12;");
+          db.exec("PRAGMA foreign_keys = ON;");
+        }
+      }
       // 9→10：新增 documents 表，无 ALTER——由下方 CREATE TABLE IF NOT EXISTS 幂等落地
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>12 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>13 的库被旧代码打开）：重建兜底
       db.exec("DROP TABLE IF EXISTS documents;");
       db.exec("DROP TABLE IF EXISTS outlines;");
       db.exec("DROP TABLE IF EXISTS locations;");
@@ -272,9 +310,10 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       novel_id TEXT NOT NULL REFERENCES novels(id),
       parent_id TEXT REFERENCES locations(id),
       name TEXT NOT NULL,
-      x REAL NOT NULL,
-      y REAL NOT NULL,
-      layer TEXT NOT NULL,
+      description TEXT,
+      x REAL,
+      y REAL,
+      layer TEXT,
       population INTEGER CHECK (population IS NULL OR population >= 0),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL

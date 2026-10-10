@@ -47,6 +47,7 @@ mock.module("ai", () => ({
 const { createNovel } = await import("./create-novel");
 const { openDatabase } = await import("../state/db");
 const { CharacterStore } = await import("../state/character-store");
+const { LocationStore } = await import("../state/location-store");
 const { WorldviewStore } = await import("../state/worldview-store");
 const { NovelStore } = await import("../state/novel-store");
 const { OutlineStore } = await import("../state/outline-store");
@@ -89,6 +90,7 @@ const outlineFixture = {
     { surfaceAction: "宗主赐下断脉散", hiddenTruth: "药中掺了追踪灵脉的蛊种", attentionLevel: 6, characterNames: ["林恒", "萧无咎"], actName: "第1幕" },
     { surfaceAction: "幕名漂移的伏笔", hiddenTruth: "不会入库", attentionLevel: 3, characterNames: ["林恒"], actName: "不存在的幕" },
   ],
+  newLocations: [{ name: "青云城", description: "东部边境要塞·主角初战的战场" }],
   parts: [
     {
       name: "第一部·风起",
@@ -158,6 +160,7 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
       novelStore: new NovelStore(db),
       outlineStore: new OutlineStore(db),
       foreshadowStore: new ForeshadowStore(db),
+      locationStore: new LocationStore(db),
     });
 
     // 最终状态与产物
@@ -202,6 +205,17 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     expect(channel.notifies.some((n) => n.includes("新角色已自动入库：萧无咎"))).toBe(true);
     expect(channel.notifies.some((n) => n.includes("新增 1 个角色已自动入库"))).toBe(true);
 
+    // 大纲新增地点确定性入库：先于角色自动创建（毫秒级同步代码先行）
+    const locationStore = new LocationStore(db);
+    const locRows = locationStore.listLocations(state.id);
+    expect(locRows.map((l) => l.location.name)).toEqual(["青云城"]);
+    expect(locRows[0]?.location.description).toBe("东部边境要塞·主角初战的战场");
+    expect(channel.notifies.some((n) => n.includes("✨ 地点已入库：青云城"))).toBe(true);
+    expect(channel.notifies.some((n) => n.includes("新增 1 个地点已自动入库"))).toBe(true);
+    expect(channel.notifies.findIndex((n) => n.includes("✨ 地点已入库：青云城"))).toBeLessThan(
+      channel.notifies.findIndex((n) => n.includes("新角色已自动入库：萧无咎")),
+    );
+
     // 大纲内容入库：部有梗概无情节点，幕梗概与情节点齐全；无章节点（规划改由单幕会话手动发起）
     const outlineNodes = new OutlineStore(db).listOutlineNodes(state.id);
     expect(outlineNodes).toHaveLength(6);
@@ -236,7 +250,7 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     closeDb = () => db.close();
 
     // 复用主流程脚本：newCharacters 置空，textScript 不含 auto-character agent 轮次
-    const outlineNoNew = { ...outlineFixture, newCharacters: [] };
+    const outlineNoNew = { ...outlineFixture, newCharacters: [], newLocations: [] };
     textScript = [
       [[{ tool: "submit_worldview", args: worldviewFixture }]],
       [characterFields.map((f) => ({ tool: "save_field", args: f })), [{ tool: "submit_character", args: {} }]],
@@ -270,10 +284,13 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
       novelStore: new NovelStore(db),
       outlineStore: new OutlineStore(db),
       foreshadowStore: new ForeshadowStore(db),
+      locationStore: new LocationStore(db),
     });
 
     // 空清单跳过：无自动入库相关 notify，角色库仅保留流程内确认的角色
     expect(channel.notifies.some((n) => n.includes("自动入库"))).toBe(false);
+    expect(channel.notifies.some((n) => n.includes("地点已入库"))).toBe(false);
+    expect(new LocationStore(db).listLocations(state.id)).toEqual([]);
     const characterStore = new CharacterStore(db);
     expect(
       characterStore.listCharacters(state.id).map((c) => c.character.basicInfo.name),

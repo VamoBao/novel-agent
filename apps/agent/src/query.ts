@@ -13,6 +13,7 @@ import {
   type Foreshadow,
   type ForeshadowEntry,
   type ForeshadowPatch,
+  type LocationEntry,
   type NovelDeletedResult,
   type NovelDetail,
   type NovelListItem,
@@ -25,6 +26,7 @@ import { OutlineStore } from "./state/outline-store";
 import { WorldviewStore } from "./state/worldview-store";
 import { DocumentStore } from "./state/document-store";
 import { ForeshadowStore, type StoredForeshadow } from "./state/foreshadow-store";
+import { LocationStore } from "./state/location-store";
 import { OUTPUT_DIR, outlineFilePath } from "./output/outline-writer";
 import {
   moveDocumentArtifact,
@@ -110,6 +112,10 @@ export function buildNovelDetail(
   const foreshadows: ForeshadowEntry[] = new ForeshadowStore(db)
     .listForeshadows(novelId)
     .map(toForeshadowEntry);
+  // 地点条目：locations 表全量行（按入库顺序），结构树地点组取用
+  const locations: LocationEntry[] = new LocationStore(db)
+    .listLocations(novelId)
+    .map((stored) => ({ id: stored.id, ...stored.location }));
   return novelDetailSchema.parse({
     novel: toListItem(novel),
     worldview,
@@ -117,6 +123,7 @@ export function buildNovelDetail(
     outlineNodes,
     documents,
     foreshadows,
+    locations,
   });
 }
 

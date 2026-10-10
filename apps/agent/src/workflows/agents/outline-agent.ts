@@ -3,11 +3,14 @@ import { z } from "zod";
 import { runReactAgent } from "../../agents/react";
 import type { UiChannel } from "../../ui/channel";
 import { getDefaultCharacterStore, type CharacterStore } from "../../state/character-store";
+import { getDefaultLocationStore, type LocationStore } from "../../state/location-store";
 import {
   outlineSchema,
   newCharacterSchema,
+  newLocationSchema,
   outlineNewForeshadowSchema,
   type NewCharacterOutline,
+  type NewLocation,
   type OutlineNewForeshadow,
   type Outline,
 } from "@novel/shared";
@@ -41,6 +44,11 @@ const SYSTEM_PROMPT = `你是一名资深小说编辑与故事结构师。你的
 2. 伏笔挂幕不挂章（章节尚不存在，登场章在后续章节规划时绑定）；
 3. 清单内 surfaceAction 不得重复；newForeshadows 会在确认时随大纲一并展示，确认后自动入库。
 
+地点梳理要求：
+1. 大纲中作为剧情发生地的真实地理场所（大陆、城市、山脉、宗门驻地、秘境等），不在地点库中的列入 save_outline 的 newLocations：name 为地点名，description 为一句话定位（如「东部边境要塞·主角初战的战场」）；清单内名字不得重复，地点库已有地点不得列入（可用 list_locations 工具查询地点库现状）；
+2. 抽象场所（如梦中、回忆里）与一次性路过、无设定价值的地点不列入，保持清单信噪比；
+3. newLocations 会在确认时随大纲一并展示给用户：用户确认后自动入库。
+
 完成后调用 save_outline 工具保存大纲（参数即完整大纲，必须严格符合 schema，且部数与总幕数必须与要求完全一致）。save_outline 会把大纲的剧情梗概、主题、每部概述与每幕名称概述展示给用户确认：用户确认后保存完成；用户提出修改意见时，根据反馈调整大纲后重新调用 save_outline，直到用户确认为止。`;
 
 /** 结构强校验 schema：save_outline 入参必须恰好为 partCount 部、共 actCount 幕（SDK 先校验再执行，模型给错即拒绝重试） */
@@ -53,7 +61,7 @@ export function outlineSchemaFor(actCount: number, partCount: number) {
   );
 }
 
-/** save_outline 的结构化入参：大纲本体 + 新增角色清单（项内名字不得重复）+ 伏笔清单（项内表面行为不得重复），叠加部/幕强校验 */
+/** save_outline 的结构化入参：大纲本体 + 新增角色清单（项内名字不得重复）+ 伏笔清单（项内表面行为不得重复）+ 新增地点清单（项内名字不得重复），叠加部/幕强校验 */
 export function saveOutlineInputSchemaFor(actCount: number, partCount: number) {
   return outlineSchema
     .extend({
@@ -63,6 +71,9 @@ export function saveOutlineInputSchemaFor(actCount: number, partCount: number) {
       newForeshadows: z
         .array(outlineNewForeshadowSchema)
         .refine((list) => new Set(list.map((f) => f.surfaceAction)).size === list.length, "伏笔清单内表面行为不得重复"),
+      newLocations: z
+        .array(newLocationSchema)
+        .refine((list) => new Set(list.map((l) => l.name)).size === list.length, "新增地点清单内名字不得重复"),
     })
     .refine(
       (o) =>
@@ -72,11 +83,12 @@ export function saveOutlineInputSchemaFor(actCount: number, partCount: number) {
     );
 }
 
-/** 大纲 Agent 的最终产物：确认通过的大纲本体 + 随大纲连带确认的新增角色清单与伏笔清单 */
+/** 大纲 Agent 的最终产物：确认通过的大纲本体 + 随大纲连带确认的新增角色清单、伏笔清单与新增地点清单 */
 export interface OutlineSubmission {
   outline: Outline;
   newCharacters: NewCharacterOutline[];
   newForeshadows: OutlineNewForeshadow[];
+  newLocations: NewLocation[];
 }
 
 export interface CreateOutlineOptions {
@@ -86,10 +98,12 @@ export interface CreateOutlineOptions {
   actCount: number;
   /** 部数（用户指定，默认 1） */
   partCount: number;
-  /** 目标小说创作 ID（list_characters 工具按此查询角色库） */
+  /** 目标小说创作 ID（list_characters / list_locations 工具按此查询角色与地点库） */
   novelId: string;
   /** 角色库 store；缺省默认 SQLite store（测试可替换） */
   characterStore?: CharacterStore;
+  /** 地点库 store；缺省默认 SQLite store（测试可替换） */
+  locationStore?: LocationStore;
 }
 
 /**
@@ -114,6 +128,7 @@ export async function createOutline(
 ): Promise<OutlineSubmission> {
   const { novelTitle, actCount, partCount, novelId } = options;
   const characterStore = options.characterStore ?? getDefaultCharacterStore();
+  const locationStore = options.locationStore ?? getDefaultLocationStore();
   let saved: OutlineSubmission | undefined;
 
   /** 角色库查询工具：返回库内全部角色名与叙事定位，供模型比对出「新增角色」 */
@@ -129,18 +144,31 @@ export async function createOutline(
     },
   });
 
+  /** 地点库查询工具：返回库内全部地点名与定位，供模型比对出「新增地点」 */
+  const listLocations = tool({
+    description:
+      "查询地点库中已有的全部地点（名字与定位）。梳理 newLocations 时必须先调用此工具：清单中只能列地点库中没有的地点，库内已有地点不得列入。",
+    inputSchema: z.object({}),
+    execute: async () => {
+      const rows = locationStore.listLocations(novelId);
+      return {
+        locations: rows.map((r) => ({ name: r.location.name, description: r.location.description })),
+      };
+    },
+  });
+
   const saveOutline = tool({
     description:
-      "大纲完成后调用此工具保存（参数 = 完整大纲 + newCharacters 新增角色清单 + newForeshadows 伏笔清单）。会把剧情梗概、主题、每部概述、每幕名称概述与新增角色清单与伏笔清单展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整后重新调用。",
+      "大纲完成后调用此工具保存（参数 = 完整大纲 + newCharacters 新增角色清单 + newForeshadows 伏笔清单 + newLocations 新增地点清单）。会把剧情梗概、主题、每部概述、每幕名称概述与三组清单展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整后重新调用。",
     inputSchema: saveOutlineInputSchemaFor(actCount, partCount),
     execute: async (input) => {
-      const { newCharacters, newForeshadows, ...outline } = input;
+      const { newCharacters, newForeshadows, newLocations, ...outline } = input;
       const confirmed = await channel.askConfirm("以上大纲是否确认？", {
         default: true,
-        view: { kind: "outline", detail: "confirm", outline, newCharacters, newForeshadows },
+        view: { kind: "outline", detail: "confirm", outline, newCharacters, newForeshadows, newLocations },
       });
       if (confirmed) {
-        saved = { outline, newCharacters, newForeshadows };
+        saved = { outline, newCharacters, newForeshadows, newLocations };
         return { ok: true as const };
       }
       const feedback = await channel.askText("请说明大纲需要调整的地方> ");
@@ -168,12 +196,12 @@ export async function createOutline(
         ? [`小说已由用户命名为《${novelTitle}》，大纲的 title 字段必须使用该名称。`]
         : []),
     ].join("\n\n"),
-    tools: { save_outline: saveOutline, list_characters: listCharacters },
+    tools: { save_outline: saveOutline, list_characters: listCharacters, list_locations: listLocations },
     // 不设 stopTool：save_outline 可能被用户否决（需继续修订），
     // hasToolCall 会在工具被调用时无条件停止，无法表达「提交被拒需继续」
     maxSteps: 12,
     isDone: () => saved !== undefined,
-    continuationHint: "请立即调用 save_outline 工具保存大纲（参数为完整大纲与 newCharacters / newForeshadows 清单），不要只输出文本。",
+    continuationHint: "请立即调用 save_outline 工具保存大纲（参数为完整大纲与 newCharacters / newForeshadows / newLocations 清单），不要只输出文本。",
   });
 
   if (!saved) {

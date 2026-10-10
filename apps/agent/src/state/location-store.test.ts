@@ -123,6 +123,27 @@ describe("LocationStore", () => {
     store.close();
   });
 
+  test("无坐标形态（自动入库产物）往返：仅 name+description 入库读出一致", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-loc-db-bare-"));
+    tempDir = tempDir || dir;
+    const store = setup(join(dir, "test.db"));
+
+    const stored = store.addLocation(NOVEL_A, {
+      name: "青云城",
+      description: "东部边境要塞·主角初战的战场",
+    });
+    expect(stored.location).toEqual({
+      name: "青云城",
+      description: "东部边境要塞·主角初战的战场",
+    });
+    const listed = store.listLocations(NOVEL_A);
+    expect(listed.at(-1)?.location.name).toBe("青云城");
+    expect(listed.at(-1)?.location.description).toBe("东部边境要塞·主角初战的战场");
+    expect(listed.at(-1)?.location.x).toBeUndefined();
+    expect(listed.at(-1)?.location.layer).toBeUndefined();
+    store.close();
+  });
+
   test("listLocations 对无位置的小说返回空数组", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-loc-db-empty-"));
     tempDir = tempDir || dir;

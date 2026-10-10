@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import type {
   CharacterEntry,
   ForeshadowEntry,
+  LocationEntry,
   NovelDetail,
   OutlineNodeEntry,
   View,
@@ -179,6 +180,29 @@ function ForeshadowPreview({
   );
 }
 
+/** 地点卡预览（只读，无编辑入口）：名字 + 定位 + 已设定的可选字段；父级名经 detail.locations
+ *  解析（未匹配兜底原 ID）；坐标 / 图层 / 人口未设定不渲染——不展示 id（全页面去 ID 约定） */
+function LocationPreview({ entry, detail }: { entry: LocationEntry; detail: NovelDetail }) {
+  const parentName = entry.parentId
+    ? detail.locations.find((l) => l.id === entry.parentId)?.name ?? entry.parentId
+    : null;
+  return (
+    <section className="viewcard">
+      <p className="card-label">地点</p>
+      <p className="part-name">{entry.name}</p>
+      {entry.description ? <p className="outline-summary">{entry.description}</p> : null}
+      {entry.x !== undefined && entry.y !== undefined ? (
+        <p className="outline-summary">坐标：（{entry.x}, {entry.y}）</p>
+      ) : null}
+      {entry.layer ? <p className="outline-summary">图层：{entry.layer}</p> : null}
+      {entry.population !== undefined ? (
+        <p className="outline-summary">主要物种数量：{entry.population}</p>
+      ) : null}
+      {parentName ? <p className="outline-summary">父级：{parentName}</p> : null}
+    </section>
+  );
+}
+
 /**
  * 右栏内容预览：结构树选中节点的只读视图 / 角色与伏笔编辑表单 / 新建角色表单。
  * 章节正文生成会话（write-chapter）由本组件收口：目标章节点 id 记录生成态，
@@ -311,6 +335,13 @@ export function PreviewPane({
       />
     ) : (
       <p className="pane-error">该伏笔内容未能加载（数据缺失）。</p>
+    );
+  } else if (selection.kind === "location") {
+    const entry = detail.locations.find((l) => l.id === selection.locationId);
+    body = entry ? (
+      <LocationPreview key={entry.id} entry={entry} detail={detail} />
+    ) : (
+      <p className="pane-error">该地点内容未能加载（数据缺失）。</p>
     );
   } else {
     const view = toWorldviewView(detail);

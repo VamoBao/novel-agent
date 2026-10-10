@@ -2,12 +2,13 @@ import { useState } from "react";
 import type { ForeshadowEntry, NovelDetail, OutlineNodeEntry } from "@novel/shared";
 import type { ReactNode } from "react";
 
-/** 结构树选中项：四类节点（角色 / 大纲节点 / 伏笔携带库表主键区分同名人） */
+/** 结构树选中项：五类节点（角色 / 大纲节点 / 伏笔 / 地点携带库表主键区分同名人） */
 export type Selection =
   | { kind: "worldview" }
   | { kind: "character"; characterId: string }
   | { kind: "outline"; outlineNodeId: string }
-  | { kind: "foreshadow"; foreshadowId: string };
+  | { kind: "foreshadow"; foreshadowId: string }
+  | { kind: "location"; locationId: string };
 
 interface StructureTreePanelProps {
   /** null = 未选中小说 */
@@ -115,8 +116,8 @@ function renderOutlineNodes(
 }
 
 /**
- * 中栏结构树：世界观 / 角色 / 伏笔（按埋设幕分组）/ 大纲（部→幕→章，读 outlines 表当前版本节点）
- * 四类组成节点。角色与大纲分组均可整组收起（组头三角，默认展开、会话内保持），大纲组内部/幕可
+ * 中栏结构树：世界观 / 地点 / 角色 / 伏笔（按埋设幕分组）/ 大纲（部→幕→章，读 outlines 表当前版本节点）
+ * 五类组成节点。地点 / 角色与大纲分组均可整组收起（组头三角，默认展开，会话内保持），大纲组内部/幕可
  * 逐节点收起（默认全展开）；伏笔组头可整组收起、组内幕分组可逐组收起（均默认展开、会话内保持，
  * 仅分组头不触发选中）；角色组头附「＋ 新增角色」入口；大纲按节点选中预览（视图粒度 =
  * 单节点）；组头刷新按钮触发大纲重新生成（经弹框确认）。
@@ -134,6 +135,8 @@ export function StructureTreePanel({
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   /** 大纲分组整组收起（默认展开），会话内保持 */
   const [groupCollapsed, setGroupCollapsed] = useState(false);
+  /** 地点分组整组收起（默认展开），会话内保持 */
+  const [locCollapsed, setLocCollapsed] = useState(false);
   /** 角色分组整组收起（默认展开），会话内保持 */
   const [charsCollapsed, setCharsCollapsed] = useState(false);
   /** 伏笔分组整组收起（默认展开），会话内保持 */
@@ -199,6 +202,35 @@ export function StructureTreePanel({
             active={selection?.kind === "worldview"}
             onClick={detail.worldview ? () => onSelect({ kind: "worldview" }) : undefined}
           />
+
+          <div className="tree-group">
+            {detail.locations.length > 0 ? (
+              <button
+                className="tree-toggle"
+                title={locCollapsed ? "展开地点" : "收起地点"}
+                onClick={() => setLocCollapsed((v) => !v)}
+              >
+                {locCollapsed ? "▸" : "▾"}
+              </button>
+            ) : null}
+            <span>📍 地点</span>
+          </div>
+          {detail.locations.length === 0 ? (
+            <TreeNode label="（暂无地点）" depth={1} muted />
+          ) : locCollapsed ? null : (
+            detail.locations.map((location) => (
+              <TreeNode
+                key={location.id}
+                label={`📍 ${location.name}`}
+                depth={1}
+                active={
+                  selection?.kind === "location" &&
+                  selection.locationId === location.id
+                }
+                onClick={() => onSelect({ kind: "location", locationId: location.id })}
+              />
+            ))
+          )}
 
           <div className="tree-group">
             {detail.characters.length > 0 ? (

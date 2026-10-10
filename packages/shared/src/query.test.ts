@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   characterEntrySchema,
   foreshadowEntrySchema,
+  locationEntrySchema,
   novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
@@ -175,6 +176,7 @@ describe("novelDetailSchema", () => {
       outlineNodes: validOutlineNodes,
       documents: validDocuments,
       foreshadows: [],
+      locations: [],
     });
     expect(detail.characters).toHaveLength(1);
     expect(detail.outlineNodes).toHaveLength(2);
@@ -192,6 +194,7 @@ describe("novelDetailSchema", () => {
       outlineNodes: [],
       documents: [],
       foreshadows: [],
+      locations: [],
     });
     expect(detail.worldview).toBeNull();
     expect(detail.outlineNodes).toHaveLength(0);
@@ -206,6 +209,7 @@ describe("novelDetailSchema", () => {
       outlineNodes: [],
       documents: [{ ...validDocuments[0], content: null }],
       foreshadows: [],
+      locations: [],
     });
     expect(detail.documents[0]?.content).toBeNull();
     expect(detail.documents[0]?.wordCount).toBe(22);
@@ -283,8 +287,63 @@ describe("foreshadowEntrySchema 与 novelDetail.foreshadows", () => {
       outlineNodes: [],
       documents: [],
       foreshadows: [{ ...entry, recoveryStatus: "unrecovered" }],
+      locations: [],
     });
     expect(detail.foreshadows).toHaveLength(1);
     expect(detail.foreshadows[0]?.characterIds).toEqual(["char-1", "char-2"]);
+  });
+});
+
+describe("locationEntrySchema 与 novelDetail.locations", () => {
+  test("自动入库形态（id + 名字 + 定位）通过；可选字段缺省不携带", () => {
+    const parsed = locationEntrySchema.parse({
+      id: "dddddddd-0000-7000-8000-000000000001",
+      name: "青云城",
+      description: "东部边境要塞·主角初战的战场",
+    });
+    expect(parsed.id).toBe("dddddddd-0000-7000-8000-000000000001");
+    expect("x" in parsed).toBe(false);
+  });
+
+  test("全字段形态（旧地图数据）通过", () => {
+    const parsed = locationEntrySchema.parse({
+      id: "dddddddd-0000-7000-8000-000000000002",
+      name: "北境大陆",
+      x: 1.5,
+      y: 2.5,
+      layer: "地面",
+      population: 3000,
+    });
+    expect(parsed.layer).toBe("地面");
+  });
+
+  test("缺 id / 空 name 被拒绝", () => {
+    expect(() => locationEntrySchema.parse({ name: "青云城" })).toThrow();
+    expect(() =>
+      locationEntrySchema.parse({ id: "dddddddd-0000-7000-8000-000000000003", name: "" }),
+    ).toThrow();
+  });
+
+  test("novelDetail 携带 locations 数组通过契约校验（结构树地点组取用）", () => {
+    const detail = novelDetailSchema.parse({
+      novel: {
+        id: "aaaaaaaa-0000-7000-8000-000000000001",
+        name: "灵脉破晓",
+        pinned: false,
+        favorite: false,
+        createdAt: "2026-10-09T00:00:00Z",
+        updatedAt: "2026-10-09T00:00:00Z",
+      },
+      worldview: null,
+      characters: [],
+      outlineNodes: [],
+      documents: [],
+      foreshadows: [],
+      locations: [
+        { id: "dddddddd-0000-7000-8000-000000000004", name: "青云城", description: "东部边境要塞" },
+      ],
+    });
+    expect(detail.locations).toHaveLength(1);
+    expect(detail.locations[0]?.name).toBe("青云城");
   });
 });

@@ -10,12 +10,14 @@ import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldvie
 import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
 import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
 import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
+import { getDefaultLocationStore, type LocationStore } from "../state/location-store";
 import { saveOutline } from "../output/outline-writer";
 import { collectWorldview } from "./agents/worldview-agent";
 import { createCharacter } from "./agents/character-agent";
 import { createOutline } from "./agents/outline-agent";
 import { autoCreateCharacters, filterNewCharacters } from "./agents/auto-character-agent";
 import { plantOutlineForeshadows } from "./foreshadow-intake";
+import { filterNewLocations, plantNewLocations } from "./location-intake";
 
 /** 常见热门类型（用户也可自定义输入） */
 const GENRES = [
@@ -49,6 +51,8 @@ export interface CreateNovelOptions {
   outlineStore?: OutlineStore;
   /** 伏笔持久化 store；缺省用默认 SQLite store（data/novel.db） */
   foreshadowStore?: ForeshadowStore;
+  /** 地点持久化 store；缺省用默认 SQLite store（data/novel.db） */
+  locationStore?: LocationStore;
 }
 
 /**
@@ -68,6 +72,7 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
   const novelStore = options.novelStore ?? getDefaultNovelStore();
   const outlineStore = options.outlineStore ?? getDefaultOutlineStore();
   const foreshadowStore = options.foreshadowStore ?? getDefaultForeshadowStore();
+  const locationStore = options.locationStore ?? getDefaultLocationStore();
   const id = options.id ?? generateNovelId();
 
   channel.notify("📖 novel-agent —— 小说创作向导");
@@ -201,7 +206,7 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
   channel.notify("\n🛠 大纲 Agent 启动…");
   const submission = await createOutline(
     params,
-    { novelTitle: novelName, actCount, partCount, novelId: id, characterStore },
+    { novelTitle: novelName, actCount, partCount, novelId: id, characterStore, locationStore },
     channel,
   );
   const outline = submission.outline;
@@ -223,6 +228,18 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
     ...(novelName ? {} : { name: outline.title }),
     description: outline.logline,
   });
+
+  // 大纲新增地点确定性入库：置于角色自动入库之前——毫秒级同步代码先行完成即
+  // 「与角色同批次」，不并行（两路 notify 交错无收益）；空清单（过滤后）整块跳过。
+  const existingLocations = locationStore.listLocations(id).map((l) => l.location);
+  const pendingLocations = filterNewLocations(submission.newLocations, existingLocations);
+  if (pendingLocations.length > 0) {
+    channel.notify(`\n✨ 大纲引入了 ${pendingLocations.length} 个新地点，正在入库…`);
+    plantNewLocations({ novelId: id, newLocations: pendingLocations, channel, locationStore });
+    channel.notify(
+      `✨ 本次大纲新增 ${pendingLocations.length} 个地点已自动入库：${pendingLocations.map((l) => l.name).join("、")}`,
+    );
+  }
 
   // 大纲新增角色自动入库：代码级兜底 diff（剔除库内已有名 + 去重），空清单跳过（零 LLM 调用）。
   // 置于 state 收尾与 name/description 回填之后：auto 块抛错（maxSteps 耗尽/中止）时

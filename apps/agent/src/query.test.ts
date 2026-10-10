@@ -7,6 +7,7 @@ import type { Database } from "bun:sqlite";
 import { CharacterStore } from "./state/character-store";
 import { DocumentStore } from "./state/document-store";
 import { ForeshadowStore } from "./state/foreshadow-store";
+import { LocationStore } from "./state/location-store";
 import { openDatabase } from "./state/db";
 import { NovelStore } from "./state/novel-store";
 import { OutlineStore } from "./state/outline-store";
@@ -201,6 +202,21 @@ describe("query CLI（buildNovelList / buildNovelDetail）", () => {
     });
     expect(detail.foreshadows[1]?.recoverChapterIds).toEqual(["ch-9"]);
     expect(detail.foreshadows[2]?.appearChapterId).toBeUndefined();
+    db.close();
+  });
+
+  test("get 全量资料携带地点条目（自动入库最小形态与全字段形态，按入库顺序）", async () => {
+    const { db } = await newFixture();
+    const id = "bbbbbbbb-0000-7000-8000-000000000010";
+    new NovelStore(db).createNovel({ id, name: "地点之书" });
+    const store = new LocationStore(db);
+    const bare = store.addLocation(id, { name: "青云城", description: "东部边境要塞·主角初战的战场" });
+    store.addLocation(id, { name: "北境大陆", x: 1.5, y: 2.5, layer: "地面", population: 3000 });
+    const detail = buildNovelDetail(db, id);
+    expect(detail.locations.map((l) => l.name)).toEqual(["青云城", "北境大陆"]);
+    expect(detail.locations[0]).toMatchObject({ id: bare.id, name: "青云城", description: "东部边境要塞·主角初战的战场" });
+    expect(detail.locations[0]?.x).toBeUndefined();
+    expect(detail.locations[1]).toMatchObject({ x: 1.5, y: 2.5, layer: "地面", population: 3000 });
     db.close();
   });
 

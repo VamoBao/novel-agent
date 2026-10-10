@@ -12,6 +12,7 @@ import {
   locationSchema,
   newCharacterSchema,
   newForeshadowSchema,
+  newLocationSchema,
   outlineNewForeshadowSchema,
   outlineNodePatchSchema,
   outlineNodeSchema,
@@ -121,14 +122,14 @@ describe("locationSchema", () => {
     expect(loc.parentId).toBeUndefined();
   });
 
-  test("空名称 / 空图层 / 缺坐标被拒绝", () => {
+  test("空名称 / 空图层（显式空串）被拒绝；坐标与图层缺省通过（12→13 放宽）", () => {
     const base = { name: "雾港城", x: 1.5, y: 2.5, layer: "地面" };
     expect(() => locationSchema.parse({ ...base, name: "" })).toThrow();
     expect(() => locationSchema.parse({ ...base, layer: "" })).toThrow();
-    expect(() => {
-      const { y: _y, ...noY } = base;
-      locationSchema.parse(noY);
-    }).toThrow();
+    // 地图向字段（x/y/layer）放宽可选：自动入库只产生「名字+定位」
+    const bare = locationSchema.parse({ name: "雾港城" });
+    expect(bare).toEqual({ name: "雾港城" });
+    expect("x" in bare).toBe(false);
   });
 
   test("人口为负数或非整数被拒绝", () => {
@@ -346,6 +347,21 @@ describe("audienceSuggestionSchema", () => {
   });
 });
 
+describe("newLocationSchema", () => {
+  test("名字 + 一句话定位通过校验", () => {
+    const loc = newLocationSchema.parse({ name: "青云城", description: "东部边境要塞·主角初战的战场" });
+    expect(loc.name).toBe("青云城");
+    expect(loc.description).toBe("东部边境要塞·主角初战的战场");
+  });
+
+  test("缺名字 / 名字空串 / 定位空串或缺失被拒绝", () => {
+    expect(() => newLocationSchema.parse({ description: "要塞" })).toThrow();
+    expect(() => newLocationSchema.parse({ name: "", description: "要塞" })).toThrow();
+    expect(() => newLocationSchema.parse({ name: "青云城", description: "" })).toThrow();
+    expect(() => newLocationSchema.parse({ name: "青云城" })).toThrow();
+  });
+});
+
 describe("newCharacterSchema", () => {
   test("完整新增角色项通过校验", () => {
     const c = newCharacterSchema.parse({ name: "萧无咎", role: "反派·血宗宗主" });
@@ -439,6 +455,36 @@ describe("newForeshadowSchema 及变体", () => {
     expect(foreshadowBindingSchema.parse({ index: 1, chapterName: "第一章·雨夜" }).index).toBe(1);
     expect(() => foreshadowBindingSchema.parse({ index: 0, chapterName: "第一章" })).toThrow();
     expect(() => foreshadowBindingSchema.parse({ index: 1, chapterName: "" })).toThrow();
+  });
+});
+
+describe("两确认视图的地点可选字段", () => {
+  const baseOutlineView = {
+    kind: "outline",
+    detail: "confirm",
+    outline: {
+      title: "灵脉遗孤",
+      logline: "散修少年夺回灵脉",
+      parts: [{ name: "第一部", summary: "概述", acts: [{ name: "第一幕", summary: "梗概", keyPlotPoints: ["情节点"] }] }],
+    },
+  };
+  const loc = { name: "青云城", description: "东部边境要塞·主角初战的战场" };
+
+  test("outline 视图携带 newLocations 通过；缺失仍通过（旧消息兼容）", () => {
+    expect(outlineViewSchema.parse({ ...baseOutlineView, newLocations: [loc] }).newLocations).toHaveLength(1);
+    expect(outlineViewSchema.parse(baseOutlineView).newLocations).toBeUndefined();
+  });
+
+  test("chapter-plan 视图携带 newLocations 通过；缺失仍通过（旧消息兼容）", () => {
+    const base = {
+      kind: "chapter-plan",
+      actName: "第1幕",
+      actSummary: "梗概",
+      keyPlotPoints: ["情节点"],
+      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+    };
+    expect(chapterPlanViewSchema.parse({ ...base, newLocations: [loc] }).newLocations).toHaveLength(1);
+    expect(chapterPlanViewSchema.parse(base).newLocations).toBeUndefined();
   });
 });
 

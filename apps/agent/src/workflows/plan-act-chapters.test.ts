@@ -9,6 +9,7 @@ import { OutlineStore } from "../state/outline-store";
 import { WorldviewStore } from "../state/worldview-store";
 import { CharacterStore } from "../state/character-store";
 import { ForeshadowStore } from "../state/foreshadow-store";
+import { LocationStore } from "../state/location-store";
 import { FakeChannel } from "../ui/fake-channel";
 import { UserAbortedError } from "../ui/aborted";
 
@@ -77,6 +78,7 @@ const chapterPlanFixture = {
   newCharacters: [],
   newForeshadows: [],
   foreshadowBindings: [],
+  newLocations: [],
 };
 
 const worldviewFixture = {
@@ -98,6 +100,7 @@ interface Seeded {
   worldviewStore: WorldviewStore;
   characterStore: CharacterStore;
   foreshadowStore: ForeshadowStore;
+  locationStore: LocationStore;
   partNodeId: string;
   actNodes: { id: string; name: string }[];
 }
@@ -117,6 +120,7 @@ async function seed(withWorldview = true): Promise<Seeded> {
   const worldviewStore = new WorldviewStore(db);
   const characterStore = new CharacterStore(db);
   const foreshadowStore = new ForeshadowStore(db);
+  const locationStore = new LocationStore(db);
   novelStore.createNovel({ id: NOVEL_ID, name: "灵脉遗孤", description: "散修少年夺回被宗门垄断的灵脉" });
   // 角色种子：满足伏笔服务角色外键校验（novels 行已建，外键顺序安全）
   characterStore.addCharacter(NOVEL_ID, {
@@ -136,6 +140,7 @@ async function seed(withWorldview = true): Promise<Seeded> {
     worldviewStore,
     characterStore,
     foreshadowStore,
+    locationStore,
     partNodeId: tree.find((n) => n.node.type === "part")!.id,
     actNodes: tree.filter((n) => n.node.type === "act").map((n) => ({ id: n.id, name: n.node.name })),
   };
@@ -163,7 +168,9 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
       },
       secondAct.id,
     );
-    // 双轮脚本：轮 1 章节 Agent save_chapters（新增角色 + 新伏笔 + 既有伏笔绑定指令）→ 轮 2 自动创建 Agent save_character 入库
+    // 种一条库内已有地点：清单中同名项应被兜底 diff 剔除
+    world.locationStore.addLocation(NOVEL_ID, { name: "北境大陆", description: "既有地点" });
+    // 双轮脚本：轮 1 章节 Agent save_chapters（新增角色 + 新伏笔 + 既有伏笔绑定指令 + 新增地点）→ 轮 2 自动创建 Agent save_character 入库
     textScript = [
       [[{
         tool: "save_chapters",
@@ -172,6 +179,10 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
           newCharacters: [{ name: "萧无咎", role: "第2章登场·血宗宗主" }],
           newForeshadows: [{ surfaceAction: "来客留下半块玉佩", hiddenTruth: "玉佩是主角身世信物", attentionLevel: 5, characterNames: ["林恒"], chapterName: "第二章·来客" }],
           foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }],
+          newLocations: [
+            { name: "青云城", description: "第2章主战场·东部边境要塞" },
+            { name: "北境大陆", description: "误标已有地点（应被兜底 diff 剔除）" },
+          ],
         },
       }]],
       [[{ tool: "save_character", args: autoCard }]],
@@ -187,6 +198,7 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
       worldviewStore: world.worldviewStore,
       characterStore: world.characterStore,
       foreshadowStore: world.foreshadowStore,
+      locationStore: world.locationStore,
     });
 
     expect(result).toEqual({ novelId: NOVEL_ID, actNodeId: secondAct.id, actName: "第2幕", chapterCount: 3 });
@@ -211,6 +223,16 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
     expect(
       world.characterStore.listCharacters(NOVEL_ID).map((c) => c.character.basicInfo.name),
     ).toEqual(["林恒", "萧无咎"]);
+
+    // 新增地点确定性入库：库内同名「北境大陆」被兜底 diff 剔除，仅「青云城」追加；先于角色自动创建
+    const locRows = world.locationStore.listLocations(NOVEL_ID);
+    expect(locRows.map((l) => l.location.name)).toEqual(["北境大陆", "青云城"]);
+    expect(locRows[1]?.location.description).toBe("第2章主战场·东部边境要塞");
+    expect(channel.notifies.some((n) => n.includes("✨ 地点已入库：青云城"))).toBe(true);
+    expect(channel.notifies.some((n) => n.includes("本次规划新增 1 个地点已自动入库"))).toBe(true);
+    expect(channel.notifies.findIndex((n) => n.includes("✨ 地点已入库：青云城"))).toBeLessThan(
+      channel.notifies.findIndex((n) => n.includes("新角色已自动入库：萧无咎")),
+    );
 
     // 未绑伏笔回传清单进 prompt：章节 Agent（首个 LLM 调用）的 prompt 含序号清单块
     expect(agentPrompts[0]).toContain("本幕未绑登场章的伏笔");

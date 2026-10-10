@@ -15,6 +15,7 @@ import type {
   CoreConflict,
   ForeshadowBinding,
   NewCharacterOutline,
+  NewLocation,
   Outline,
   OutlineNewForeshadow,
   Stage,
@@ -83,10 +84,10 @@ export function renderView(view: View): string {
       return formatCharacterCard(view.character);
     case "outline":
       return view.detail === "confirm"
-        ? formatOutlineForConfirm(view.outline, view.newCharacters, view.newForeshadows)
+        ? formatOutlineForConfirm(view.outline, view.newCharacters, view.newForeshadows, view.newLocations)
         : formatOutlineFull(view.outline);
     case "chapter-plan":
-      return formatChapterPlan(view, view.newCharacters, view.newForeshadows, view.foreshadowBindings);
+      return formatChapterPlan(view, view.newCharacters, view.newForeshadows, view.foreshadowBindings, view.newLocations);
     case "worldview":
       return formatWorldview(view.worldview);
     case "conflict":
@@ -113,11 +114,12 @@ function formatCharacterCard(c: Character): string {
   return lines.join("\n");
 }
 
-/** 确认视图：剧情梗概、主题、两级部/幕名称与概述 + 新增角色/伏笔清单（详细情节点在保存后完整展示） */
+/** 确认视图：剧情梗概、主题、两级部/幕名称与概述 + 新增角色/伏笔/地点清单（详细情节点在保存后完整展示） */
 function formatOutlineForConfirm(
   o: Outline,
   newCharacters?: NewCharacterOutline[],
   newForeshadows?: OutlineNewForeshadow[],
+  newLocations?: NewLocation[],
 ): string {
   const lines = [`📖 大纲草稿：《${o.title}》`, `  剧情梗概：${o.logline}`];
   if (o.theme) lines.push(`  主题：${o.theme}`);
@@ -139,6 +141,12 @@ function formatOutlineForConfirm(
       lines.push(`    · [${f.actName}] ${f.surfaceAction} ⇢ ${f.hiddenTruth}（注意度 ${f.attentionLevel}，服务：${f.characterNames.join("、")}）`);
     }
   }
+  if (newLocations && newLocations.length > 0) {
+    lines.push(`  ✨ 本次大纲新增地点（确认后自动入库）：`);
+    for (const l of newLocations) {
+      lines.push(`    · ${l.name}——${l.description}`);
+    }
+  }
   return lines.join("\n");
 }
 
@@ -156,12 +164,13 @@ function formatOutlineFull(o: Outline): string {
   return lines.join("\n");
 }
 
-/** 章节规划确认视图：本幕梗概、关键情节点与推荐章节列表 + 新增角色/伏笔清单与伏笔绑定（拼入 save_chapters 最终确认提示） */
+/** 章节规划确认视图：本幕梗概、关键情节点与推荐章节列表 + 新增角色/伏笔/地点清单与伏笔绑定（拼入 save_chapters 最终确认提示） */
 function formatChapterPlan(
   view: ChapterPlanView,
   newCharacters?: NewCharacterOutline[],
   newForeshadows?: ChapterNewForeshadow[],
   foreshadowBindings?: ForeshadowBinding[],
+  newLocations?: NewLocation[],
 ): string {
   const lines = [
     `📑 章节规划草稿（${view.actName}）`,
@@ -187,6 +196,12 @@ function formatChapterPlan(
     lines.push(`  🔗 伏笔绑定（确认后生效）：`);
     for (const b of foreshadowBindings) {
       lines.push(`    ${b.index}) → ${b.chapterName}`);
+    }
+  }
+  if (newLocations && newLocations.length > 0) {
+    lines.push(`  ✨ 本次规划新增地点（确认后自动入库）：`);
+    for (const l of newLocations) {
+      lines.push(`    · ${l.name}——${l.description}`);
     }
   }
   return lines.join("\n");

@@ -12,15 +12,16 @@ export interface StoredLocation {
   location: Location;
 }
 
-/** locations 表行结构（列与 locationSchema 平铺字段对应） */
+/** locations 表行结构（列与 locationSchema 平铺字段对应；description / x / y / layer 可空——自动入库只产生名字+定位） */
 interface LocationRow {
   id: string;
   novel_id: string;
   parent_id: string | null;
   name: string;
-  x: number;
-  y: number;
-  layer: string;
+  description: string | null;
+  x: number | null;
+  y: number | null;
+  layer: string | null;
   population: number | null;
   created_at: string;
   updated_at: string;
@@ -28,24 +29,26 @@ interface LocationRow {
 
 const INSERT_SQL = `
   INSERT INTO locations (
-    id, novel_id, parent_id, name, x, y, layer, population,
+    id, novel_id, parent_id, name, description, x, y, layer, population,
     created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 `;
 
 const SELECT_SQL = `
-  SELECT id, novel_id, parent_id, name, x, y, layer, population,
+  SELECT id, novel_id, parent_id, name, description, x, y, layer, population,
          created_at, updated_at
   FROM locations WHERE novel_id = ? ORDER BY created_at ASC, id ASC;
 `;
 
 function rowToLocation(row: LocationRow): Location {
-  // 列值经 schema 还原为位置结构，读侧同样过 zod 校验（库内数据完整性兜底）
+  // 列值经 schema 还原为位置结构，读侧同样过 zod 校验（库内数据完整性兜底）；
+  // 可空列 null → undefined（schema 可选字段缺省不携带）
   return locationSchema.parse({
     name: row.name,
-    x: row.x,
-    y: row.y,
-    layer: row.layer,
+    description: row.description ?? undefined,
+    x: row.x ?? undefined,
+    y: row.y ?? undefined,
+    layer: row.layer ?? undefined,
     population: row.population ?? undefined,
     parentId: row.parent_id ?? undefined,
   });
@@ -87,9 +90,10 @@ export class LocationStore {
         novelId,
         validated.parentId ?? null,
         validated.name,
-        validated.x,
-        validated.y,
-        validated.layer,
+        validated.description ?? null,
+        validated.x ?? null,
+        validated.y ?? null,
+        validated.layer ?? null,
         validated.population ?? null,
         now,
         now,

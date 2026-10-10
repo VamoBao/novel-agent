@@ -116,6 +116,17 @@ describe("renderView", () => {
     expect(renderView({ kind: "outline", detail: "confirm", outline } as never)).not.toContain("本次大纲伏笔");
   });
 
+  test("outline confirm：携带 newLocations 时渲染地点区块，缺失或空不渲染", () => {
+    const withLoc = renderView({
+      kind: "outline", detail: "confirm", outline,
+      newLocations: [{ name: "青云城", description: "东部边境要塞·主角初战的战场" }],
+    } as never);
+    expect(withLoc).toContain("本次大纲新增地点");
+    expect(withLoc).toContain("青云城——东部边境要塞·主角初战的战场");
+    expect(renderView({ kind: "outline", detail: "confirm", outline, newLocations: [] } as never)).not.toContain("新增地点");
+    expect(renderView({ kind: "outline", detail: "confirm", outline } as never)).not.toContain("新增地点");
+  });
+
   test("chapter-plan：携带 newForeshadows / foreshadowBindings 时渲染两区块，缺失不渲染", () => {
     const view = {
       kind: "chapter-plan", actName: "第2幕", actSummary: "梗概", keyPlotPoints: ["情节点"],
@@ -129,6 +140,19 @@ describe("renderView", () => {
     expect(rendered).toContain("伏笔绑定");
     expect(rendered).toContain("1) → 第一章·雨夜");
     expect(renderView({ ...view, newForeshadows: undefined, foreshadowBindings: undefined } as never)).not.toContain("伏笔");
+  });
+
+  test("chapter-plan：携带 newLocations 时渲染地点区块，缺失或空不渲染", () => {
+    const view = {
+      kind: "chapter-plan", actName: "第2幕", actSummary: "梗概", keyPlotPoints: ["情节点"],
+      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+      newLocations: [{ name: "青云城", description: "第2章主战场·东部边境要塞" }],
+    };
+    const rendered = renderView(view as never);
+    expect(rendered).toContain("本次规划新增地点");
+    expect(rendered).toContain("青云城——第2章主战场·东部边境要塞");
+    expect(renderView({ ...view, newLocations: [] } as never)).not.toContain("新增地点");
+    expect(renderView({ ...view, newLocations: undefined } as never)).not.toContain("新增地点");
   });
 
   test("worldview：可选行缺省不渲染", () => {

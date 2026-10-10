@@ -4,11 +4,13 @@ import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldvie
 import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
 import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
 import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
+import { getDefaultLocationStore, type LocationStore } from "../state/location-store";
 import { readOutlineTheme } from "../output/outline-writer";
 import type { Outline } from "@novel/shared";
 import { planChapters } from "./agents/chapter-agent";
 import { autoCreateCharacters, filterNewCharacters } from "./agents/auto-character-agent";
 import { plantChapterForeshadows } from "./foreshadow-intake";
+import { filterNewLocations, plantNewLocations } from "./location-intake";
 
 export interface PlanActChaptersOptions {
   /** 交互通道（终端 / 协议 / 测试替身），业务交互的唯一出口 */
@@ -27,6 +29,8 @@ export interface PlanActChaptersOptions {
   characterStore?: CharacterStore;
   /** 伏笔 store；缺省用默认 SQLite store（data/novel.db） */
   foreshadowStore?: ForeshadowStore;
+  /** 地点 store；缺省用默认 SQLite store（data/novel.db） */
+  locationStore?: LocationStore;
 }
 
 export interface PlanActChaptersResult {
@@ -54,6 +58,7 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
   const worldviewStore = options.worldviewStore ?? getDefaultWorldviewStore();
   const characterStore = options.characterStore ?? getDefaultCharacterStore();
   const foreshadowStore = options.foreshadowStore ?? getDefaultForeshadowStore();
+  const locationStore = options.locationStore ?? getDefaultLocationStore();
 
   const novel = novelStore.getNovel(novelId);
   if (!novel) {
@@ -95,7 +100,7 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
 
   channel.stage("chapter");
   channel.notify(`📑 章节规划 Agent 启动（${act.node.name}）…`);
-  const { plan, newCharacters, newForeshadows, foreshadowBindings } = await planChapters(
+  const { plan, newCharacters, newForeshadows, foreshadowBindings, newLocations } = await planChapters(
     {
       novelTitle: novel.name ?? "未命名小说",
       logline: novel.description ?? "",
@@ -107,11 +112,23 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
       keyPlotPoints: act.node.keyPlotPoints,
     },
     channel,
-    { novelId, characterStore, unboundForeshadows },
+    { novelId, characterStore, locationStore, unboundForeshadows },
   );
 
   const chapterNodes = outlineStore.saveChapters(novelId, act.id, plan.chapters);
   channel.notify(`📑 章节已入库：${act.node.name} 规划 ${chapterNodes.length} 章`);
+
+  // 章节规划新增地点确定性入库：置于角色自动入库之前（同 createNovel 收尾动作语义——
+  // 毫秒级同步代码先行，与角色同批次；不并行避免 notify 交错）。空清单（过滤后）整块跳过。
+  const existingLocations = locationStore.listLocations(novelId).map((l) => l.location);
+  const pendingLocations = filterNewLocations(newLocations, existingLocations);
+  if (pendingLocations.length > 0) {
+    channel.notify(`\n✨ 本幕规划引入了 ${pendingLocations.length} 个新地点，正在入库…`);
+    plantNewLocations({ novelId, newLocations: pendingLocations, channel, locationStore });
+    channel.notify(
+      `✨ 本次规划新增 ${pendingLocations.length} 个地点已自动入库：${pendingLocations.map((l) => l.name).join("、")}`,
+    );
+  }
 
   // 章节规划新增角色自动入库：代码级兜底 diff（剔除库内已有名 + 去重），空清单跳过（零 LLM 调用）
   const existingCharacters = characterStore.listCharacters(novelId).map((c) => c.character);

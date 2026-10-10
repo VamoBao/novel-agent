@@ -4,10 +4,12 @@ import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldvie
 import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
 import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
 import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
+import { getDefaultLocationStore, type LocationStore } from "../state/location-store";
 import { saveOutline } from "../output/outline-writer";
 import { createOutline } from "./agents/outline-agent";
 import { autoCreateCharacters, filterNewCharacters } from "./agents/auto-character-agent";
 import { plantOutlineForeshadows } from "./foreshadow-intake";
+import { filterNewLocations, plantNewLocations } from "./location-intake";
 
 export interface RegenOutlineOptions {
   /** 交互通道（终端 / 协议 / 测试替身），业务交互的唯一出口 */
@@ -20,6 +22,8 @@ export interface RegenOutlineOptions {
   outlineStore?: OutlineStore;
   /** 伏笔持久化 store；缺省用默认 SQLite store（data/novel.db） */
   foreshadowStore?: ForeshadowStore;
+  /** 地点持久化 store；缺省用默认 SQLite store（data/novel.db） */
+  locationStore?: LocationStore;
 }
 
 export interface RegenOutlineResult {
@@ -49,6 +53,7 @@ export async function regenerateOutline(options: RegenOutlineOptions): Promise<R
   const characterStore = options.characterStore ?? getDefaultCharacterStore();
   const outlineStore = options.outlineStore ?? getDefaultOutlineStore();
   const foreshadowStore = options.foreshadowStore ?? getDefaultForeshadowStore();
+  const locationStore = options.locationStore ?? getDefaultLocationStore();
 
   const novel = novelStore.getNovel(novelId);
   if (!novel) {
@@ -81,7 +86,7 @@ export async function regenerateOutline(options: RegenOutlineOptions): Promise<R
   const submission = await createOutline(
     // 类型/受众/核心冲突未入库，仅喂库内数据（worldview + characters）
     { worldview: storedWorldview.worldview, characters: characters.map((c) => c.character) },
-    { novelTitle: novel.name ?? undefined, actCount, partCount, novelId, characterStore },
+    { novelTitle: novel.name ?? undefined, actCount, partCount, novelId, characterStore, locationStore },
     channel,
   );
   const outline = submission.outline;
@@ -96,6 +101,18 @@ export async function regenerateOutline(options: RegenOutlineOptions): Promise<R
   const savedPath = await saveOutline(novelId, outline);
   channel.notify(`🗂 大纲产物已更新：${savedPath}`);
   novelStore.updateNovel(novelId, { description: outline.logline });
+
+  // 新版大纲地点确定性入库（同 createNovel 收尾动作）：置于角色自动入库之前；地点只增
+  // 不改——兜底 diff 对全库地点名，旧版入库地点保留不动。空清单（过滤后）整块跳过。
+  const existingLocations = locationStore.listLocations(novelId).map((l) => l.location);
+  const pendingLocations = filterNewLocations(submission.newLocations, existingLocations);
+  if (pendingLocations.length > 0) {
+    channel.notify(`\n✨ 新版大纲引入了 ${pendingLocations.length} 个新地点，正在入库…`);
+    plantNewLocations({ novelId, newLocations: pendingLocations, channel, locationStore });
+    channel.notify(
+      `✨ 本次大纲新增 ${pendingLocations.length} 个地点已自动入库：${pendingLocations.map((l) => l.name).join("、")}`,
+    );
+  }
 
   // 大纲新增角色自动入库（兜底 diff + 空清单跳过，同 createNovel 收尾动作）
   const freshCharacters = characterStore.listCharacters(novelId).map((c) => c.character);
