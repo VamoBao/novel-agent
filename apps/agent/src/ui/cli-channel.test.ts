@@ -142,6 +142,32 @@ describe("renderView", () => {
     expect(renderView({ ...view, newForeshadows: undefined, foreshadowBindings: undefined } as never)).not.toContain("伏笔");
   });
 
+  test("outline confirm：伏笔携带 recoverActName 时行内显示回收幕，缺失不显示", () => {
+    const withRecover = renderView({
+      kind: "outline", detail: "confirm", outline,
+      newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], actName: "第一幕", recoverActName: "第三幕" }],
+    } as never);
+    expect(withRecover).toContain("回收：第三幕");
+    const withoutRecover = renderView({
+      kind: "outline", detail: "confirm", outline,
+      newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], actName: "第一幕" }],
+    } as never);
+    expect(withoutRecover).not.toContain("回收：");
+  });
+
+  test("chapter-plan：携带 foreshadowRecoverBindings 时渲染回收绑定区块，缺失或空不渲染", () => {
+    const view = {
+      kind: "chapter-plan", actName: "第2幕", actSummary: "梗概", keyPlotPoints: ["情节点"],
+      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+      foreshadowRecoverBindings: [{ index: 1, chapterName: "第二章·来客" }],
+    };
+    const rendered = renderView(view as never);
+    expect(rendered).toContain("♻ 伏笔回收绑定（确认后生效）");
+    expect(rendered).toContain("1) → 第二章·来客");
+    expect(renderView({ ...view, foreshadowRecoverBindings: [] } as never)).not.toContain("回收绑定");
+    expect(renderView({ ...view, foreshadowRecoverBindings: undefined } as never)).not.toContain("回收绑定");
+  });
+
   test("chapter-plan：携带 newLocations 时渲染地点区块，缺失或空不渲染", () => {
     const view = {
       kind: "chapter-plan", actName: "第2幕", actSummary: "梗概", keyPlotPoints: ["情节点"],

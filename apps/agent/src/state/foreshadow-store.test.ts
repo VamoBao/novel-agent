@@ -213,4 +213,39 @@ describe("act_node_id 与 listUnboundByAct", () => {
     store.close();
     await rm(dir, { recursive: true, force: true });
   });
+
+  test("listUnrecoveredByAct：命中回收幕=本幕且回收章为空；排除他幕 / 已绑回收章 / 无回收幕 / 无回收幕且已绑", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-fs-unrecovered-"));
+    const store = setup(join(dir, "t.db"));
+    store.addForeshadow(NOVEL_A, makeForeshadow(), "act-1", "act-9");                            // 命中
+    store.addForeshadow(
+      NOVEL_A,
+      makeForeshadow({ surfaceAction: "已绑回收章的伏笔", recoverChapterIds: ["ch-9"] }),
+      "act-1",
+      "act-9",
+    );                                                                                           // 已绑回收章排除
+    store.addForeshadow(NOVEL_A, makeForeshadow({ surfaceAction: "他幕回收的伏笔" }), "act-1", "act-8"); // 回收幕他幕排除
+    store.addForeshadow(NOVEL_A, makeForeshadow({ surfaceAction: "无回收幕的伏笔" }), "act-1");  // 无回收幕排除
+    const unrecovered = store.listUnrecoveredByAct(NOVEL_A, "act-9");
+    expect(unrecovered.map((f) => f.foreshadow.surfaceAction)).toEqual(["老周把主角派去北境送信"]);
+    expect(unrecovered[0]?.recoverActNodeId).toBe("act-9");
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("addForeshadow 第四参写入 recover_act_node_id，缺省为 null，往返无损", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-fs-recoveract-"));
+    const store = setup(join(dir, "t.db"));
+    const stored = store.addForeshadow(NOVEL_A, makeForeshadow(), "act-1", "act-3");
+    expect(stored.recoverActNodeId).toBe("act-3");
+    const noRecover = store.addForeshadow(NOVEL_A, makeForeshadow({ surfaceAction: "无回收幕" }), "act-1");
+    expect(noRecover.recoverActNodeId).toBeNull();
+    // patch 走既有 UPDATE_SQL（列不含回收幕，patch 不改回收幕——编辑面只编辑回收章）
+    const patched = store.updateForeshadow(stored.id, { plantingMethod: "对话" });
+    expect(patched.recoverActNodeId).toBe("act-3");
+    expect(patched.foreshadow.plantingMethod).toBe("对话");
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
 });
+

@@ -78,6 +78,7 @@ const chapterPlanFixture = {
   newCharacters: [],
   newForeshadows: [],
   foreshadowBindings: [],
+  foreshadowRecoverBindings: [],
   newLocations: [],
 };
 
@@ -157,6 +158,11 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
     const world = await seed();
     const secondAct = world.actNodes[1]!;
     agentPrompts = [];
+    // 第一幕预置章节：回收伏笔的登场章（全局章序在第二幕章之前）
+    const firstAct = world.actNodes[0]!;
+    const seededChapters = world.outlineStore.saveChapters(NOVEL_ID, firstAct.id, [
+      { name: "序章·北境", summary: "北境序章" },
+    ]);
     // 种一条挂第 2 幕的未绑伏笔：规划应经 foreshadowBindings 把它 patch 到登场章
     const seededFs = world.foreshadowStore.addForeshadow(
       NOVEL_ID,
@@ -170,6 +176,19 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
     );
     // 种一条库内已有地点：清单中同名项应被兜底 diff 剔除
     world.locationStore.addLocation(NOVEL_ID, { name: "北境大陆", description: "既有地点" });
+    // 种一条待回收伏笔（登场=序章·北境，回收幕=第 2 幕且回收章未绑）：规划应经 foreshadowRecoverBindings 绑到第三章
+    const recoverFs = world.foreshadowStore.addForeshadow(
+      NOVEL_ID,
+      {
+        surfaceAction: "断脉散中的蛊种",
+        hiddenTruth: "蛊种成熟时宗主将借体夺舍",
+        attentionLevel: 6,
+        recoveryStatus: "unrecovered",
+        appearChapterId: seededChapters[0]!.id,
+      },
+      firstAct.id,
+      secondAct.id,
+    );
     // 双轮脚本：轮 1 章节 Agent save_chapters（新增角色 + 新伏笔 + 既有伏笔绑定指令 + 新增地点）→ 轮 2 自动创建 Agent save_character 入库
     textScript = [
       [[{
@@ -179,6 +198,7 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
           newCharacters: [{ name: "萧无咎", role: "第2章登场·血宗宗主" }],
           newForeshadows: [{ surfaceAction: "来客留下半块玉佩", hiddenTruth: "玉佩是主角身世信物", attentionLevel: 5, characterNames: ["林恒"], chapterName: "第二章·来客" }],
           foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }],
+          foreshadowRecoverBindings: [{ index: 1, chapterName: "第三章·破晓" }],
           newLocations: [
             { name: "青云城", description: "第2章主战场·东部边境要塞" },
             { name: "北境大陆", description: "误标已有地点（应被兜底 diff 剔除）" },
@@ -209,7 +229,7 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
 
     const chapters = world.outlineStore
       .listOutlineNodes(NOVEL_ID)
-      .filter((n) => n.node.type === "chapter");
+      .filter((n) => n.node.type === "chapter" && n.node.parentId === secondAct.id);
     expect(chapters.map((c) => [c.node.parentId, c.node.name, c.node.sort])).toEqual([
       [secondAct.id, "第一章·雨夜", 1],
       [secondAct.id, "第二章·来客", 2],
@@ -237,6 +257,9 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
     // 未绑伏笔回传清单进 prompt：章节 Agent（首个 LLM 调用）的 prompt 含序号清单块
     expect(agentPrompts[0]).toContain("本幕未绑登场章的伏笔");
     expect(agentPrompts[0]).toContain("1. 宗主赐下断脉散——药中掺了追踪灵脉的蛊种");
+    // 待回收伏笔清单进 prompt（带登场章信息）
+    expect(agentPrompts[0]).toContain("本幕待回收伏笔");
+    expect(agentPrompts[0]).toContain("1. 断脉散中的蛊种——蛊种成熟时宗主将借体夺舍");
 
     // 伏笔：新伏笔带登场章与幕入库；既有未绑伏笔绑定第一章
     const linHengId = world.characterStore
@@ -249,7 +272,14 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
     expect(created?.actNodeId).toBe(secondAct.id);
     expect(created?.foreshadow.characterIds).toEqual([linHengId]);
     expect(world.foreshadowStore.getForeshadow(seededFs.id)?.foreshadow.appearChapterId).toBe(chapterIds.find((n) => n.node.name === "第一章·雨夜")?.id);
-    expect(channel.notifies.some((n) => n.includes("本次规划伏笔入库 1 处、绑定 1 处"))).toBe(true);
+    expect(channel.notifies.some((n) => n.includes("本次规划伏笔入库 1 处、绑定 1 处、回收绑定 1 处"))).toBe(true);
+    // 回收绑定：待回收伏笔绑到第三章（全局章序晚于序章·北境）
+    const thirdChapter = world.outlineStore
+      .listOutlineNodes(NOVEL_ID)
+      .find((n) => n.node.type === "chapter" && n.node.name === "第三章·破晓");
+    expect(thirdChapter).toBeDefined();
+    expect(world.foreshadowStore.getForeshadow(recoverFs.id)?.foreshadow.recoverChapterIds).toEqual([thirdChapter!.id]);
+    expect(channel.notifies.some((n) => n.includes("♻ 伏笔已绑定回收章：断脉散中的蛊种"))).toBe(true);
   });
 
   test("小说不存在：抛可读错误，不启动 Agent", async () => {

@@ -8,7 +8,7 @@ import { CharacterStore, type StoredCharacter } from "../state/character-store";
 import { ForeshadowStore } from "../state/foreshadow-store";
 import { FakeChannel } from "../ui/fake-channel";
 
-const { plantOutlineForeshadows, plantChapterForeshadows, resolveCharacterIds } = await import("./foreshadow-intake");
+const { plantOutlineForeshadows, plantChapterForeshadows, resolveCharacterIds, buildChapterOrder } = await import("./foreshadow-intake");
 
 const NOVEL = "n-foreshadow-1";
 let tempDir: string;
@@ -110,8 +110,15 @@ describe("plantChapterForeshadows", () => {
         { index: 9, chapterName: "第一章·雨夜" },
         { index: 2, chapterName: "不存在的章" },
       ],
+      recoverBindings: [],
+      recoverable: [],
       characters: [chen],
       chapterNodes,
+      allChapterNodes: [
+        { id: "act-1", parentId: "part-1", type: "act", sort: 1 },
+        { id: "ch-1", parentId: "act-1", type: "chapter", sort: 1 },
+        { id: "ch-2", parentId: "act-1", type: "chapter", sort: 2 },
+      ],
       unbound,
       channel,
       foreshadowStore: store,
@@ -119,7 +126,7 @@ describe("plantChapterForeshadows", () => {
 
     // 注：本场景共 4 处跳过（新伏笔章名未匹配 1 + 新伏笔服务角色全失败 1 + 绑定序号越界与章名未匹配 2）——
     // 按实现的「每条目必落一桶」计数语义计（含随分支覆盖新增的服务角色全失败 1 处）
-    expect(result).toEqual({ created: 2, skipped: 4, bound: 1 });
+    expect(result).toEqual({ created: 2, skipped: 4, bound: 1, recoverBound: 0 });
     const all = store.listForeshadows(NOVEL);
     // 名单顺序 = 入库顺序：两条未绑种子（前）→ 章节新伏笔 → 角色部分失败的新伏笔
     expect(all.map((f) => f.foreshadow.surfaceAction)).toEqual([
@@ -156,3 +163,136 @@ function makeCharacter(name: string) {
     endingDirection: "结局未定",
   };
 }
+
+describe("buildChapterOrder", () => {
+  test("部→幕→章深度优先展开，章 ID 得全局序（跨幕可比）", () => {
+    const order = buildChapterOrder([
+      { id: "p2", parentId: null, type: "part", sort: 2 },
+      { id: "p1", parentId: null, type: "part", sort: 1 },
+      { id: "a1-2", parentId: "p1", type: "act", sort: 2 },
+      { id: "a1-1", parentId: "p1", type: "act", sort: 1 },
+      { id: "a2-1", parentId: "p2", type: "act", sort: 1 },
+      { id: "c1-1-2", parentId: "a1-1", type: "chapter", sort: 2 },
+      { id: "c1-1-1", parentId: "a1-1", type: "chapter", sort: 1 },
+      { id: "c1-2-1", parentId: "a1-2", type: "chapter", sort: 1 },
+      { id: "c2-1-1", parentId: "a2-1", type: "chapter", sort: 1 },
+    ]);
+    expect(order.get("c1-1-1")).toBe(1);
+    expect(order.get("c1-1-2")).toBe(2);
+    expect(order.get("c1-2-1")).toBe(3);
+    expect(order.get("c2-1-1")).toBe(4);
+    expect(order.size).toBe(4);
+  });
+});
+
+describe("伏笔回收链路", () => {
+  test("plantOutlineForeshadows：recoverActName 匹配挂回收幕；幕名漂移伏笔照常入库、回收幕留空并警告", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-intake-recover-outline-"));
+    tempDir = tempDir || dir;
+    const db = openDatabase(join(dir, "t.db"));
+    new NovelStore(db).createNovel({ id: NOVEL });
+    const chen = new CharacterStore(db).addCharacter(NOVEL, makeCharacter("陈默"));
+    const store = new ForeshadowStore(db);
+    const channel = new FakeChannel([]);
+    const actNodes = [
+      { id: "act-1", name: "第1幕" },
+      { id: "act-3", name: "第3幕" },
+    ];
+
+    plantOutlineForeshadows({
+      novelId: NOVEL,
+      newForeshadows: [
+        { ...baseItem, characterNames: ["陈默"], actName: "第1幕", recoverActName: "第3幕" },
+        { ...baseItem, surfaceAction: "回收幕漂移的伏笔", characterNames: ["陈默"], actName: "第1幕", recoverActName: "不存在的幕" },
+      ],
+      characters: [chen],
+      actNodes,
+      channel,
+      foreshadowStore: store,
+    });
+
+    const rows = store.listForeshadows(NOVEL);
+    expect(rows[0]?.recoverActNodeId).toBe("act-3");
+    expect(rows[1]?.recoverActNodeId).toBeNull();
+    expect(rows).toHaveLength(2);
+    expect(channel.notifies.some((n) => n.includes("回收幕「不存在的幕」未在大纲中找到"))).toBe(true);
+    db.close();
+  });
+
+  test("plantChapterForeshadows 回收绑定：成功（含同伏笔多章）；越界/章名漂移/登场未绑/回收早于登场逐条跳过；登场绑定对称校验", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-intake-recover-bind-"));
+    tempDir = tempDir || dir;
+    const db = openDatabase(join(dir, "t.db"));
+    new NovelStore(db).createNovel({ id: NOVEL });
+    const chen = new CharacterStore(db).addCharacter(NOVEL, makeCharacter("陈默"));
+    const store = new ForeshadowStore(db);
+    const channel = new FakeChannel([]);
+    // 全书章序：前幕章 c0（序1）→ 本幕章 ch-1（序2）/ ch-2（序3）
+    const allChapterNodes = [
+      { id: "part-1", parentId: null, type: "part", sort: 1 },
+      { id: "act-0", parentId: "part-1", type: "act", sort: 1 },
+      { id: "c0", parentId: "act-0", type: "chapter", sort: 1 },
+      { id: "act-1", parentId: "part-1", type: "act", sort: 2 },
+      { id: "ch-1", parentId: "act-1", type: "chapter", sort: 1 },
+      { id: "ch-2", parentId: "act-1", type: "chapter", sort: 2 },
+    ];
+    const chapterNodes = [
+      { id: "ch-1", name: "第一章·雨夜" },
+      { id: "ch-2", name: "第二章·来客" },
+    ];
+    // 待回收清单：1 登场 c0（序1）合法回收 ch-1/ch-2；2 登场未绑；3 登场 ch-2（序3）回收只能更晚
+    const okFs = store.addForeshadow(NOVEL, { ...baseItem, appearChapterId: "c0", recoveryStatus: "unrecovered" } as never, "act-0", "act-1");
+    const noAppear = store.addForeshadow(NOVEL, { ...baseItem, surfaceAction: "登场未绑的待回收伏笔", recoveryStatus: "unrecovered" } as never, "act-0", "act-1");
+    const lateAppear = store.addForeshadow(NOVEL, { ...baseItem, surfaceAction: "登场已晚的待回收伏笔", appearChapterId: "ch-2", recoveryStatus: "unrecovered" } as never, "act-0", "act-1");
+    // 登场绑定对称校验：已有回收章 ch-2（序3），登场绑 ch-1（序2）合法；绑 ch-2（序3）拦截
+    const symmetricOk = store.addForeshadow(
+      NOVEL,
+      { ...baseItem, surfaceAction: "已绑回收章待登场A", recoverChapterIds: ["ch-2"], recoveryStatus: "unrecovered" } as never,
+      "act-1",
+    );
+    const symmetricBad = store.addForeshadow(
+      NOVEL,
+      { ...baseItem, surfaceAction: "已绑回收章待登场B", recoverChapterIds: ["ch-1"], recoveryStatus: "unrecovered" } as never,
+      "act-1",
+    );
+    const unbound = [symmetricOk, symmetricBad];
+
+    const result = plantChapterForeshadows({
+      novelId: NOVEL,
+      actNodeId: "act-1",
+      newForeshadows: [],
+      bindings: [
+        { index: 1, chapterName: "第一章·雨夜" },
+        { index: 2, chapterName: "第二章·来客" },
+      ],
+      recoverBindings: [
+        { index: 1, chapterName: "第一章·雨夜" },
+        { index: 1, chapterName: "第二章·来客" },
+        { index: 9, chapterName: "第一章·雨夜" },
+        { index: 2, chapterName: "不存在的章" },
+        { index: 2, chapterName: "第一章·雨夜" },
+        { index: 3, chapterName: "第一章·雨夜" },
+      ],
+      recoverable: [okFs, noAppear, lateAppear],
+      characters: [chen],
+      chapterNodes,
+      allChapterNodes,
+      unbound,
+      channel,
+      foreshadowStore: store,
+    });
+
+    expect(result.recoverBound).toBe(2);
+    expect(store.getForeshadow(okFs.id)?.foreshadow.recoverChapterIds).toEqual(["ch-1", "ch-2"]);
+    expect(store.getForeshadow(noAppear.id)?.foreshadow.recoverChapterIds).toBeUndefined();
+    // 登场绑定对称校验：A 登场 ch-1（序2 < 回收 ch-2 序3）合法；B 登场 ch-2（序3 ≥ 回收 ch-1 序2）拦截
+    expect(store.getForeshadow(symmetricOk.id)?.foreshadow.appearChapterId).toBe("ch-1");
+    expect(store.getForeshadow(symmetricBad.id)?.foreshadow.appearChapterId).toBeUndefined();
+    expect(channel.notifies.some((n) => n.includes("♻ 伏笔已绑定回收章"))).toBe(true);
+    expect(channel.notifies.some((n) => n.includes("序号 9 越界"))).toBe(true);
+    expect(channel.notifies.some((n) => n.includes("登场章未绑定"))).toBe(true);
+    expect(channel.notifies.some((n) => n.includes("回收章须晚于登场章"))).toBe(true);
+    expect(channel.notifies.some((n) => n.includes("登场章须早于回收章"))).toBe(true);
+    db.close();
+  });
+});

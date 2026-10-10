@@ -93,9 +93,15 @@ export const newForeshadowSchema = z.object({
 
 export type NewForeshadow = z.infer<typeof newForeshadowSchema>;
 
-/** 大纲阶段变体：埋设幕名（入库时解析为幕节点 ID） */
+/** 大纲阶段变体：埋设幕名（入库时解析为幕节点 ID）；recoverActName 回收幕名（可选——
+ *  真相在后续某幕揭晓的伏笔携带，须为真实幕名且在埋设幕之后，入库解析为回收幕节点） */
 export const outlineNewForeshadowSchema = newForeshadowSchema.extend({
   actName: z.string().min(1).describe("埋设幕名（必须是大纲中真实的幕名）"),
+  recoverActName: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("回收幕名（真相揭晓的幕；必须是大纲中真实的幕名且在埋设幕之后）；大纲期看不到回收点则省略"),
 });
 
 export type OutlineNewForeshadow = z.infer<typeof outlineNewForeshadowSchema>;

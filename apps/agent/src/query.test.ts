@@ -326,7 +326,7 @@ describe("query CLI 管理命令（rename / pin / favorite / delete）", () => {
 });
 
 describe("query CLI update-foreshadow", () => {
-  test("改必填值 / 清空可选项（null 语义）/ 改登场章与服务角色 / 回收章现值保留 / 返回条目含 actNodeId", async () => {
+  test("改必填值 / 清空可选项（null 语义）/ 改登场章与服务角色 / 回收章随编辑覆盖或清空 / 返回条目含 actNodeId 与 recoverActNodeId", async () => {
     const { db } = await newFixture();
     const id = "dddddddd-0000-7000-8000-000000000001";
     new NovelStore(db).createNovel({ id, name: "伏笔编辑之书" });
@@ -356,7 +356,7 @@ describe("query CLI update-foreshadow", () => {
       appearChapterId: chapter1.id,
       recoverChapterIds: ["chapter-recover-keep"],
       characterIds: [charA.id],
-    }, act1.id);
+    }, act1.id, act1.id);
 
     const updated = updateForeshadowEntry(db, id, fs.id, JSON.stringify({
       surfaceAction: "宗主赐下的药",
@@ -365,6 +365,7 @@ describe("query CLI update-foreshadow", () => {
       recoveryStatus: "partial",
       appearChapterId: chapters[1]!.id,
       characterIds: [charB.id],
+      recoverChapterIds: [chapters[1]!.id],
     }));
 
     expect(updated.id).toBe(fs.id);
@@ -376,8 +377,20 @@ describe("query CLI update-foreshadow", () => {
     expect(updated.purpose).toBeUndefined();
     expect(updated.appearChapterId).toBe(chapters[1]!.id);
     expect(updated.characterIds).toEqual([charB.id]);
-    expect(updated.recoverChapterIds).toEqual(["chapter-recover-keep"]); // 回收章保留现值
+    expect(updated.recoverChapterIds).toEqual([chapters[1]!.id]); // 回收章随编辑覆盖
+    expect(updated.recoverActNodeId).toBe(act1.id);               // 回收幕不受编辑影响（编辑面只编辑回收章）
     expect(new ForeshadowStore(db).getForeshadow(fs.id)?.foreshadow.hiddenTruth).toBe("药中掺了追踪蛊种");
+
+    // 再提交不携带回收章 → null 清空（编辑面语义：未勾选 = 清空全部回收章）
+    const cleared = updateForeshadowEntry(db, id, fs.id, JSON.stringify({
+      surfaceAction: "宗主赐下的药",
+      hiddenTruth: "药中掺了追踪蛊种",
+      attentionLevel: 8,
+      recoveryStatus: "partial",
+      appearChapterId: chapters[1]!.id,
+      characterIds: [charB.id],
+    }));
+    expect(cleared.recoverChapterIds).toBeUndefined();
     db.close();
   });
 

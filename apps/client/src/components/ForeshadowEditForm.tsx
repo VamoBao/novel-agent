@@ -16,6 +16,8 @@ interface ForeshadowEditFormProps {
   novelId: string;
   entry: ForeshadowEntry;
   chapters: readonly ChapterOption[];
+  /** 全书章节全局序（章 ID → 序号）：回收章必须严格晚于登场章的过滤与联动依据 */
+  chapterOrder: ReadonlyMap<string, number>;
   characters: readonly CharacterEntry[];
   /** 提交成功（返回更新后条目） */
   onSubmitted: (entry: ForeshadowEntry) => void;
@@ -46,6 +48,7 @@ interface FormState {
   plantingMethod: string;
   purpose: string;
   appearChapterId: string;
+  recoverChapterIds: string[];
   characterIds: string[];
 }
 
@@ -59,6 +62,7 @@ function initialState(entry: ForeshadowEntry): FormState {
     plantingMethod: entry.plantingMethod ?? "",
     purpose: entry.purpose ?? "",
     appearChapterId: entry.appearChapterId ?? "",
+    recoverChapterIds: entry.recoverChapterIds ?? [],
     characterIds: entry.characterIds ?? [],
   };
 }
@@ -77,6 +81,7 @@ function toForeshadow(form: FormState): Foreshadow {
     plantingMethod: opt(form.plantingMethod),
     purpose: opt(form.purpose),
     appearChapterId: opt(form.appearChapterId),
+    ...(form.recoverChapterIds.length > 0 ? { recoverChapterIds: form.recoverChapterIds } : {}),
     ...(form.characterIds.length > 0 ? { characterIds: form.characterIds } : {}),
   });
 }
@@ -93,7 +98,7 @@ type TextFieldName =
 
 /**
  * 伏笔编辑表单（仅编辑既有伏笔——伏笔由大纲 / 章节规划流自动入库，无新建模式）：
- * 字段对齐 foreshadowSchema，必填三项（表面行为 / 隐藏真相非空 + 注意度 1-10 整数）
+ * 字段对齐 foreshadowSchema，必填三项（表面行为 / 隐藏真相非空 + 注意度 1-10 整数）；回收章多选须严格晚于登场章（全局章序过滤，登场未绑时禁用）
  * 不满足时禁止提交并提示。提交经 query CLI 直写库（patch 语义按主键更新）；
  * 取消零副作用。登场章下拉选项与回收状态文案由调用方（PreviewPane）复用导出。
  */
@@ -101,6 +106,7 @@ export function ForeshadowEditForm({
   novelId,
   entry,
   chapters,
+  chapterOrder,
   characters,
   onSubmitted,
   onCancel,
@@ -119,6 +125,35 @@ export function ForeshadowEditForm({
       characterIds: checked
         ? [...prev.characterIds, id]
         : prev.characterIds.filter((cid) => cid !== id),
+    }));
+  };
+
+  // 回收章必须严格晚于登场章：登场章选定后过滤可选项；登场未绑时不可规划回收
+  const appearOrder = form.appearChapterId ? chapterOrder.get(form.appearChapterId) : undefined;
+  const recoverOptions =
+    appearOrder === undefined
+      ? []
+      : chapters.filter((c) => (chapterOrder.get(c.id) ?? Number.POSITIVE_INFINITY) > appearOrder);
+  const appearBound = appearOrder !== undefined;
+
+  const setAppearChapter = (value: string): void => {
+    setForm((prev) => {
+      const nextOrder = value ? chapterOrder.get(value) : undefined;
+      // 切换/清空登场章后剔除不再满足顺序的已选回收章（清空登场 = 顺序无从满足，联动清空）
+      const recoverChapterIds =
+        nextOrder === undefined
+          ? []
+          : prev.recoverChapterIds.filter((cid) => (chapterOrder.get(cid) ?? -1) > nextOrder);
+      return { ...prev, appearChapterId: value, recoverChapterIds };
+    });
+  };
+
+  const toggleRecoverChapter = (id: string, checked: boolean): void => {
+    setForm((prev) => ({
+      ...prev,
+      recoverChapterIds: checked
+        ? [...prev.recoverChapterIds, id]
+        : prev.recoverChapterIds.filter((cid) => cid !== id),
     }));
   };
 
@@ -222,7 +257,7 @@ export function ForeshadowEditForm({
           <select
             value={form.appearChapterId}
             disabled={busy}
-            onChange={(e) => setTextField("appearChapterId", e.target.value)}
+            onChange={(e) => setAppearChapter(e.target.value)}
           >
             <option value="">（未绑定）</option>
             {chapters.map((chapter) => (
@@ -231,6 +266,26 @@ export function ForeshadowEditForm({
               </option>
             ))}
           </select>
+        </div>
+        <div className="field">
+          <label>回收章（真相揭晓的章，可多选；须在登场章之后）</label>
+          {!appearBound ? (
+            <p className="hint">（请先绑定登场章，再规划回收章）</p>
+          ) : recoverOptions.length === 0 ? (
+            <p className="hint">（登场章之后暂无章节）</p>
+          ) : (
+            recoverOptions.map((chapter) => (
+              <label key={chapter.id} className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={form.recoverChapterIds.includes(chapter.id)}
+                  disabled={busy}
+                  onChange={(e) => toggleRecoverChapter(chapter.id, e.target.checked)}
+                />
+                {chapter.label}
+              </label>
+            ))
+          )}
         </div>
         <div className="field">
           <label>服务角色（伏笔暗示其走向的角色，可多选）</label>

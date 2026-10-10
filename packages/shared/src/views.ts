@@ -59,6 +59,8 @@ export const chapterPlanViewSchema = z.object({
   newForeshadows: z.array(chapterNewForeshadowSchema).optional(),
   /** 确认门携带的伏笔绑定指令（既有伏笔→登场章）；旧消息不带 */
   foreshadowBindings: z.array(foreshadowBindingSchema).optional(),
+  /** 确认门携带的伏笔回收绑定指令（既有伏笔→回收章，同 index 多条 = 多步回收）；旧消息不带 */
+  foreshadowRecoverBindings: z.array(foreshadowBindingSchema).optional(),
   /** 确认门携带的新增地点清单（名字+一句话定位）；旧消息不带 */
   newLocations: z.array(newLocationSchema).optional(),
 });

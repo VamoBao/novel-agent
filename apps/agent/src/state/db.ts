@@ -7,7 +7,7 @@ export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 /**
  * 打开（必要时创建）数据库并完成建表。
@@ -27,7 +27,8 @@ const SCHEMA_VERSION = 13;
  *   x/y/layer/population 可空：自动入库只产生「名字+定位」，地图向字段留给未来编辑），
  *   parent_id 自引用外键（城市→大陆层级）
  * - foreshadows：伏笔（表面行为/隐藏真相/读者注意度 1-10/回收状态枚举），
- *   出现章节 ID 与埋设幕节点 ID（act_node_id，章节规划按幕圈定回传的依据）均为
+ *   出现章节 ID、埋设幕节点 ID（act_node_id，章节规划按幕圈定回传的依据）与回收幕节点 ID
+ *   （recover_act_node_id，大纲规划的真相揭晓幕）均为
  *   可空裸列（chapter 节点写作期落地后补约束，先例 document_id），
  *   回收章节 IDs 与服务角色 IDs 存 JSON 文本
  */
@@ -182,9 +183,22 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
           db.exec("PRAGMA foreign_keys = ON;");
         }
       }
+      if (version >= 8 && version <= 13) {
+        // 13→14：foreshadows 增列 recover_act_node_id（回收幕节点，可空裸列——大纲规划
+        // 的真相揭晓幕，章节规划按幕圈定回传「待回收」伏笔）。守卫覆盖 8~13：表自 v8
+        // 起已存在，这些版本都持无此列的旧表形态（同 11→12 先例）；表异常缺失时跳过
+        // ALTER，由下方 CREATE TABLE IF NOT EXISTS 直建目标形态
+        const hasForeshadows =
+          db
+            .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'foreshadows'")
+            .get() !== null;
+        if (hasForeshadows) {
+          db.exec("ALTER TABLE foreshadows ADD COLUMN recover_act_node_id TEXT;");
+        }
+      }
       // 9→10：新增 documents 表，无 ALTER——由下方 CREATE TABLE IF NOT EXISTS 幂等落地
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>13 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>14 的库被旧代码打开）：重建兜底
       db.exec("DROP TABLE IF EXISTS documents;");
       db.exec("DROP TABLE IF EXISTS outlines;");
       db.exec("DROP TABLE IF EXISTS locations;");
@@ -338,6 +352,7 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       purpose TEXT,
       appear_chapter_id TEXT,
       act_node_id TEXT,
+      recover_act_node_id TEXT,
       recover_chapter_ids TEXT,
       character_ids TEXT,
       created_at TEXT NOT NULL,

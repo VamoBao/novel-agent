@@ -15,10 +15,10 @@ describe("saveChaptersInputSchema", () => {
 
   test("规划 + 新增角色清单均合规时通过；空清单合法", () => {
     expect(
-      saveChaptersInputSchema.parse({ ...submission, newForeshadows: [], foreshadowBindings: [], newLocations: [] }).newCharacters,
+      saveChaptersInputSchema.parse({ ...submission, newForeshadows: [], foreshadowBindings: [], foreshadowRecoverBindings: [], newLocations: [] }).newCharacters,
     ).toHaveLength(1);
     expect(
-      saveChaptersInputSchema.parse({ ...threeChapterPlan, newCharacters: [], newForeshadows: [], foreshadowBindings: [], newLocations: [] })
+      saveChaptersInputSchema.parse({ ...threeChapterPlan, newCharacters: [], newForeshadows: [], foreshadowBindings: [], foreshadowRecoverBindings: [], newLocations: [] })
         .newCharacters,
     ).toEqual([]);
   });
@@ -44,12 +44,13 @@ describe("saveChaptersInputSchema", () => {
         newForeshadows: [],
         newLocations: [],
         foreshadowBindings: [],
+        foreshadowRecoverBindings: [],
       }),
     ).toThrow("不得重复");
   });
 
   test("章节规划自身约束不回归（0 章与 13 章均拒绝）", () => {
-    expect(() => saveChaptersInputSchema.parse({ chapters: [], newCharacters: [], newForeshadows: [], foreshadowBindings: [], newLocations: [] })).toThrow();
+    expect(() => saveChaptersInputSchema.parse({ chapters: [], newCharacters: [], newForeshadows: [], foreshadowBindings: [], foreshadowRecoverBindings: [], newLocations: [] })).toThrow();
     expect(() =>
       saveChaptersInputSchema.parse({
         chapters: Array.from({ length: 13 }, (_, i) => ({ name: `第${i + 1}章`, summary: `第${i + 1}章概述` })),
@@ -65,10 +66,10 @@ describe("saveChaptersInputSchema", () => {
   test("newForeshadows 与 foreshadowBindings 均必填数组，空数组合法，完整条目通过", () => {
     const base = { ...threeChapterPlan, newCharacters: [] };
     expect(() => saveChaptersInputSchema.parse(base)).toThrow();
-    const parsed = saveChaptersInputSchema.parse({ ...base, newForeshadows: [], foreshadowBindings: [], newLocations: [] });
+    const parsed = saveChaptersInputSchema.parse({ ...base, newForeshadows: [], foreshadowBindings: [], foreshadowRecoverBindings: [], newLocations: [] });
     expect(parsed.newForeshadows).toEqual([]);
     expect(
-      saveChaptersInputSchema.parse({ ...base, newForeshadows: [chapterFs], foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }], newLocations: [] }).foreshadowBindings,
+      saveChaptersInputSchema.parse({ ...base, newForeshadows: [chapterFs], foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }], foreshadowRecoverBindings: [], newLocations: [] }).foreshadowBindings,
     ).toHaveLength(1);
   });
 
@@ -90,18 +91,50 @@ describe("saveChaptersInputSchema", () => {
   const chapterLoc = { name: "青云城", description: "第2章主战场·东部边境要塞" };
 
   test("newLocations 必填数组：缺省省略不合法、空数组合法、完整条目通过", () => {
-    const base = { ...threeChapterPlan, newCharacters: [], newForeshadows: [] as never[], foreshadowBindings: [] as never[] };
+    const base = { ...threeChapterPlan, newCharacters: [], newForeshadows: [] as never[], foreshadowBindings: [] as never[], foreshadowRecoverBindings: [] as never[] };
     expect(() => saveChaptersInputSchema.parse(base)).toThrow();
     expect(saveChaptersInputSchema.parse({ ...base, newLocations: [] }).newLocations).toEqual([]);
     expect(saveChaptersInputSchema.parse({ ...base, newLocations: [chapterLoc] }).newLocations).toHaveLength(1);
   });
 
   test("地点清单内名字重复被拒绝；项内空名字/空定位被拒绝", () => {
-    const base = { ...threeChapterPlan, newCharacters: [], newForeshadows: [] as never[], foreshadowBindings: [] as never[] };
+    const base = { ...threeChapterPlan, newCharacters: [], newForeshadows: [] as never[], foreshadowBindings: [] as never[], foreshadowRecoverBindings: [] as never[] };
     expect(() =>
       saveChaptersInputSchema.parse({ ...base, newLocations: [chapterLoc, { ...chapterLoc, description: "同一地点重复" }] }),
     ).toThrow("不得重复");
     expect(() => saveChaptersInputSchema.parse({ ...base, newLocations: [{ name: "", description: "要塞" }] })).toThrow();
     expect(() => saveChaptersInputSchema.parse({ ...base, newLocations: [{ name: "青云城", description: "" }] })).toThrow();
+  });
+
+  test("foreshadowRecoverBindings 必填数组：缺省不合法、空合法、同 index 不同章合法（多步回收）、(index, chapterName) 组合重复被拒绝", () => {
+    const base = {
+      ...threeChapterPlan,
+      newCharacters: [],
+      newForeshadows: [] as never[],
+      foreshadowBindings: [] as never[],
+      newLocations: [] as never[],
+    };
+    expect(() => saveChaptersInputSchema.parse(base)).toThrow();
+    expect(
+      saveChaptersInputSchema.parse({ ...base, foreshadowRecoverBindings: [] }).foreshadowRecoverBindings,
+    ).toEqual([]);
+    expect(
+      saveChaptersInputSchema.parse({
+        ...base,
+        foreshadowRecoverBindings: [
+          { index: 1, chapterName: "第二章·来客" },
+          { index: 1, chapterName: "第三章·破晓" },
+        ],
+      }).foreshadowRecoverBindings,
+    ).toHaveLength(2);
+    expect(() =>
+      saveChaptersInputSchema.parse({
+        ...base,
+        foreshadowRecoverBindings: [
+          { index: 1, chapterName: "第二章·来客" },
+          { index: 1, chapterName: "第二章·来客" },
+        ],
+      }),
+    ).toThrow("不得重复");
   });
 });

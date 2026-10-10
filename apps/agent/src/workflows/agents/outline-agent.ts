@@ -41,7 +41,7 @@ const SYSTEM_PROMPT = `你是一名资深小说编辑与故事结构师。你的
    - surfaceAction 表面行为（读者可见的表现）、hiddenTruth 隐藏的真相（真正指向的剧情）、attentionLevel 读者注意度 1-10（1 最易发现，10 最难发现）；
    - characterNames 服务角色名（可引用角色库或 newCharacters 清单中的名字，必须真实存在）；
    - actName 埋设幕名（必须是本大纲中真实的幕名）；
-2. 伏笔挂幕不挂章（章节尚不存在，登场章在后续章节规划时绑定）；
+2. 伏笔挂幕不挂章（章节尚不存在，登场章在后续章节规划时绑定）；真相在后续某幕揭晓的伏笔附 recoverActName（回收幕名）：必须是大纲中真实的幕名且在埋设幕之后，大纲期看不到回收点的伏笔省略该字段——回收幕随伏笔入库，该幕章节规划时自动绑定回收章；
 3. 清单内 surfaceAction 不得重复；newForeshadows 会在确认时随大纲一并展示，确认后自动入库。
 
 地点梳理要求：
@@ -61,7 +61,19 @@ export function outlineSchemaFor(actCount: number, partCount: number) {
   );
 }
 
-/** save_outline 的结构化入参：大纲本体 + 新增角色清单（项内名字不得重复）+ 伏笔清单（项内表面行为不得重复）+ 新增地点清单（项内名字不得重复），叠加部/幕强校验 */
+/** 幕名 → 大纲全局序（部序展开后幕的流水号）：伏笔回收幕必须在埋设幕之后的校验依据 */
+function actOrderIndex(o: Outline, actName: string): number | undefined {
+  let index = 0;
+  for (const part of o.parts) {
+    for (const act of part.acts) {
+      index += 1;
+      if (act.name === actName) return index;
+    }
+  }
+  return undefined;
+}
+
+/** save_outline 的结构化入参：大纲本体 + 新增角色清单（项内名字不得重复）+ 伏笔清单（项内表面行为不得重复，回收幕须为真实幕名且晚于埋设幕）+ 新增地点清单（项内名字不得重复），叠加部/幕强校验 */
 export function saveOutlineInputSchemaFor(actCount: number, partCount: number) {
   return outlineSchema
     .extend({
@@ -75,6 +87,16 @@ export function saveOutlineInputSchemaFor(actCount: number, partCount: number) {
         .array(newLocationSchema)
         .refine((list) => new Set(list.map((l) => l.name)).size === list.length, "新增地点清单内名字不得重复"),
     })
+    .refine(
+      (o) =>
+        o.newForeshadows.every((f) => {
+          if (!f.recoverActName) return true;
+          const plant = actOrderIndex(o, f.actName);
+          const recover = actOrderIndex(o, f.recoverActName);
+          return plant !== undefined && recover !== undefined && recover > plant;
+        }),
+      "伏笔回收幕必须是大纲中真实的幕名且在埋设幕之后",
+    )
     .refine(
       (o) =>
         o.parts.length === partCount &&

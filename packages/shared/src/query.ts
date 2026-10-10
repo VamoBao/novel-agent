@@ -69,6 +69,11 @@ export const foreshadowEntrySchema = foreshadowSchema.extend({
     .min(1)
     .nullable()
     .describe("埋设幕节点 ID（outlines 表 act 节点）；未绑幕 / 旧数据为 null"),
+  recoverActNodeId: z
+    .string()
+    .min(1)
+    .nullable()
+    .describe("回收幕节点 ID（大纲规划的真相揭晓幕）；未规划 / 旧数据为 null"),
 });
 export type ForeshadowEntry = z.infer<typeof foreshadowEntrySchema>;
 

@@ -117,6 +117,31 @@ describe("saveOutlineInputSchemaFor", () => {
     ).toThrow();
   });
 
+  test("recoverActName 幕序校验：晚于埋设幕通过；缺省合法；同名幕 / 更早幕 / 不存在的幕被拒绝", () => {
+    const base = { ...submission, newLocations: [] as never[] };
+    expect(() =>
+      saveOutlineInputSchemaFor(4, 2).parse({
+        ...base,
+        newForeshadows: [{ ...outlineFs, recoverActName: "第二幕" }],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      saveOutlineInputSchemaFor(4, 2).parse({ ...base, newForeshadows: [outlineFs] }),
+    ).not.toThrow();
+    expect(() =>
+      saveOutlineInputSchemaFor(4, 2).parse({
+        ...base,
+        newForeshadows: [{ ...outlineFs, recoverActName: "第一幕" }],
+      }),
+    ).toThrow("回收幕");
+    expect(() =>
+      saveOutlineInputSchemaFor(4, 2).parse({
+        ...base,
+        newForeshadows: [{ ...outlineFs, recoverActName: "不存在的幕" }],
+      }),
+    ).toThrow("回收幕");
+  });
+
   test("伏笔清单内表面行为重复被拒绝", () => {
     expect(() =>
       saveOutlineInputSchemaFor(4, 2).parse({

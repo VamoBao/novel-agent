@@ -14,6 +14,7 @@ import { ViewCard } from "./ViewCard";
 import { OutlineNodeCard } from "./OutlineNodeCard";
 import type { ChapterForeshadow } from "./OutlineNodeCard";
 import type { Selection } from "./StructureTreePanel";
+import { globalChapterOrder } from "../chapter-order";
 
 interface PreviewPaneProps {
   /** null = 未选中小说 */
@@ -136,8 +137,15 @@ function ForeshadowPreview({
 }) {
   const [editing, setEditing] = useState(false);
   const chapters = chapterOptions(detail);
+  const chapterOrder = globalChapterOrder(detail);
   const actName = detail.outlineNodes.find((n) => n.id === entry.actNodeId)?.name ?? "未绑幕";
   const appearName = detail.outlineNodes.find((n) => n.id === entry.appearChapterId)?.name ?? null;
+  const recoverNames = (entry.recoverChapterIds ?? []).map(
+    (cid) => detail.outlineNodes.find((n) => n.id === cid)?.name ?? cid,
+  );
+  const recoverActName = entry.recoverActNodeId
+    ? detail.outlineNodes.find((n) => n.id === entry.recoverActNodeId)?.name ?? entry.recoverActNodeId
+    : null;
   const nameById = new Map(detail.characters.map((c) => [c.id, c.basicInfo.name]));
   if (editing) {
     return (
@@ -145,6 +153,7 @@ function ForeshadowPreview({
         novelId={novelId}
         entry={entry}
         chapters={chapters}
+        chapterOrder={chapterOrder}
         characters={detail.characters}
         onSubmitted={() => {
           setEditing(false);
@@ -167,6 +176,12 @@ function ForeshadowPreview({
           注意度：{entry.attentionLevel} · 回收状态：{recoveryLabel(entry.recoveryStatus)}
         </p>
         <p className="outline-summary">登场章：{appearName ?? "（未绑定）"}</p>
+        <p className="outline-summary">
+          回收章：{recoverNames.length > 0 ? recoverNames.join("、") : "（未规划）"}
+        </p>
+        {recoverActName && recoverNames.length === 0 ? (
+          <p className="outline-summary">回收幕：{recoverActName}（待该幕章节规划时绑定回收章）</p>
+        ) : null}
         <p className="outline-summary">
           服务角色：
           {(entry.characterIds ?? []).map((cid) => nameById.get(cid) ?? cid).join("、") || "（无）"}

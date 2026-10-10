@@ -254,7 +254,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(13);
+    ).toBe(14);
     db.close();
   });
 
@@ -302,7 +302,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(13);
+    ).toBe(14);
     db.close();
   });
 
@@ -330,6 +330,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
       "purpose",
       "appear_chapter_id",
       "act_node_id",
+      "recover_act_node_id",
       "recover_chapter_ids",
       "character_ids",
       "created_at",
@@ -355,7 +356,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(13);
+    ).toBe(14);
     db.close();
   });
 
@@ -399,7 +400,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(13);
+    ).toBe(14);
     db.close();
   });
 
@@ -453,7 +454,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(13);
+    ).toBe(14);
     db.close();
   });
 
@@ -476,7 +477,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
     raw.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(13);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(14);
     const columns = (db.query("PRAGMA table_info(foreshadows)").all() as { name: string }[]).map((c) => c.name);
     expect(columns).toContain("act_node_id");
     const row = db.query("SELECT surface_action, hidden_truth, attention_level, act_node_id FROM foreshadows WHERE id = 'f-1';").get() as Record<string, unknown>;
@@ -532,7 +533,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
     legacy.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(13);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(14);
     expect(tableColumns(db, "locations")).toEqual([
       "id",
       "novel_id",
@@ -578,6 +579,41 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
     db.close();
   });
 
+  test("v13 库升 14：foreshadows 增 recover_act_node_id 列，存量数据无损", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-db-mig14-"));
+    tempDirs.push(dir);
+    const dbPath = join(dir, "v13.db");
+    // 手工构造 v13 形态：novels + foreshadows（无 recover_act_node_id 列）
+    const legacy = new Database(dbPath, { create: true });
+    legacy.exec("PRAGMA foreign_keys = ON;");
+    legacy.exec(`CREATE TABLE novels (
+      id TEXT PRIMARY KEY, name TEXT, author TEXT, description TEXT,
+      pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+      favorite INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0, 1)),
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`);
+    legacy.exec(`CREATE TABLE foreshadows (
+      id TEXT PRIMARY KEY, novel_id TEXT NOT NULL REFERENCES novels(id),
+      surface_action TEXT NOT NULL, hidden_truth TEXT NOT NULL,
+      attention_level INTEGER NOT NULL CHECK (attention_level BETWEEN 1 AND 10),
+      recovery_status TEXT NOT NULL DEFAULT 'unrecovered' CHECK (recovery_status IN ('unrecovered','partial','recovered')),
+      planting_method TEXT, purpose TEXT, appear_chapter_id TEXT, act_node_id TEXT, recover_chapter_ids TEXT, character_ids TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`);
+    legacy.exec("INSERT INTO novels (id, name, created_at, updated_at) VALUES ('n-1', '旧书', '2026-01-01', '2026-01-01');");
+    legacy.exec("INSERT INTO foreshadows (id, novel_id, surface_action, hidden_truth, attention_level, act_node_id, created_at, updated_at) VALUES ('f-1', 'n-1', '表面', '真相', 4, 'act-1', '2026-01-01', '2026-01-01');");
+    legacy.exec("PRAGMA user_version = 13;");
+    legacy.close();
+
+    const db = openDatabase(dbPath);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(14);
+    const columns = (db.query("PRAGMA table_info(foreshadows)").all() as { name: string }[]).map((c) => c.name);
+    expect(columns).toContain("recover_act_node_id");
+    const row = db.query("SELECT surface_action, act_node_id, recover_act_node_id FROM foreshadows WHERE id = 'f-1';").get() as Record<string, unknown>;
+    expect(row.surface_action).toBe("表面");
+    expect(row.act_node_id).toBe("act-1");
+    expect(row.recover_act_node_id).toBeNull();
+    db.close();
+  });
+
   test("v4 库跨版本直升：novels 与 outlines 两段列同批补齐、数据保留", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig4-"));
     tempDirs.push(dir);
@@ -600,7 +636,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
     ).toBe(1);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(13);
+    ).toBe(14);
     db.close();
   });
 
@@ -618,7 +654,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 12）", () => {
     expect(tableColumns(db, "documents")).toContain("word_count");
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(13);
+    ).toBe(14);
     db.close();
   });
 });

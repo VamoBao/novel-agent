@@ -11,6 +11,43 @@ import type {
   OutlineNewForeshadow,
 } from "@novel/shared";
 
+/** buildChapterOrder 的输入节点：outlines 表当前版本行的最小形态（树形 + sort） */
+export interface ChapterOrderNode {
+  id: string;
+  parentId: string | null;
+  type: string;
+  sort: number;
+}
+
+/**
+ * 全书章节全局序（纯函数，可单测）：outlines.sort 仅同父级内唯一，跨幕比较
+ * 「回收章是否晚于登场章」须按「部 sort → 幕 sort → 章 sort」深度优先展开——
+ * 返回 章 ID → 全局序号（1 起）的映射。
+ */
+export function buildChapterOrder(nodes: readonly ChapterOrderNode[]): Map<string, number> {
+  const children = new Map<string | null, ChapterOrderNode[]>();
+  for (const node of nodes) {
+    const list = children.get(node.parentId) ?? [];
+    list.push(node);
+    children.set(node.parentId, list);
+  }
+  for (const list of children.values()) list.sort((a, b) => a.sort - b.sort);
+  const order = new Map<string, number>();
+  let index = 0;
+  const walk = (parentId: string | null): void => {
+    for (const node of children.get(parentId) ?? []) {
+      if (node.type === "chapter") {
+        index += 1;
+        order.set(node.id, index);
+      } else {
+        walk(node.id);
+      }
+    }
+  };
+  walk(null);
+  return order;
+}
+
 export interface PlantOutlineResult {
   created: number;
   skipped: number;
@@ -20,6 +57,7 @@ export interface PlantChapterResult {
   created: number;
   skipped: number;
   bound: number;
+  recoverBound: number;
 }
 
 /** 服务角色名 → ID（trim 全等；重复名幂等；未解析名单返回供警告） */
@@ -73,6 +111,19 @@ export function plantOutlineForeshadows(options: {
     if (unresolved.length > 0) {
       options.channel.notify(`⚠️ 伏笔「${item.surfaceAction}」的未解析服务角色已剔除：${unresolved.join("、")}`);
     }
+    // 回收幕解析：幕名漂移不阻塞伏笔入库——回收幕留空并警告（登场幕匹配是硬条件、回收幕只是规划信息）
+    const recoverActName = item.recoverActName;
+    let recoverActNodeId: string | undefined;
+    if (recoverActName) {
+      const recoverAct = options.actNodes.find((a) => a.name === recoverActName.trim());
+      if (recoverAct) {
+        recoverActNodeId = recoverAct.id;
+      } else {
+        options.channel.notify(
+          `⚠️ 伏笔「${item.surfaceAction}」的回收幕「${recoverActName}」未在大纲中找到，回收幕留空（可在章节规划或编辑时补绑）`,
+        );
+      }
+    }
     store.addForeshadow(
       options.novelId,
       {
@@ -83,8 +134,11 @@ export function plantOutlineForeshadows(options: {
         characterIds: ids,
       },
       act.id,
+      recoverActNodeId,
     );
-    options.channel.notify(`✨ 伏笔已入库：${item.surfaceAction}（埋设：${act.name}）`);
+    options.channel.notify(
+      `✨ 伏笔已入库：${item.surfaceAction}（埋设：${act.name}${recoverActNodeId && item.recoverActName ? `，回收幕：${item.recoverActName}` : ""}）`,
+    );
     created += 1;
   }
   return { created, skipped };
@@ -92,24 +146,33 @@ export function plantOutlineForeshadows(options: {
 
 /**
  * 章节规划阶段伏笔处理（章节入库后调用）：新伏笔带登场章与幕归属入库；
- * 绑定指令把回传清单中的未绑伏笔 patch 到登场章——序号越界 / 章名未匹配跳过并警告。
+ * 登场绑定指令把回传清单中的未绑伏笔 patch 到登场章（已有回收章时新登场章须早于最早回收章）；
+ * 回收绑定指令把「本幕待回收」清单中的伏笔 patch 到回收章（可多条 = 多步回收）——
+ * 序号越界 / 章名未匹配 / 登场未绑 / 回收章不晚于登场章逐条跳过并警告。
+ * allChapterNodes 供全书章节全局序（部→幕→章）的顺序校验（含本次规划的章）。
  */
 export function plantChapterForeshadows(options: {
   novelId: string;
   actNodeId: string;
   newForeshadows: ChapterNewForeshadow[];
   bindings: ForeshadowBinding[];
+  recoverBindings: ForeshadowBinding[];
+  /** 本幕「待回收」回传清单（回收幕=本幕且回收章为空，与 recoverBindings 序号对应） */
+  recoverable: readonly StoredForeshadow[];
   characters: readonly StoredCharacter[];
   chapterNodes: readonly { id: string; name: string }[];
+  allChapterNodes: readonly ChapterOrderNode[];
   unbound: readonly StoredForeshadow[];
   channel: UiChannel;
   foreshadowStore?: ForeshadowStore;
 }): PlantChapterResult {
   const store = options.foreshadowStore ?? getDefaultForeshadowStore();
   const characters = options.characters.map((c) => ({ id: c.id, name: c.character.basicInfo.name }));
+  const chapterOrder = buildChapterOrder(options.allChapterNodes);
   let created = 0;
   let skipped = 0;
   let bound = 0;
+  let recoverBound = 0;
   for (const item of options.newForeshadows) {
     const chapter = options.chapterNodes.find((c) => c.name === item.chapterName.trim());
     if (!chapter) {
@@ -154,9 +217,67 @@ export function plantChapterForeshadows(options: {
       skipped += 1;
       continue;
     }
+    // 对称顺序校验：伏笔已绑回收章时，新登场章必须早于最早回收章（回收晚于登场的不变量）
+    if (target.foreshadow.recoverChapterIds && target.foreshadow.recoverChapterIds.length > 0) {
+      const appearOrder = chapterOrder.get(chapter.id);
+      const minRecoverOrder = Math.min(
+        ...target.foreshadow.recoverChapterIds.map((cid) => chapterOrder.get(cid) ?? Number.POSITIVE_INFINITY),
+      );
+      if (appearOrder !== undefined && appearOrder >= minRecoverOrder) {
+        options.channel.notify(
+          `⚠️ 伏笔绑定跳过（登场章须早于回收章）：${target.foreshadow.surfaceAction}（${chapter.name}）`,
+        );
+        skipped += 1;
+        continue;
+      }
+    }
     store.updateForeshadow(target.id, { appearChapterId: chapter.id });
     options.channel.notify(`🔗 伏笔已绑定登场章：${target.foreshadow.surfaceAction}（${chapter.name}）`);
     bound += 1;
   }
-  return { created, skipped, bound };
+
+  // 回收绑定：同伏笔多条指令合并为一组回收章后一次 patch（多步回收）
+  const recoverTargets = new Map<string, string[]>();
+  for (const binding of options.recoverBindings) {
+    const target = options.recoverable[binding.index - 1];
+    if (!target) {
+      options.channel.notify(`⚠️ 伏笔回收绑定跳过（序号 ${binding.index} 越界，清单共 ${options.recoverable.length} 条）`);
+      skipped += 1;
+      continue;
+    }
+    const chapter = options.chapterNodes.find((c) => c.name === binding.chapterName.trim());
+    if (!chapter) {
+      options.channel.notify(`⚠️ 伏笔回收绑定跳过（回收章「${binding.chapterName}」未在本次规划中找到）：${target.foreshadow.surfaceAction}`);
+      skipped += 1;
+      continue;
+    }
+    if (!target.foreshadow.appearChapterId) {
+      options.channel.notify(`⚠️ 伏笔回收绑定跳过（登场章未绑定，暂缓绑定回收）：${target.foreshadow.surfaceAction}`);
+      skipped += 1;
+      continue;
+    }
+    const appearOrder = chapterOrder.get(target.foreshadow.appearChapterId);
+    const recoverOrder = chapterOrder.get(chapter.id);
+    if (appearOrder === undefined || recoverOrder === undefined || recoverOrder <= appearOrder) {
+      options.channel.notify(
+        `⚠️ 伏笔回收绑定跳过（回收章须晚于登场章）：${target.foreshadow.surfaceAction}（${chapter.name}）`,
+      );
+      skipped += 1;
+      continue;
+    }
+    const list = recoverTargets.get(target.id) ?? [];
+    if (!list.includes(chapter.id)) list.push(chapter.id);
+    recoverTargets.set(target.id, list);
+  }
+  for (const [foreshadowId, chapterIds] of recoverTargets) {
+    const target = options.recoverable.find((f) => f.id === foreshadowId);
+    if (!target) continue;
+    const names = chapterIds
+      .map((cid) => options.chapterNodes.find((c) => c.id === cid)?.name ?? cid)
+      .join("、");
+    store.updateForeshadow(foreshadowId, { recoverChapterIds: chapterIds });
+    options.channel.notify(`♻ 伏笔已绑定回收章：${target.foreshadow.surfaceAction}（${names}）`);
+    recoverBound += chapterIds.length;
+  }
+  return { created, skipped, bound, recoverBound };
 }

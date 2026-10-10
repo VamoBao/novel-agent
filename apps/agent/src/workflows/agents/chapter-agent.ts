@@ -34,9 +34,10 @@ const SYSTEM_PROMPT = `你是一名资深小说编辑。你的任务：把给定
 
 伏笔梳理要求：
 1. 若「本幕未绑登场章的伏笔」清单中的伏笔会在你规划的章节中出现，必须在 foreshadowBindings 中输出绑定（index = 清单序号，chapterName = 登场章名——必须是本次规划中的真实章名）；不在本幕出现的伏笔不要绑定；
-2. 规划中发现新的伏笔时列入 newForeshadows（surfaceAction / hiddenTruth / attentionLevel 1-10 / characterNames 服务角色名 / chapterName 登场章名）；
-3. 章节概述尽量体现伏笔的表面行为，让正文写作有据可依；
-4. 两组清单内 surfaceAction / 序号均不得重复；确认后新伏笔自动入库、绑定自动生效。
+2. 若「本幕待回收伏笔」清单中的伏笔（真相揭晓幕 = 本幕）会在你规划的章节中揭晓或回收，必须在 foreshadowRecoverBindings 中输出回收绑定（index = 清单序号，chapterName = 回收章名——必须是本次规划中的真实章名，且在该伏笔登场章之后）；一个伏笔跨多章多步回收时输出多条（同 index 不同章）；不在本幕揭晓的伏笔不要绑定；
+3. 规划中发现新的伏笔时列入 newForeshadows（surfaceAction / hiddenTruth / attentionLevel 1-10 / characterNames 服务角色名 / chapterName 登场章名）；
+4. 章节概述尽量体现伏笔的表面行为，让正文写作有据可依；章节概述也尽量体现回收伏笔的真相揭晓；
+5. 各清单内 surfaceAction / 登场绑定序号不得重复，回收绑定内同序号同章的组合不得重复；确认后新伏笔自动入库、登场与回收绑定自动生效。
 
 地点梳理要求：
 1. 本章概述中作为剧情发生地的真实地理场所（城市、山脉、宗门驻地、秘境等），不在地点库中的列入 save_chapters 的 newLocations：name 为地点名，description 为一句话定位（如「第2章主战场·东部边境要塞」）；清单内名字不得重复，地点库已有地点不得列入（可用 list_locations 工具查询地点库现状）；
@@ -65,6 +66,8 @@ export interface PlanChaptersAgentOptions {
   characterStore?: CharacterStore;
   /** 地点库 store；缺省默认 SQLite store（测试可替换） */
   locationStore?: LocationStore;
+  /** 本幕「待回收」的伏笔（回收幕=本幕且回收章为空；有则带序号回传给 LLM 供绑定回收章） */
+  recoverableForeshadows: readonly StoredForeshadow[];
   /** 本幕「未绑登场章」的伏笔（编排层查好传入；有则带序号回传给 LLM 供绑定登场章） */
   unboundForeshadows?: readonly StoredForeshadow[];
 }
@@ -80,17 +83,24 @@ export const saveChaptersInputSchema = chapterPlanSchema.extend({
   foreshadowBindings: z
     .array(foreshadowBindingSchema)
     .refine((list) => new Set(list.map((b) => b.index)).size === list.length, "伏笔绑定指令内序号不得重复"),
+  foreshadowRecoverBindings: z
+    .array(foreshadowBindingSchema)
+    .refine(
+      (list) => new Set(list.map((b) => `${b.index}:${b.chapterName}`)).size === list.length,
+      "伏笔回收绑定指令内序号与章名组合不得重复",
+    ),
   newLocations: z
     .array(newLocationSchema)
     .refine((list) => new Set(list.map((l) => l.name)).size === list.length, "新增地点清单内名字不得重复"),
 });
 
-/** 章节 Agent 的最终产物：确认通过的规划本体 + 随规划连带确认的新增角色清单、新伏笔清单、既有伏笔绑定指令与新增地点清单 */
+/** 章节 Agent 的最终产物：确认通过的规划本体 + 随规划连带确认的新增角色清单、新伏笔清单、既有伏笔登场/回收绑定指令与新增地点清单 */
 export interface ChapterPlanSubmission {
   plan: ChapterPlan;
   newCharacters: NewCharacterOutline[];
   newForeshadows: ChapterNewForeshadow[];
   foreshadowBindings: ForeshadowBinding[];
+  foreshadowRecoverBindings: ForeshadowBinding[];
   newLocations: NewLocation[];
 }
 
@@ -136,10 +146,10 @@ export async function planChapters(
 
   const saveChapters = tool({
     description:
-      "章节规划完成后调用此工具保存（参数 = 完整规划 + newCharacters 新增角色清单 + newForeshadows 新伏笔与 foreshadowBindings 绑定 + newLocations 新增地点清单）。会把本幕梗概、关键情节点、推荐的章节列表与各清单展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整规划后重新调用。",
+      "章节规划完成后调用此工具保存（参数 = 完整规划 + newCharacters 新增角色清单 + newForeshadows 新伏笔与 foreshadowBindings / foreshadowRecoverBindings 登场与回收绑定 + newLocations 新增地点清单）。会把本幕梗概、关键情节点、推荐的章节列表与各清单展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整规划后重新调用。",
     inputSchema: saveChaptersInputSchema,
     execute: async (inputPlan) => {
-      const { newCharacters, newForeshadows, foreshadowBindings, newLocations, ...plan } = inputPlan;
+      const { newCharacters, newForeshadows, foreshadowBindings, foreshadowRecoverBindings, newLocations, ...plan } = inputPlan;
       const confirmed = await channel.askConfirm("以上章节规划是否确认？", {
         default: true,
         view: {
@@ -151,11 +161,12 @@ export async function planChapters(
           newCharacters,
           newForeshadows,
           foreshadowBindings,
+          foreshadowRecoverBindings,
           newLocations,
         },
       });
       if (confirmed) {
-        saved = { plan, newCharacters, newForeshadows, foreshadowBindings, newLocations };
+        saved = { plan, newCharacters, newForeshadows, foreshadowBindings, foreshadowRecoverBindings, newLocations };
         return { ok: true as const };
       }
       const feedback = await channel.askText("请说明章节规划需要调整的地方> ");
@@ -188,6 +199,16 @@ export async function planChapters(
               .join("\n")}`,
           ]
         : []),
+      ...(options.recoverableForeshadows && options.recoverableForeshadows.length > 0
+        ? [
+            `本幕待回收伏笔（真相揭晓幕=本幕且回收章未绑；序号. 表面行为——隐藏真相，登场章为空表示尚未绑定登场章）：\n${options.recoverableForeshadows
+              .map(
+                (f, i) =>
+                  `${i + 1}. ${f.foreshadow.surfaceAction}——${f.foreshadow.hiddenTruth}（登场：${f.foreshadow.appearChapterId ?? "未绑定"}）`,
+              )
+              .join("\n")}`,
+          ]
+        : []),
       "请基于以上内容推荐本幕的章节规划并调用 save_chapters 保存。",
     ].join("\n\n"),
     tools: { save_chapters: saveChapters, list_characters: listCharacters, list_locations: listLocations },
@@ -195,7 +216,7 @@ export async function planChapters(
     maxSteps: 12,
     isDone: () => saved !== undefined,
     continuationHint:
-      "请立即调用 save_chapters 工具保存章节规划（参数为完整规划与 newCharacters / newForeshadows / foreshadowBindings / newLocations 清单），不要只输出文本。",
+      "请立即调用 save_chapters 工具保存章节规划（参数为完整规划与 newCharacters / newForeshadows / foreshadowBindings / foreshadowRecoverBindings / newLocations 清单），不要只输出文本。",
   });
 
   if (!saved) {

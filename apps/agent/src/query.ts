@@ -257,13 +257,13 @@ function parseForeshadowJson(json: string): Foreshadow {
 }
 
 function toForeshadowEntry(stored: StoredForeshadow): ForeshadowEntry {
-  return { id: stored.id, ...stored.foreshadow, actNodeId: stored.actNodeId };
+  return { id: stored.id, ...stored.foreshadow, actNodeId: stored.actNodeId, recoverActNodeId: stored.recoverActNodeId };
 }
 
 /**
  * 表单完整卡 → patch：必填字段与回收状态直接覆盖；可选项有值传值、缺省传 null
- * （清空——patch 语义 undefined=不动）；characterIds 空选传 null 清空；
- * recoverChapterIds 不入 patch（编辑面不含回收章，保留现值）。
+ * （清空——patch 语义 undefined=不动）；characterIds 与 recoverChapterIds 空选传 null 清空
+ * （回收章编辑面已开放——未勾选 = 清空全部回收章）。
  */
 function toForeshadowPatch(foreshadow: Foreshadow): ForeshadowPatch {
   return {
@@ -275,6 +275,7 @@ function toForeshadowPatch(foreshadow: Foreshadow): ForeshadowPatch {
     purpose: foreshadow.purpose ?? null,
     appearChapterId: foreshadow.appearChapterId ?? null,
     characterIds: foreshadow.characterIds ?? null,
+    recoverChapterIds: foreshadow.recoverChapterIds ?? null,
   };
 }
 

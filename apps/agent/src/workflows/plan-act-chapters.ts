@@ -100,7 +100,8 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
 
   channel.stage("chapter");
   channel.notify(`📑 章节规划 Agent 启动（${act.node.name}）…`);
-  const { plan, newCharacters, newForeshadows, foreshadowBindings, newLocations } = await planChapters(
+  const recoverableForeshadows = foreshadowStore.listUnrecoveredByAct(novelId, act.id);
+  const { plan, newCharacters, newForeshadows, foreshadowBindings, foreshadowRecoverBindings, newLocations } = await planChapters(
     {
       novelTitle: novel.name ?? "未命名小说",
       logline: novel.description ?? "",
@@ -112,7 +113,7 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
       keyPlotPoints: act.node.keyPlotPoints,
     },
     channel,
-    { novelId, characterStore, locationStore, unboundForeshadows },
+    { novelId, characterStore, locationStore, unboundForeshadows, recoverableForeshadows },
   );
 
   const chapterNodes = outlineStore.saveChapters(novelId, act.id, plan.chapters);
@@ -172,22 +173,31 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
 
   // 伏笔处理：新伏笔带登场章与幕入库、既有未绑伏笔按 LLM 绑定指令 patch（确定性代码）。
   // 置于角色自动入库块之后：新伏笔的 characterNames 可能引用本轮自动入库的新角色。
-  if (newForeshadows.length > 0 || foreshadowBindings.length > 0) {
-    channel.notify(`\n✨ 本幕伏笔处理中：新增 ${newForeshadows.length} 处、绑定 ${foreshadowBindings.length} 处…`);
+  if (newForeshadows.length > 0 || foreshadowBindings.length > 0 || foreshadowRecoverBindings.length > 0) {
+    channel.notify(
+      `\n✨ 本幕伏笔处理中：新增 ${newForeshadows.length} 处、绑定 ${foreshadowBindings.length} 处、回收绑定 ${foreshadowRecoverBindings.length} 处…`,
+    );
     const chapterNodeRefs = chapterNodes.map((n) => ({ id: n.id, name: n.node.name }));
-    const { created, skipped, bound } = plantChapterForeshadows({
+    // 全书当前版本章节点（含本次规划）——回收/登场顺序校验的全局章序依据
+    const allChapterNodes = outlineStore
+      .listOutlineNodes(novelId, { currentOnly: true })
+      .map((n) => ({ id: n.id, parentId: n.node.parentId, type: n.node.type, sort: n.node.sort }));
+    const { created, skipped, bound, recoverBound } = plantChapterForeshadows({
       novelId,
       actNodeId: act.id,
       newForeshadows,
       bindings: foreshadowBindings,
+      recoverBindings: foreshadowRecoverBindings,
+      recoverable: recoverableForeshadows,
       characters: characterStore.listCharacters(novelId),
       chapterNodes: chapterNodeRefs,
+      allChapterNodes,
       unbound: unboundForeshadows,
       channel,
       foreshadowStore,
     });
     channel.notify(
-      `✨ 本次规划伏笔入库 ${created} 处、绑定 ${bound} 处${skipped > 0 ? `（${skipped} 处未匹配跳过）` : ""}`,
+      `✨ 本次规划伏笔入库 ${created} 处、绑定 ${bound} 处、回收绑定 ${recoverBound} 处${skipped > 0 ? `（${skipped} 处未匹配跳过）` : ""}`,
     );
   }
   return { novelId, actNodeId: act.id, actName: act.node.name, chapterCount: chapterNodes.length };

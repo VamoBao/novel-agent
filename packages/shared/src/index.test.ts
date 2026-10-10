@@ -451,6 +451,38 @@ describe("newForeshadowSchema 及变体", () => {
     expect(() => chapterNewForeshadowSchema.parse(base)).toThrow();
   });
 
+  test("大纲变体 recoverActName 两态：缺省合法、携带合法（回收幕名）", () => {
+    expect(outlineNewForeshadowSchema.parse({ ...base, actName: "第1幕" }).recoverActName).toBeUndefined();
+    expect(
+      outlineNewForeshadowSchema.parse({ ...base, actName: "第1幕", recoverActName: "第3幕" }).recoverActName,
+    ).toBe("第3幕");
+    expect(() =>
+      outlineNewForeshadowSchema.parse({ ...base, actName: "第1幕", recoverActName: "" }),
+    ).toThrow();
+  });
+
+  test("chapter-plan 视图携带 foreshadowRecoverBindings 通过；缺失仍通过（旧消息兼容）；同 index 多条合法（多步回收）", () => {
+    const view = chapterPlanViewSchema.parse({
+      kind: "chapter-plan",
+      actName: "第1幕",
+      actSummary: "梗概",
+      keyPlotPoints: ["情节点"],
+      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+      foreshadowRecoverBindings: [
+        { index: 1, chapterName: "第二章·来客" },
+        { index: 1, chapterName: "第三章·破晓" },
+      ],
+    });
+    expect(view.foreshadowRecoverBindings).toHaveLength(2);
+    expect(chapterPlanViewSchema.parse({
+      kind: "chapter-plan",
+      actName: "第1幕",
+      actSummary: "梗概",
+      keyPlotPoints: ["情节点"],
+      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+    }).foreshadowRecoverBindings).toBeUndefined();
+  });
+
   test("foreshadowBindingSchema：合法通过；序号 0 或章名空串被拒绝", () => {
     expect(foreshadowBindingSchema.parse({ index: 1, chapterName: "第一章·雨夜" }).index).toBe(1);
     expect(() => foreshadowBindingSchema.parse({ index: 0, chapterName: "第一章" })).toThrow();

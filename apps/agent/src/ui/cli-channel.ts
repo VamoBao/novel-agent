@@ -87,7 +87,7 @@ export function renderView(view: View): string {
         ? formatOutlineForConfirm(view.outline, view.newCharacters, view.newForeshadows, view.newLocations)
         : formatOutlineFull(view.outline);
     case "chapter-plan":
-      return formatChapterPlan(view, view.newCharacters, view.newForeshadows, view.foreshadowBindings, view.newLocations);
+      return formatChapterPlan(view, view.newCharacters, view.newForeshadows, view.foreshadowBindings, view.newLocations, view.foreshadowRecoverBindings);
     case "worldview":
       return formatWorldview(view.worldview);
     case "conflict":
@@ -138,7 +138,7 @@ function formatOutlineForConfirm(
   if (newForeshadows && newForeshadows.length > 0) {
     lines.push(`  ✨ 本次大纲伏笔（确认后自动入库）：`);
     for (const f of newForeshadows) {
-      lines.push(`    · [${f.actName}] ${f.surfaceAction} ⇢ ${f.hiddenTruth}（注意度 ${f.attentionLevel}，服务：${f.characterNames.join("、")}）`);
+      lines.push(`    · [${f.actName}] ${f.surfaceAction} ⇢ ${f.hiddenTruth}（注意度 ${f.attentionLevel}，服务：${f.characterNames.join("、")}${f.recoverActName ? `，回收：${f.recoverActName}` : ""}）`);
     }
   }
   if (newLocations && newLocations.length > 0) {
@@ -171,6 +171,7 @@ function formatChapterPlan(
   newForeshadows?: ChapterNewForeshadow[],
   foreshadowBindings?: ForeshadowBinding[],
   newLocations?: NewLocation[],
+  foreshadowRecoverBindings?: ForeshadowBinding[],
 ): string {
   const lines = [
     `📑 章节规划草稿（${view.actName}）`,
@@ -195,6 +196,12 @@ function formatChapterPlan(
   if (foreshadowBindings && foreshadowBindings.length > 0) {
     lines.push(`  🔗 伏笔绑定（确认后生效）：`);
     for (const b of foreshadowBindings) {
+      lines.push(`    ${b.index}) → ${b.chapterName}`);
+    }
+  }
+  if (foreshadowRecoverBindings && foreshadowRecoverBindings.length > 0) {
+    lines.push(`  ♻ 伏笔回收绑定（确认后生效）：`);
+    for (const b of foreshadowRecoverBindings) {
       lines.push(`    ${b.index}) → ${b.chapterName}`);
     }
   }
