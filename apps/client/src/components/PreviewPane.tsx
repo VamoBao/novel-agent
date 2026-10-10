@@ -6,10 +6,12 @@ import type {
   LocationEntry,
   NovelDetail,
   OutlineNodeEntry,
+  StyleReferenceEntry,
   View,
 } from "@novel/shared";
 import { CharacterEditForm } from "./CharacterEditForm";
 import { ForeshadowEditForm, recoveryLabel, type ChapterOption } from "./ForeshadowEditForm";
+import { StyleEditForm } from "./StyleEditForm";
 import { ViewCard } from "./ViewCard";
 import { OutlineNodeCard } from "./OutlineNodeCard";
 import type { ChapterForeshadow } from "./OutlineNodeCard";
@@ -34,6 +36,14 @@ interface PreviewPaneProps {
   onForeshadowSaved?: () => void;
   /** 章节正文生成完成（run_finished）后刷新详情（章节点 id 稳定，选中保持） */
   onDocumentSaved?: () => void;
+  /** 新建文风态（App 持有，镜像新建角色）：提交 / 取消 / 改选节点时退出 */
+  creatingStyle?: boolean;
+  onStyleCreatedSubmitted?: (entry: StyleReferenceEntry) => void;
+  onStyleCreatedCancelled?: () => void;
+  /** 文风编辑提交成功后刷新详情（文风 id 稳定，选中不失效） */
+  onStyleSaved?: () => void;
+  /** 文风删除成功后重置选中并刷新详情（原 id 已不存在） */
+  onStyleDeleted?: () => void;
 }
 
 /** 伏笔条目 → 章卡显示模型（badge 区分登场/回收；服务角色 ID 经详情 characters 解析名字，未匹配兜底原 ID） */
@@ -218,6 +228,54 @@ function LocationPreview({ entry, detail }: { entry: LocationEntry; detail: Nove
   );
 }
 
+/** 文风卡预览（带编辑入口，镜像 ForeshadowPreview）：启用徽标 + 内容全文（pre-wrap 滚动阅读）；
+ *  编辑态切换 StyleEditForm，删除成功经 onDeleted 上抛（调用方重置选中并刷新详情） */
+function StylePreview({
+  novelId,
+  entry,
+  onSaved,
+  onDeleted,
+}: {
+  novelId: string;
+  entry: StyleReferenceEntry;
+  onSaved: () => void;
+  onDeleted: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  if (editing) {
+    return (
+      <StyleEditForm
+        novelId={novelId}
+        entry={entry}
+        onSubmitted={() => {
+          setEditing(false);
+          onSaved();
+        }}
+        onDeleted={() => {
+          setEditing(false);
+          onDeleted();
+        }}
+        onCancel={() => setEditing(false)}
+      />
+    );
+  }
+  return (
+    <>
+      <div className="preview-actions">
+        <button onClick={() => setEditing(true)}>✏️ 编辑文风</button>
+      </div>
+      <section className="viewcard">
+        <p className="card-label">参考文风</p>
+        <p className="part-name">{entry.name}</p>
+        <p className="outline-summary">
+          {entry.enabled ? "✅ 启用中（生成正文时注入）" : "⏸ 已停用（生成正文时不注入）"}
+        </p>
+        <div className="prose-content">{entry.content}</div>
+      </section>
+    </>
+  );
+}
+
 /**
  * 右栏内容预览：结构树选中节点的只读视图 / 角色与伏笔编辑表单 / 新建角色表单。
  * 章节正文生成会话（write-chapter）由本组件收口：目标章节点 id 记录生成态，
@@ -236,6 +294,11 @@ export function PreviewPane({
   onCharacterSaved,
   onForeshadowSaved,
   onDocumentSaved,
+  creatingStyle = false,
+  onStyleCreatedSubmitted,
+  onStyleCreatedCancelled,
+  onStyleSaved,
+  onStyleDeleted,
 }: PreviewPaneProps) {
   /** 正文生成中的章节点 ID（null = 空闲）；agent 会话单例，进行中禁用各章入口 */
   const [writingNodeId, setWritingNodeId] = useState<string | null>(null);
@@ -295,6 +358,14 @@ export function PreviewPane({
         hasWorldview={detail.worldview !== null}
         onSubmitted={onCreateCharacterSubmitted ?? (() => {})}
         onCancel={onCreateCharacterCancelled ?? (() => {})}
+      />
+    );
+  } else if (creatingStyle) {
+    body = (
+      <StyleEditForm
+        novelId={detail.novel.id}
+        onSubmitted={onStyleCreatedSubmitted ?? (() => {})}
+        onCancel={onStyleCreatedCancelled ?? (() => {})}
       />
     );
   } else if (!selection) {
@@ -357,6 +428,19 @@ export function PreviewPane({
       <LocationPreview key={entry.id} entry={entry} detail={detail} />
     ) : (
       <p className="pane-error">该地点内容未能加载（数据缺失）。</p>
+    );
+  } else if (selection.kind === "style") {
+    const entry = detail.styleReferences.find((s) => s.id === selection.styleId);
+    body = entry ? (
+      <StylePreview
+        key={entry.id}
+        novelId={detail.novel.id}
+        entry={entry}
+        onSaved={() => onStyleSaved?.()}
+        onDeleted={() => onStyleDeleted?.()}
+      />
+    ) : (
+      <p className="pane-error">该文风内容未能加载（数据缺失或已删除）。</p>
     );
   } else {
     const view = toWorldviewView(detail);

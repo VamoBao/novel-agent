@@ -2,13 +2,14 @@ import { useState } from "react";
 import type { ForeshadowEntry, NovelDetail, OutlineNodeEntry } from "@novel/shared";
 import type { ReactNode } from "react";
 
-/** 结构树选中项：五类节点（角色 / 大纲节点 / 伏笔 / 地点携带库表主键区分同名人） */
+/** 结构树选中项：六类节点（角色 / 大纲节点 / 伏笔 / 地点 / 参考文风携带库表主键区分同名人） */
 export type Selection =
   | { kind: "worldview" }
   | { kind: "character"; characterId: string }
   | { kind: "outline"; outlineNodeId: string }
   | { kind: "foreshadow"; foreshadowId: string }
-  | { kind: "location"; locationId: string };
+  | { kind: "location"; locationId: string }
+  | { kind: "style"; styleId: string };
 
 interface StructureTreePanelProps {
   /** null = 未选中小说 */
@@ -21,6 +22,8 @@ interface StructureTreePanelProps {
   onRegenOutline?: () => void;
   /** 「👥 角色」组头的「＋ 新增角色」入口（App 接线到右栏新建态）；不传则不显示按钮 */
   onAddCharacter?: () => void;
+  /** 「🖋️ 文风」组头的「＋ 新增文风」入口（App 接线到右栏新建态）；不传则不显示按钮 */
+  onAddStyle?: () => void;
 }
 
 interface TreeNodeProps {
@@ -117,10 +120,11 @@ function renderOutlineNodes(
 
 /**
  * 中栏结构树：世界观 / 地点 / 角色 / 伏笔（按埋设幕分组）/ 大纲（部→幕→章，读 outlines 表当前版本节点）
- * 五类组成节点。地点 / 角色与大纲分组均可整组收起（组头三角，默认展开，会话内保持），大纲组内部/幕可
+ * / 参考文风 六类组成节点。地点 / 角色与大纲分组均可整组收起（组头三角，默认展开，会话内保持），大纲组内部/幕可
  * 逐节点收起（默认全展开）；伏笔组头可整组收起、组内幕分组可逐组收起（均默认展开、会话内保持，
- * 仅分组头不触发选中）；角色组头附「＋ 新增角色」入口；大纲按节点选中预览（视图粒度 =
- * 单节点）；组头刷新按钮触发大纲重新生成（经弹框确认）。
+ * 仅分组头不触发选中）；文风组在大纲之后（设定 → 规划 → 结构 → 写作素材），组头可整组收起；
+ * 角色与文风组头附「＋」新增入口；大纲按节点选中预览（视图粒度 = 单节点）；
+ * 组头刷新按钮触发大纲重新生成（经弹框确认）。
  */
 export function StructureTreePanel({
   detail,
@@ -130,6 +134,7 @@ export function StructureTreePanel({
   onSelect,
   onRegenOutline,
   onAddCharacter,
+  onAddStyle,
 }: StructureTreePanelProps) {
   /** 收起的大纲节点 ID 集合（默认空 = 全展开），会话内保持 */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
@@ -141,6 +146,8 @@ export function StructureTreePanel({
   const [charsCollapsed, setCharsCollapsed] = useState(false);
   /** 伏笔分组整组收起（默认展开），会话内保持 */
   const [fsGroupCollapsed, setFsGroupCollapsed] = useState(false);
+  /** 文风分组整组收起（默认展开），会话内保持 */
+  const [styleCollapsed, setStyleCollapsed] = useState(false);
   /** 收起的伏笔幕分组（actNodeId；未绑幕组键 "__none__"），默认空 = 全展开，会话内保持 */
   const [fsActCollapsed, setFsActCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const toggleFsAct = (key: string): void => {
@@ -338,6 +345,37 @@ export function StructureTreePanel({
             <TreeNode label="（未生成）" depth={1} muted />
           ) : groupCollapsed ? null : (
             renderOutlineNodes(detail.outlineNodes, null, 1, selection, onSelect, collapsed, toggleCollapse)
+          )}
+
+          <div className="tree-group">
+            {detail.styleReferences.length > 0 ? (
+              <button
+                className="tree-toggle"
+                title={styleCollapsed ? "展开文风" : "收起文风"}
+                onClick={() => setStyleCollapsed((v) => !v)}
+              >
+                {styleCollapsed ? "▸" : "▾"}
+              </button>
+            ) : null}
+            <span>🖋️ 文风</span>
+            {onAddStyle ? (
+              <button className="tree-group-btn" title="新增参考文风" onClick={onAddStyle}>
+                ＋
+              </button>
+            ) : null}
+          </div>
+          {detail.styleReferences.length === 0 ? (
+            <TreeNode label="（暂无文风）" depth={1} muted />
+          ) : styleCollapsed ? null : (
+            detail.styleReferences.map((style) => (
+              <TreeNode
+                key={style.id}
+                label={`🖋 ${style.name}${style.enabled ? "" : "（已停用）"}`}
+                depth={1}
+                active={selection?.kind === "style" && selection.styleId === style.id}
+                onClick={() => onSelect({ kind: "style", styleId: style.id })}
+              />
+            ))
           )}
         </>
       ) : null}

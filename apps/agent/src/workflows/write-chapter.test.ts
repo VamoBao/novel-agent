@@ -11,6 +11,7 @@ import { OutlineStore } from "../state/outline-store";
 import { WorldviewStore } from "../state/worldview-store";
 import { CharacterStore } from "../state/character-store";
 import { DocumentStore } from "../state/document-store";
+import { StyleReferenceStore } from "../state/style-reference-store";
 import { FakeChannel } from "../ui/fake-channel";
 import type { Character, Worldview } from "@novel/shared";
 
@@ -114,6 +115,7 @@ async function setupDb(options: { withWorldview?: boolean } = {}) {
     worldviewStore,
     characterStore,
     documentStore,
+    styleReferenceStore: new StyleReferenceStore(db),
     outputDir,
     actNodeId: act!.id,
     chapterNodeId: chapters[0]!.id,
@@ -304,5 +306,95 @@ describe("writeChapter", () => {
     ).rejects.toThrow("空正文");
     expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(0);
     expect(ctx.outlineStore.getOutlineNode(ctx.chapterNodeId)!.node.documentId).toBeNull();
+  });
+
+  test("无启用文风：prompt 无【参考文风】段与模仿要求、零文风通知（现状回归）", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+
+    // 库里有文风但全部停用——同样视为无启用文风
+    ctx.styleReferenceStore.addStyleReference(NOVEL_ID, {
+      name: "停用样本",
+      content: "被停用的文风。",
+      enabled: false,
+    });
+
+    const channel = new FakeChannel([]);
+    await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
+
+    const prompt = generateTextCalls[0]!.prompt;
+    expect(prompt).not.toContain("【参考文风】");
+    expect(prompt).not.toContain("模仿参考文风");
+    expect(prompt).not.toContain("被停用的文风");
+    expect(channel.notifies.some((n) => n.includes("参考文风"))).toBeFalse();
+  });
+
+  test("启用文风注入：【参考文风】段落位于下一章块之后写作要求之前，附模仿要求与生效清单通知", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+
+    ctx.styleReferenceStore.addStyleReference(NOVEL_ID, {
+      name: "江南式打斗",
+      content: "刀光一闪，血溅三步。",
+    });
+    ctx.styleReferenceStore.addStyleReference(NOVEL_ID, {
+      name: "张爱玲腔",
+      content: "生命是一袭华美的袍。",
+    });
+
+    const channel = new FakeChannel([]);
+    await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
+
+    const prompt = generateTextCalls[0]!.prompt;
+    // 两份样本全文与名字随段注入
+    expect(prompt).toContain("【参考文风】");
+    expect(prompt).toContain("（江南式打斗）");
+    expect(prompt).toContain("刀光一闪，血溅三步。");
+    expect(prompt).toContain("（张爱玲腔）");
+    expect(prompt).toContain("生命是一袭华美的袍。");
+    // 长样本放尾部：下一章衔接块之后、写作要求之前
+    const styleAt = prompt.indexOf("【参考文风】");
+    const nextAt = prompt.indexOf("【下一章");
+    const reqAt = prompt.indexOf("写作要求：");
+    expect(nextAt).toBeGreaterThan(-1);
+    expect(styleAt).toBeGreaterThan(nextAt);
+    expect(styleAt).toBeLessThan(reqAt);
+    // 写作要求附模仿条（模仿风格但不抄袭情节与专有名词）
+    expect(prompt).toContain("模仿参考文风");
+    expect(prompt).toContain("不抄袭其具体情节与专有名词");
+    // 生成前通报生效样本名单
+    expect(channel.notifies.some((n) => n.includes("🖋️ 本次参考文风：江南式打斗、张爱玲腔"))).toBeTrue();
+  });
+
+  test("混合启用停用：只注入启用条目，通知名单不含停用样本", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+
+    ctx.styleReferenceStore.addStyleReference(NOVEL_ID, {
+      name: "启用样本",
+      content: "启用的文风文本。",
+      enabled: true,
+    });
+    ctx.styleReferenceStore.addStyleReference(NOVEL_ID, {
+      name: "停用样本",
+      content: "停用的文风文本。",
+      enabled: false,
+    });
+
+    const channel = new FakeChannel([]);
+    await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
+
+    const prompt = generateTextCalls[0]!.prompt;
+    expect(prompt).toContain("（启用样本）");
+    expect(prompt).toContain("启用的文风文本。");
+    expect(prompt).not.toContain("（停用样本）");
+    expect(prompt).not.toContain("停用的文风文本。");
+    expect(channel.notifies.some((n) => n.includes("🖋️ 本次参考文风：启用样本"))).toBeTrue();
   });
 });

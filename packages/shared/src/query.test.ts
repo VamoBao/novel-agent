@@ -7,6 +7,7 @@ import {
   novelDetailSchema,
   novelListItemSchema,
   outlineNodeEntrySchema,
+  styleReferenceEntrySchema,
 } from "./query";
 
 const validListItem = {
@@ -177,6 +178,7 @@ describe("novelDetailSchema", () => {
       documents: validDocuments,
       foreshadows: [],
       locations: [],
+      styleReferences: [],
     });
     expect(detail.characters).toHaveLength(1);
     expect(detail.outlineNodes).toHaveLength(2);
@@ -195,6 +197,7 @@ describe("novelDetailSchema", () => {
       documents: [],
       foreshadows: [],
       locations: [],
+      styleReferences: [],
     });
     expect(detail.worldview).toBeNull();
     expect(detail.outlineNodes).toHaveLength(0);
@@ -210,6 +213,7 @@ describe("novelDetailSchema", () => {
       documents: [{ ...validDocuments[0], content: null }],
       foreshadows: [],
       locations: [],
+      styleReferences: [],
     });
     expect(detail.documents[0]?.content).toBeNull();
     expect(detail.documents[0]?.wordCount).toBe(22);
@@ -294,6 +298,7 @@ describe("foreshadowEntrySchema 与 novelDetail.foreshadows", () => {
       documents: [],
       foreshadows: [{ ...entry, recoveryStatus: "unrecovered" }],
       locations: [],
+      styleReferences: [],
     });
     expect(detail.foreshadows).toHaveLength(1);
     expect(detail.foreshadows[0]?.characterIds).toEqual(["char-1", "char-2"]);
@@ -348,8 +353,52 @@ describe("locationEntrySchema 与 novelDetail.locations", () => {
       locations: [
         { id: "dddddddd-0000-7000-8000-000000000004", name: "青云城", description: "东部边境要塞" },
       ],
+      styleReferences: [],
     });
     expect(detail.locations).toHaveLength(1);
     expect(detail.locations[0]?.name).toBe("青云城");
+  });
+});
+
+describe("styleReferenceEntrySchema 与 novelDetail.styleReferences", () => {
+  test("条目（id + 名字 + 内容 + 启用开关）通过校验；缺 id 或空内容被拒绝", () => {
+    const entry = {
+      id: "eeeeeeee-0000-7000-8000-000000000001",
+      name: "江南式打斗",
+      content: "刀光一闪，血溅三步。",
+      enabled: true,
+    };
+    expect(styleReferenceEntrySchema.parse(entry).name).toBe("江南式打斗");
+    expect(() => styleReferenceEntrySchema.parse({ ...entry, id: "" })).toThrow();
+    expect(() => styleReferenceEntrySchema.parse({ ...entry, content: "" })).toThrow();
+  });
+
+  test("novelDetail 携带 styleReferences 数组通过契约校验（结构树文风组与正文注入取用）", () => {
+    const detail = novelDetailSchema.parse({
+      novel: {
+        id: "aaaaaaaa-0000-7000-8000-000000000001",
+        name: "灵脉破晓",
+        pinned: false,
+        favorite: false,
+        createdAt: "2026-10-10T00:00:00Z",
+        updatedAt: "2026-10-10T00:00:00Z",
+      },
+      worldview: null,
+      characters: [],
+      outlineNodes: [],
+      documents: [],
+      foreshadows: [],
+      locations: [],
+      styleReferences: [
+        {
+          id: "eeeeeeee-0000-7000-8000-000000000002",
+          name: "张爱玲腔",
+          content: "生命是一袭华美的袍。",
+          enabled: false,
+        },
+      ],
+    });
+    expect(detail.styleReferences).toHaveLength(1);
+    expect(detail.styleReferences[0]?.enabled).toBe(false);
   });
 });

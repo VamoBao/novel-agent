@@ -7,6 +7,7 @@ import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-stor
 import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
 import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
 import { getDefaultDocumentStore, type DocumentStore } from "../state/document-store";
+import { getDefaultStyleReferenceStore, type StyleReferenceStore } from "../state/style-reference-store";
 import { OUTPUT_DIR } from "../output/outline-writer";
 import {
   buildChapterDocumentPath,
@@ -32,6 +33,8 @@ export interface WriteChapterOptions {
   worldviewStore?: WorldviewStore;
   characterStore?: CharacterStore;
   documentStore?: DocumentStore;
+  /** 参考文风库；缺省 getDefaultStyleReferenceStore()，测试注入替身 */
+  styleReferenceStore?: StyleReferenceStore;
 }
 
 export interface WriteChapterResult {
@@ -79,6 +82,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   const worldviewStore = options.worldviewStore ?? getDefaultWorldviewStore();
   const characterStore = options.characterStore ?? getDefaultCharacterStore();
   const documentStore = options.documentStore ?? getDefaultDocumentStore();
+  const styleReferenceStore = options.styleReferenceStore ?? getDefaultStyleReferenceStore();
   const outputDir = options.outputDir ?? OUTPUT_DIR;
 
   const novel = novelStore.getNovel(novelId);
@@ -125,7 +129,17 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   const previous = siblings.find((n) => n.node.sort === chapter.node.sort - 1);
   const next = siblings.find((n) => n.node.sort === chapter.node.sort + 1);
 
+  // 参考文风（可选增强，不阻塞生成）：只注入启用的样本，全部停用或未添加时零注入零通知
+  const enabledStyles = styleReferenceStore
+    .listStyleReferences(novelId)
+    .filter((stored) => stored.styleReference.enabled);
+
   channel.notify(`✍️ 正文生成中（《${novel.name ?? "未命名小说"}》· ${chapter.node.name}，写作模型）…`);
+  if (enabledStyles.length > 0) {
+    channel.notify(
+      `🖋️ 本次参考文风：${enabledStyles.map((stored) => stored.styleReference.name).join("、")}`,
+    );
+  }
   const model = options.model ?? getWritingModel();
   const { text } = await generateText({
     model,
@@ -161,6 +175,16 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       next
         ? `【下一章（为其留出衔接空间，不要抢写其情节）】\n${next.node.name}：${next.node.summary}`
         : null,
+      // 参考文风放 prompt 尾部：不把世界观/角色/本章概述等核心上下文推远，且紧邻风格指令
+      ...(enabledStyles.length > 0
+        ? [
+            "",
+            "【参考文风】",
+            enabledStyles
+              .map((stored) => `（${stored.styleReference.name}）\n${stored.styleReference.content}`)
+              .join("\n\n"),
+          ]
+        : []),
       "",
       "写作要求：",
       "1. 依据本章剧情概述展开正文，可合理补充场景、对话与细节，但不得偏离概述的情节走向；",
@@ -168,7 +192,12 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       "3. 场景化叙述、张弛有度，对话自然贴合各角色性格；",
       "4. 严格遵守世界观禁忌（taboos）；",
       "5. 篇幅约 2000~3000 字；",
-      "6. 只输出正文文本：不要章节标题、不要任何说明或元信息。",
+      ...(enabledStyles.length > 0
+        ? ["6. 模仿参考文风样本的叙事语言、句式节奏与描写风格，但不抄袭其具体情节与专有名词；"]
+        : []),
+      enabledStyles.length > 0
+        ? "7. 只输出正文文本：不要章节标题、不要任何说明或元信息。"
+        : "6. 只输出正文文本：不要章节标题、不要任何说明或元信息。",
     ]
       .filter((line): line is string => line !== null)
       .join("\n"),

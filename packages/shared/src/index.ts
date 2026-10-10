@@ -30,6 +30,7 @@ export {
   type OutlineNodePatch,
 } from "./outline-node";
 export { documentSchema, type Document } from "./document";
+export { styleReferenceSchema, type StyleReference } from "./style-reference";
 export { audienceSuggestionSchema, type AudienceSuggestion } from "./audience";
 export {
   fieldSummaryViewSchema,
@@ -66,6 +67,7 @@ export {
   documentEntrySchema,
   foreshadowEntrySchema,
   locationEntrySchema,
+  styleReferenceEntrySchema,
   novelDetailSchema,
   novelDeletedResultSchema,
   type NovelListItem,
@@ -74,6 +76,7 @@ export {
   type DocumentEntry,
   type ForeshadowEntry,
   type LocationEntry,
+  type StyleReferenceEntry,
   type NovelDetail,
   type NovelDeletedResult,
 } from "./query";

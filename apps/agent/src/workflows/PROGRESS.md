@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-10 [feat] 参考文风——结构界面维护 + 正文生成按启用注入（跨模块需求，设计规格 `docs/superpowers/specs/2026-10-10-style-references-design.md` + 实现计划 `docs/superpowers/plans/2026-10-10-style-references.md`，8 任务逐一实现后清单归一；三项选型经用户确认：内容存库不落文件 / 每本小说独立 / 启用开关制，决策见根 DECISIONS）：**本模块仅 write-chapter.ts 改动**——上下文组装时经 style-reference-store 按启用过滤参考文风，非空在 prompt 尾部（【下一章】块后、写作要求前）注入【参考文风】段（每条「（名字）\n内容」）+ 写作要求附模仿条（模仿叙事语言/句式节奏/描写风格，不抄袭具体情节与专有名词）+ 生成前 notify 生效名单；无启用文风零注入零通知（现状逐字节回归，不新增前置校验分支）。write-chapter.test.ts 净增 3 用例覆盖四态（无启用 / 两条启用段落位置与模仿要求与 notify / 全停用同无文风 / 混合只注入启用条）。shared schema / style_references 表（14→15）/ query CLI 三命令 / 客户端文风组见根 PROGRESS 当日条目。AC：typecheck 3 工程 / lint / 319 用例全过；真实库副本迁移 13→15 实跑无损（八表行数逐一一致），真实库未动；真实 LLM 端到端待用户复验——结构树添加启用文风后生成正文，观察 notify 名单与文风效果
+
 - 2026-10-07 [feat] 结构树伏笔组与预览编辑（跨模块需求，SDD 计划见 `docs/superpowers/plans/2026-10-07-foreshadow-tree-edit.md`，5 任务逐一实现后清单归一，决策见根 DECISIONS）：**本模块零改动**——需求落在 shared 查询契约（foreshadowEntry.actNodeId）/ agent 查询 CLI（update-foreshadow 命令，src/query.ts 非本模块）/ 客户端结构树与编辑表单；本模块入库的伏笔首次可在结构树按幕总览与编辑——详细改动范围与 AC（typecheck 3 工程 / lint / 268 用例全过，净增 3；GUI 待人工验收）见根 PROGRESS 当日条目
 
 - 2026-10-07 [feat] 章节预览伏笔展示（跨模块需求，SDD 计划见 `docs/superpowers/plans/2026-10-07-chapter-foreshadow-preview.md`，4 任务逐一实现后清单归一，决策见根 DECISIONS）：**本模块零改动**——需求落在 shared 查询契约（novelDetail.foreshadows）/ agent 查询 CLI（buildNovelDetail 读 ForeshadowStore）/ 客户端章卡渲染，本模块入库的伏笔（foreshadow-intake 采集、appearChapterId 绑定）首次在客户端展示——详细改动范围与 AC（typecheck 3 工程 / lint / 265 用例全过，净增 3；GUI 观感待人工验收）见根 PROGRESS 当日条目

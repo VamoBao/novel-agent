@@ -9,6 +9,7 @@ import type {
   ForeshadowEntry,
   NovelDetail,
   NovelListItem,
+  StyleReferenceEntry,
 } from "@novel/shared";
 
 /**
@@ -52,6 +53,19 @@ contextBridge.exposeInMainWorld("agent", {
     ipcRenderer.invoke("library:updateCharacter", novelId, characterId, character),
   updateForeshadow: (novelId: string, foreshadowId: string, foreshadow: Foreshadow): Promise<ForeshadowEntry> =>
     ipcRenderer.invoke("library:updateForeshadow", novelId, foreshadowId, foreshadow),
+  /** 参考文风管理（新增 / 编辑 / 删除）：返回文风条目（删除返回被删 ID） */
+  addStyle: (
+    novelId: string,
+    style: { name: string; content: string; enabled?: boolean },
+  ): Promise<StyleReferenceEntry> => ipcRenderer.invoke("library:addStyle", novelId, style),
+  updateStyle: (
+    novelId: string,
+    styleId: string,
+    style: { name: string; content: string; enabled: boolean },
+  ): Promise<StyleReferenceEntry> =>
+    ipcRenderer.invoke("library:updateStyle", novelId, styleId, style),
+  deleteStyle: (styleId: string): Promise<{ deleted: string }> =>
+    ipcRenderer.invoke("library:deleteStyle", styleId),
   /** 模型设置读写（设置弹窗）：明文 JSON 于 userData（优先级 设置 > .env > 继承环境变量） */
   getSettings: (): Promise<{ settings: AppSettings; filePath: string }> =>
     ipcRenderer.invoke("settings:get"),

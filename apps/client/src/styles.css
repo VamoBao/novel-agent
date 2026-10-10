@@ -713,6 +713,22 @@ button.danger {
   accent-color: var(--accent);
 }
 
+/* 文风编辑表单删除按钮（StyleEditForm，编辑态）：危险色实底，对齐弹框删除按钮观感 */
+.character-form .form-actions .danger-filled {
+  background: var(--danger-emphasis);
+  border-color: var(--danger-emphasis);
+  color: var(--fg-on-emphasis);
+}
+
+.character-form .form-actions .danger-filled:hover:not(:disabled) {
+  background: var(--danger-hover);
+}
+
+.character-form .form-actions .danger-filled:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* 角色卡预览的编辑入口行（卡片上方右对齐） */
 .preview-actions {
   display: flex;

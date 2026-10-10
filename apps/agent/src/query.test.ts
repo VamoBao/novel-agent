@@ -14,13 +14,16 @@ import { OutlineStore } from "./state/outline-store";
 import { WorldviewStore } from "./state/worldview-store";
 import { writeDocumentArtifact } from "./output/document-writer";
 import {
+  addStyleEntry,
   buildNovelDetail,
   buildNovelList,
   deleteNovel,
+  deleteStyleEntry,
   renameNovel,
   setNovelFavorite,
   setNovelPinned,
   updateForeshadowEntry,
+  updateStyleEntry,
 } from "./query";
 
 const tempDirs: string[] = [];
@@ -403,6 +406,62 @@ describe("query CLI update-foreshadow", () => {
         surfaceAction: "x", hiddenTruth: "y", attentionLevel: 1, recoveryStatus: "unrecovered",
       })),
     ).toThrow("伏笔不存在");
+    db.close();
+  });
+});
+
+describe("query CLI 参考文风（add-style / update-style / delete-style）", () => {
+  test("add-style 入库后 buildNovelDetail 携带条目（按入库顺序）；小说不存在与 JSON 非法抛可读错误", async () => {
+    const { db } = await newFixture();
+    const id = "eeeeeeee-0000-7000-8000-000000000001";
+    new NovelStore(db).createNovel({ id, name: "文风之书" });
+
+    const added = addStyleEntry(db, id, JSON.stringify({
+      name: "江南式打斗",
+      content: "刀光一闪，血溅三步。",
+    }));
+    expect(added.name).toBe("江南式打斗");
+    expect(added.enabled).toBe(true);
+    addStyleEntry(db, id, JSON.stringify({ name: "张爱玲腔", content: "生命是一袭华美的袍。", enabled: false }));
+
+    const detail = buildNovelDetail(db, id);
+    expect(detail.styleReferences).toHaveLength(2);
+    expect(detail.styleReferences.map((s) => s.name)).toEqual(["江南式打斗", "张爱玲腔"]);
+    expect(detail.styleReferences[1]?.enabled).toBe(false);
+
+    expect(() => addStyleEntry(db, "no-such-novel", JSON.stringify({ name: "x", content: "y" }))).toThrow(
+      "小说不存在",
+    );
+    expect(() => addStyleEntry(db, id, "{not-json")).toThrow("解析失败");
+    expect(() => addStyleEntry(db, id, JSON.stringify({ name: "", content: "y" }))).toThrow("不合法");
+    db.close();
+  });
+
+  test("update-style 全量编辑返回更新后条目；delete-style 删除后清单减少", async () => {
+    const { db } = await newFixture();
+    const id = "eeeeeeee-0000-7000-8000-000000000002";
+    new NovelStore(db).createNovel({ id });
+    const added = addStyleEntry(db, id, JSON.stringify({ name: "原名", content: "原内容" }));
+
+    const updated = updateStyleEntry(db, id, added.id, JSON.stringify({
+      name: "新名",
+      content: "新内容",
+      enabled: false,
+    }));
+    expect(updated.id).toBe(added.id);
+    expect(updated).toEqual({
+      id: added.id,
+      name: "新名",
+      content: "新内容",
+      enabled: false,
+    });
+
+    deleteStyleEntry(db, added.id);
+    expect(buildNovelDetail(db, id).styleReferences).toHaveLength(0);
+    expect(() => deleteStyleEntry(db, added.id)).toThrow("参考文风不存在");
+    expect(() =>
+      updateStyleEntry(db, id, "no-such-style", JSON.stringify({ name: "x", content: "y", enabled: true })),
+    ).toThrow("参考文风不存在");
     db.close();
   });
 });

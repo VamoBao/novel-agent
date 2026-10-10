@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import type { CharacterEntry, NovelDetail, NovelListItem, OutlineNodeEntry } from "@novel/shared";
+import type {
+  CharacterEntry,
+  NovelDetail,
+  NovelListItem,
+  OutlineNodeEntry,
+  StyleReferenceEntry,
+} from "@novel/shared";
 import { ChapterPlanFlow } from "./components/ChapterPlanFlow";
 import { CreationFlow } from "./components/CreationFlow";
 import { NovelListPanel } from "./components/NovelListPanel";
@@ -38,6 +44,8 @@ export function App() {
   const [chapterPlan, setChapterPlan] = useState<ChapterPlanTarget | null>(null);
   /** 右栏新建角色态（角色组头「＋」进入；提交/取消/改选节点退出） */
   const [creatingCharacter, setCreatingCharacter] = useState(false);
+  /** 右栏新建文风态（文风组头「＋」进入；提交/取消/改选节点退出） */
+  const [creatingStyle, setCreatingStyle] = useState(false);
   /** 弹框确认中的重生成目标（非 null 时渲染 OutlineRegenDialog） */
   const [regenConfirm, setRegenConfirm] = useState<OutlineRegenTarget | null>(null);
   const [outlineRegen, setOutlineRegen] = useState<OutlineRegenTarget | null>(null);
@@ -82,6 +90,7 @@ export function App() {
         setDetail(null);
         setDetailError(null);
         setCreatingCharacter(false);
+        setCreatingStyle(false);
         return;
     }
     let cancelled = false;
@@ -119,9 +128,10 @@ export function App() {
     };
   }, [selectedId]);
 
-  /** 结构树选中：同时退出新建角色态（新建中点击其他节点视为取消） */
+  /** 结构树选中：同时退出新建角色 / 新建文风态（新建中点击其他节点视为取消） */
   const handleSelect = (next: Selection): void => {
     setCreatingCharacter(false);
+    setCreatingStyle(false);
     setSelection(next);
   };
 
@@ -144,6 +154,24 @@ export function App() {
 
   /** 伏笔编辑提交成功：刷新详情（伏笔 id 稳定，选中与编辑态由 PreviewPane 收口） */
   const handleForeshadowSaved = (): void => {
+    if (selectedId) void reloadDetail(selectedId);
+  };
+
+  /** 新增文风提交成功：退出新建态、刷新详情并自动选中新条目 */
+  const handleStyleCreated = (entry: StyleReferenceEntry): void => {
+    setCreatingStyle(false);
+    setSelection({ kind: "style", styleId: entry.id });
+    if (selectedId) void reloadDetail(selectedId);
+  };
+
+  /** 文风编辑提交成功：刷新详情（文风 id 稳定，选中与编辑态由 PreviewPane 收口） */
+  const handleStyleSaved = (): void => {
+    if (selectedId) void reloadDetail(selectedId);
+  };
+
+  /** 文风删除成功：重置选中（原 id 已不存在）并刷新详情 */
+  const handleStyleDeleted = (): void => {
+    setSelection(null);
     if (selectedId) void reloadDetail(selectedId);
   };
 
@@ -338,6 +366,7 @@ export function App() {
             onSelect={handleSelect}
             onRegenOutline={handleRegenOutline}
             onAddCharacter={detail ? () => setCreatingCharacter(true) : undefined}
+            onAddStyle={detail ? () => setCreatingStyle(true) : undefined}
           />
         </nav>
         <main className="preview-pane">
@@ -353,6 +382,11 @@ export function App() {
             onCharacterSaved={handleCharacterSaved}
             onForeshadowSaved={handleForeshadowSaved}
             onDocumentSaved={handleDocumentSaved}
+            creatingStyle={creatingStyle}
+            onStyleCreatedSubmitted={handleStyleCreated}
+            onStyleCreatedCancelled={() => setCreatingStyle(false)}
+            onStyleSaved={handleStyleSaved}
+            onStyleDeleted={handleStyleDeleted}
           />
         </main>
       </div>

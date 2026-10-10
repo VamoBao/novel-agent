@@ -7,6 +7,7 @@ import {
   novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
+  styleReferenceSchema,
   type Character,
   type CharacterEntry,
   type DocumentEntry,
@@ -18,6 +19,8 @@ import {
   type NovelDetail,
   type NovelListItem,
   type OutlineNodeEntry,
+  type StyleReference,
+  type StyleReferenceEntry,
 } from "@novel/shared";
 import { CharacterStore, type StoredCharacter } from "./state/character-store";
 import { openDatabase } from "./state/db";
@@ -27,6 +30,7 @@ import { WorldviewStore } from "./state/worldview-store";
 import { DocumentStore } from "./state/document-store";
 import { ForeshadowStore, type StoredForeshadow } from "./state/foreshadow-store";
 import { LocationStore } from "./state/location-store";
+import { StyleReferenceStore } from "./state/style-reference-store";
 import { OUTPUT_DIR, outlineFilePath } from "./output/outline-writer";
 import {
   moveDocumentArtifact,
@@ -51,6 +55,9 @@ import {
  *   / `add-character <novelId> <角色卡JSON>`（新增角色，version=1）
  *   / `update-character <novelId> <characterId> <角色卡JSON>`（版本化编辑角色，旧卡快照归档）
  *   / `update-foreshadow <novelId> <foreshadowId> <伏笔JSON>`（patch 语义编辑伏笔）
+ *   / `add-style <novelId> <文风JSON>`（新增参考文风，enabled 缺省启用）
+ *   / `update-style <novelId> <styleId> <文风JSON>`（全量编辑参考文风：名字/内容/启用开关）
+ *   / `delete-style <styleId>`（删除参考文风）
  *
  * 连接统一走 openDatabase：4→5 起有保数据迁移，纯浏览路径也须能完成版本升级
  * （readonly 连接会在旧库上因缺列报错）。
@@ -116,6 +123,10 @@ export function buildNovelDetail(
   const locations: LocationEntry[] = new LocationStore(db)
     .listLocations(novelId)
     .map((stored) => ({ id: stored.id, ...stored.location }));
+  // 参考文风条目：style_references 表全量行（按入库顺序），结构树文风组与正文生成注入取用
+  const styleReferences: StyleReferenceEntry[] = new StyleReferenceStore(db)
+    .listStyleReferences(novelId)
+    .map(toStyleReferenceEntry);
   return novelDetailSchema.parse({
     novel: toListItem(novel),
     worldview,
@@ -124,6 +135,7 @@ export function buildNovelDetail(
     documents,
     foreshadows,
     locations,
+    styleReferences,
   });
 }
 
@@ -290,6 +302,70 @@ export function updateForeshadowEntry(
   return toForeshadowEntry(new ForeshadowStore(db).updateForeshadow(foreshadowId, patch));
 }
 
+/** 文风 JSON → schema 校验后的 StyleReference（add 用：enabled 缺省 true——新增即启用） */
+function parseStyleReferenceJson(json: string, requireEnabled: boolean): StyleReference {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch (error) {
+    throw new Error(
+      `文风 JSON 解析失败：${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  const input =
+    !requireEnabled && typeof raw === "object" && raw !== null
+      ? { enabled: true, ...(raw as Record<string, unknown>) }
+      : raw;
+  const result = styleReferenceSchema.safeParse(input);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new Error(
+      `文风数据不合法（${issue?.path.join(".") || "根"}）：${issue?.message ?? "未知问题"}`,
+    );
+  }
+  return result.data;
+}
+
+function toStyleReferenceEntry(stored: {
+  id: string;
+  styleReference: StyleReference;
+}): StyleReferenceEntry {
+  return { id: stored.id, ...stored.styleReference };
+}
+
+/** add-style 载荷：入库新文风（enabled 缺省 true），返回文风条目 */
+export function addStyleEntry(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  styleJson: string,
+): StyleReferenceEntry {
+  if (!new NovelStore(db).getNovel(novelId)) {
+    throw new Error(`小说不存在，无法新增文风：${novelId}`);
+  }
+  const style = parseStyleReferenceJson(styleJson, false);
+  const stored = new StyleReferenceStore(db).addStyleReference(novelId, style);
+  return toStyleReferenceEntry(stored);
+}
+
+/** update-style 载荷：全量编辑文风（名字/内容/启用开关），返回更新后条目 */
+export function updateStyleEntry(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  styleId: string,
+  styleJson: string,
+): StyleReferenceEntry {
+  const style = parseStyleReferenceJson(styleJson, true);
+  const stored = new StyleReferenceStore(db).updateStyleReference(styleId, style);
+  return toStyleReferenceEntry(stored);
+}
+
+/** delete-style 载荷：删除文风（行不存在抛可读错误） */
+export function deleteStyleEntry(db: ReturnType<typeof openDatabase>, styleId: string): { deleted: string } {
+  new StyleReferenceStore(db).deleteStyleReference(styleId);
+  return { deleted: styleId };
+}
+
 function main(argv: string[]): number {
   const [command, novelId, ...rest] = argv;
   const db = openDatabase();
@@ -334,6 +410,19 @@ function main(argv: string[]): number {
         if (!novelId || rest.length !== 2 || !rest[0] || !rest[1]) break;
         process.stdout.write(`${JSON.stringify(updateForeshadowEntry(db, novelId, rest[0], rest[1]))}\n`);
         return 0;
+      case "add-style":
+        if (!novelId || rest.length !== 1 || !rest[0]) break;
+        process.stdout.write(`${JSON.stringify(addStyleEntry(db, novelId, rest[0]))}\n`);
+        return 0;
+      case "update-style":
+        if (!novelId || rest.length !== 2 || !rest[0] || !rest[1]) break;
+        process.stdout.write(`${JSON.stringify(updateStyleEntry(db, novelId, rest[0], rest[1]))}\n`);
+        return 0;
+      case "delete-style":
+        // 文风 ID 落在第二个位置参数（novelId 变量处）——delete 无小说入参
+        if (!novelId) break;
+        process.stdout.write(`${JSON.stringify(deleteStyleEntry(db, novelId))}\n`);
+        return 0;
       default:
         break;
     }
@@ -341,7 +430,7 @@ function main(argv: string[]): number {
     db.close();
   }
   process.stderr.write(
-    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id> | add-character <novelId> <角色卡JSON> | update-character <novelId> <characterId> <角色卡JSON> | update-foreshadow <novelId> <foreshadowId> <伏笔JSON>>\n",
+    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id> | add-character <novelId> <角色卡JSON> | update-character <novelId> <characterId> <角色卡JSON> | update-foreshadow <novelId> <foreshadowId> <伏笔JSON> | add-style <novelId> <文风JSON> | update-style <novelId> <styleId> <文风JSON> | delete-style <styleId>>\n",
   );
   return 1;
 }

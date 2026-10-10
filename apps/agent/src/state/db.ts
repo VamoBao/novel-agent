@@ -7,7 +7,7 @@ export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 
 /**
  * 打开（必要时创建）数据库并完成建表。
@@ -31,6 +31,10 @@ const SCHEMA_VERSION = 14;
  *   （recover_act_node_id，大纲规划的真相揭晓幕）均为
  *   可空裸列（chapter 节点写作期落地后补约束，先例 document_id），
  *   回收章节 IDs 与服务角色 IDs 存 JSON 文本
+ * - style_references：参考文风（名字/文本内容/启用开关）——**内容直接进库**
+ *   （TEXT 列，不落文件：文风是喂给 LLM 的素材而非人类阅读产物，体量小而恒定，
+ *   每次生成正文都全量注入无懒加载空间），每本小说独立（novel_id 外键），
+ *   enabled 控制生成正文时是否注入
  */
 /**
  * 10→11 数据迁移：documents 表正文改文件存储。
@@ -197,8 +201,9 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
         }
       }
       // 9→10：新增 documents 表，无 ALTER——由下方 CREATE TABLE IF NOT EXISTS 幂等落地
+      // 14→15：新增 style_references 表，无 ALTER——同上
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>14 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>15 的库被旧代码打开）：重建兜底
       db.exec("DROP TABLE IF EXISTS documents;");
       db.exec("DROP TABLE IF EXISTS outlines;");
       db.exec("DROP TABLE IF EXISTS locations;");
@@ -361,6 +366,20 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
   `);
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_foreshadows_novel_id ON foreshadows(novel_id);",
+  );
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS style_references (
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL REFERENCES novels(id),
+      name TEXT NOT NULL,
+      content TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_style_references_novel_id ON style_references(novel_id);",
   );
   return db;
 }

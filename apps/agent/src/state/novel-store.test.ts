@@ -148,6 +148,12 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
          VALUES ('fs-1', ?, '送信任务', '借刀杀人', 4, 'partial', '["ch-a", "ch-b"]', '["ch-1"]', ?, ?);`,
       )
       .run(id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+    db
+      .prepare(
+        `INSERT INTO style_references (id, novel_id, name, content, enabled, created_at, updated_at)
+         VALUES ('sr-1', ?, '江南式打斗', '刀光一闪。', 1, ?, ?);`,
+      )
+      .run(id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
 
     store.deleteNovel(id);
     expect(store.getNovel(id)).toBeUndefined();
@@ -156,12 +162,13 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     expect((db.prepare("SELECT COUNT(*) AS c FROM outlines").get() as { c: number }).c).toBe(0);
     expect((db.prepare("SELECT COUNT(*) AS c FROM locations").get() as { c: number }).c).toBe(0);
     expect((db.prepare("SELECT COUNT(*) AS c FROM foreshadows").get() as { c: number }).c).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) AS c FROM style_references").get() as { c: number }).c).toBe(0);
     expect(() => store.deleteNovel(id)).toThrow("不存在");
     db.close();
     await rm(dir, { recursive: true, force: true });
   });
 
-  test("v4 旧库经 openDatabase 迁移：数据保留、新列可用、版本升到 12", async () => {
+  test("v4 旧库经 openDatabase 迁移：数据保留、新列可用、版本升到当前", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-mig-"));
     const dbPath = join(dir, "v4.db");
     // 手工构造 v4 形态的库：旧 novels 结构（无 pinned / favorite）+ 旧 outlines 结构
@@ -239,7 +246,7 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     expect(legacyChar.version).toBe(1);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(14);
+    ).toBe(15);
     db.close();
     await rm(dir, { recursive: true, force: true });
   });

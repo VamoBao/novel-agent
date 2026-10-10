@@ -9,6 +9,7 @@ import type {
   ForeshadowEntry,
   NovelDetail,
   NovelListItem,
+  StyleReferenceEntry,
 } from "@novel/shared";
 
 declare global {
@@ -32,6 +33,16 @@ declare global {
         character: Character,
       ) => Promise<CharacterEntry>;
       updateForeshadow: (novelId: string, foreshadowId: string, foreshadow: Foreshadow) => Promise<ForeshadowEntry>;
+      addStyle: (
+        novelId: string,
+        style: { name: string; content: string; enabled?: boolean },
+      ) => Promise<StyleReferenceEntry>;
+      updateStyle: (
+        novelId: string,
+        styleId: string,
+        style: { name: string; content: string; enabled: boolean },
+      ) => Promise<StyleReferenceEntry>;
+      deleteStyle: (styleId: string) => Promise<{ deleted: string }>;
       getSettings: () => Promise<{ settings: AppSettings; filePath: string }>;
       saveSettings: (settings: AppSettings) => Promise<{ settings: AppSettings; filePath: string }>;
       isAutostart: () => boolean;

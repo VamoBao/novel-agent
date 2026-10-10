@@ -3,6 +3,7 @@ import { characterSchema } from "./character";
 import { foreshadowSchema } from "./foreshadow";
 import { locationSchema } from "./location";
 import { outlineNodeTypeSchema } from "./outline-node";
+import { styleReferenceSchema } from "./style-reference";
 import { worldviewSchema } from "./worldview";
 
 /**
@@ -83,6 +84,12 @@ export const locationEntrySchema = locationSchema.extend({
 });
 export type LocationEntry = z.infer<typeof locationEntrySchema>;
 
+/** 参考文风条目：style_references 表当前行（按入库顺序）；生成正文按 enabled 注入 */
+export const styleReferenceEntrySchema = styleReferenceSchema.extend({
+  id: z.string().min(1).describe("style_references 表主键（UUIDv7）"),
+});
+export type StyleReferenceEntry = z.infer<typeof styleReferenceEntrySchema>;
+
 /** 单本小说全量资料：结构数据（世界观 / 角色 / 大纲节点 / 正文 / 伏笔）均可缺失（对应创作中途尚未落库的部分） */
 export const novelDetailSchema = z.object({
   novel: novelListItemSchema,
@@ -100,6 +107,11 @@ export const novelDetailSchema = z.object({
   locations: z
     .array(locationEntrySchema)
     .describe("全部地点（按入库顺序，未生成为空数组；结构树地点组取用）"),
+  styleReferences: z
+    .array(styleReferenceEntrySchema)
+    .describe(
+      "全部参考文风（按入库顺序，未添加为空数组；结构树文风组与正文生成注入取用）",
+    ),
 });
 export type NovelDetail = z.infer<typeof novelDetailSchema>;
 

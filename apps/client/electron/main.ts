@@ -10,6 +10,7 @@ import {
   novelDetailSchema,
   novelListItemSchema,
   PROTOCOL_VERSION,
+  styleReferenceEntrySchema,
   type AgentStartOptions,
   type Character,
   type CharacterEntry,
@@ -17,6 +18,7 @@ import {
   type ForeshadowEntry,
   type NovelDetail,
   type NovelListItem,
+  type StyleReferenceEntry,
 } from "@novel/shared";
 import {
   readSettingsFile,
@@ -419,6 +421,42 @@ ipcMain.handle(
   "library:updateForeshadow",
   (_event, novelId: string, foreshadowId: string, foreshadow: Foreshadow): Promise<ForeshadowEntry> =>
     handleForeshadowMutation(["update-foreshadow", novelId, foreshadowId, JSON.stringify(foreshadow)]),
+);
+
+/** 参考文风管理（新增 / 编辑 / 删除）：操作成功返回文风条目 */
+function handleStyleMutation(args: string[]): Promise<StyleReferenceEntry> {
+  return runLibraryQuery(args).then((raw) => {
+    const result = styleReferenceEntrySchema.safeParse(raw);
+    if (!result.success) {
+      throw new Error(`文风结果不合查询 schema：${result.error.issues[0]?.message ?? "未知错误"}`);
+    }
+    return result.data;
+  });
+}
+
+ipcMain.handle(
+  "library:addStyle",
+  (_event, novelId: string, style: { name: string; content: string; enabled?: boolean }): Promise<StyleReferenceEntry> =>
+    handleStyleMutation(["add-style", novelId, JSON.stringify(style)]),
+);
+
+ipcMain.handle(
+  "library:updateStyle",
+  (_event, novelId: string, styleId: string, style: { name: string; content: string; enabled: boolean }): Promise<StyleReferenceEntry> =>
+    handleStyleMutation(["update-style", novelId, styleId, JSON.stringify(style)]),
+);
+
+ipcMain.handle("library:deleteStyle", (_event, styleId: string): Promise<{ deleted: string }> =>
+  runLibraryQuery(["delete-style", styleId]).then((raw) => {
+    if (
+      typeof raw !== "object" ||
+      raw === null ||
+      (raw as { deleted?: unknown }).deleted !== styleId
+    ) {
+      throw new Error("删除结果不合查询 schema");
+    }
+    return raw as { deleted: string };
+  }),
 );
 
 app.whenReady().then(() => {

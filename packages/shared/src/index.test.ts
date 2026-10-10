@@ -13,11 +13,14 @@ import {
   newCharacterSchema,
   newForeshadowSchema,
   newLocationSchema,
+  novelDetailSchema,
   outlineNewForeshadowSchema,
   outlineNodePatchSchema,
   outlineNodeSchema,
   outlineSchema,
   outlineViewSchema,
+  styleReferenceEntrySchema,
+  styleReferenceSchema,
   worldviewSchema,
 } from "./index";
 
@@ -517,6 +520,26 @@ describe("两确认视图的地点可选字段", () => {
     };
     expect(chapterPlanViewSchema.parse({ ...base, newLocations: [loc] }).newLocations).toHaveLength(1);
     expect(chapterPlanViewSchema.parse(base).newLocations).toBeUndefined();
+  });
+});
+
+describe("styleReferenceSchema 与查询契约", () => {
+  test("名字+内容+启用开关通过校验", () => {
+    const s = styleReferenceSchema.parse({ name: "江南式打斗", content: "刀光一闪，血溅三步。", enabled: true });
+    expect(s).toEqual({ name: "江南式打斗", content: "刀光一闪，血溅三步。", enabled: true });
+  });
+
+  test("空名 / 空内容被拒绝", () => {
+    expect(() => styleReferenceSchema.parse({ name: "", content: "样本", enabled: true })).toThrow();
+    expect(() => styleReferenceSchema.parse({ name: "文风", content: "", enabled: true })).toThrow();
+    expect(() => styleReferenceSchema.parse({ name: "文风", content: "样本", enabled: "yes" })).toThrow();
+  });
+
+  test("styleReferenceEntrySchema = schema + 库表主键；novelDetail.styleReferences 契约存在", () => {
+    const entry = styleReferenceEntrySchema.parse({ id: "s1", name: "文风", content: "样本", enabled: false });
+    expect(entry.id).toBe("s1");
+    expect(entry.enabled).toBe(false);
+    expect(novelDetailSchema.shape.styleReferences).toBeDefined();
   });
 });
 
