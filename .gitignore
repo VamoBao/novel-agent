@@ -53,3 +53,6 @@ data/*
 .zcodeignore
 
 .worktrees/
+
+# 临时目录（本地讨论记录等临时内容，整体不入库）
+temp/
