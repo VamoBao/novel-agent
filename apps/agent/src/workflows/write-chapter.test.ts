@@ -12,7 +12,9 @@ import { WorldviewStore } from "../state/worldview-store";
 import { CharacterStore } from "../state/character-store";
 import { DocumentStore } from "../state/document-store";
 import { StyleReferenceStore } from "../state/style-reference-store";
+import { ForeshadowStore } from "../state/foreshadow-store";
 import { FakeChannel } from "../ui/fake-channel";
+import { writeDocumentArtifact } from "../output/document-writer";
 import type { Character, Worldview } from "@novel/shared";
 
 /**
@@ -93,6 +95,7 @@ async function setupDb(options: { withWorldview?: boolean } = {}) {
   const worldviewStore = new WorldviewStore(db);
   const characterStore = new CharacterStore(db);
   const documentStore = new DocumentStore(db);
+  const foreshadowStore = new ForeshadowStore(db);
   novelStore.createNovel({ id: NOVEL_ID, name: "灵脉拾遗" });
   if (options.withWorldview !== false) {
     worldviewStore.saveWorldview(NOVEL_ID, worldviewFixture);
@@ -108,6 +111,7 @@ async function setupDb(options: { withWorldview?: boolean } = {}) {
   const chapters = outlineStore.saveChapters(NOVEL_ID, act!.id, [
     { name: "第一章", summary: "少年在市集拾得碎片" },
     { name: "第二章", summary: "宗门来人追查" },
+    { name: "第三章", summary: "碎片来历初现" },
   ]);
   return {
     novelStore,
@@ -115,11 +119,13 @@ async function setupDb(options: { withWorldview?: boolean } = {}) {
     worldviewStore,
     characterStore,
     documentStore,
+    foreshadowStore,
     styleReferenceStore: new StyleReferenceStore(db),
     outputDir,
     actNodeId: act!.id,
     chapterNodeId: chapters[0]!.id,
     secondChapterNodeId: chapters[1]!.id,
+    thirdChapterNodeId: chapters[2]!.id,
     cleanup: async () => {
       db.close();
       await rm(dir, { recursive: true, force: true });
@@ -396,5 +402,123 @@ describe("writeChapter", () => {
     expect(prompt).not.toContain("（停用样本）");
     expect(prompt).not.toContain("停用的文风文本。");
     expect(channel.notifies.some((n) => n.includes("🖋️ 本次参考文风：启用样本"))).toBeTrue();
+  });
+
+  test("无绑定伏笔：prompt 无【本章伏笔】段与伏笔要求、无伏笔通知（现状回归）", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+
+    const channel = new FakeChannel([]);
+    await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
+
+    const prompt = generateTextCalls[0]!.prompt;
+    expect(prompt).not.toContain("【本章伏笔】");
+    expect(prompt).not.toContain("按注意度控制显隐程度");
+    // 写作要求编号与既有形态一致（无附加条时「只输出正文文本」仍是第 6 条）
+    expect(prompt).toContain("6. 只输出正文文本");
+    expect(channel.notifies.some((n) => n.includes("本章伏笔"))).toBeFalse();
+  });
+
+  test("登场与同章种收注入：伏笔块位于下一章块之后参考文风之前，通知统计，要求附加条编号顺延", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+
+    const lin = ctx.characterStore.listCharacters(NOVEL_ID)[0]!;
+    ctx.foreshadowStore.addForeshadow(NOVEL_ID, {
+      surfaceAction: "碎片刻着细如发丝的痕",
+      hiddenTruth: "碎片是宗门失窃的镇脉之物",
+      attentionLevel: 7,
+      recoveryStatus: "unrecovered",
+      appearChapterId: ctx.chapterNodeId,
+      characterIds: [lin.id],
+    });
+    ctx.foreshadowStore.addForeshadow(NOVEL_ID, {
+      surfaceAction: "宗门告示的墨迹未干",
+      hiddenTruth: "告示出自宗门内鬼",
+      attentionLevel: 5,
+      recoveryStatus: "unrecovered",
+      appearChapterId: ctx.chapterNodeId,
+      recoverChapterIds: [ctx.chapterNodeId],
+    });
+    ctx.styleReferenceStore.addStyleReference(NOVEL_ID, { name: "样本", content: "文风文本。" });
+
+    const channel = new FakeChannel([]);
+    await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
+
+    const prompt = generateTextCalls[0]!.prompt;
+    expect(prompt).toContain("【本章伏笔】");
+    expect(prompt).toContain("一、本章登场");
+    expect(prompt).toContain("碎片刻着细如发丝的痕");
+    expect(prompt).toContain("服务角色：林恒");
+    expect(prompt).toContain("二、本章回收");
+    expect(prompt).toContain("登场于本章：");
+    // 块位置：下一章块之后、参考文风之前（核心叙事上下文区，长样本文风仍留尾部）
+    const foreshadowAt = prompt.indexOf("【本章伏笔】");
+    const nextAt = prompt.indexOf("【下一章");
+    const styleAt = prompt.indexOf("【参考文风】");
+    const reqAt = prompt.indexOf("写作要求：");
+    expect(nextAt).toBeGreaterThan(-1);
+    expect(foreshadowAt).toBeGreaterThan(nextAt);
+    expect(foreshadowAt).toBeLessThan(styleAt);
+    expect(styleAt).toBeLessThan(reqAt);
+    // 条件附加要求编号顺延：6=伏笔、7=文风、8=只输出正文文本
+    expect(prompt).toContain("6. 本章如有登场伏笔");
+    expect(prompt).toContain("7. 模仿参考文风");
+    expect(prompt).toContain("8. 只输出正文文本");
+    expect(channel.notifies.some((n) => n.includes("🔮 本章伏笔：登场 1 条、回收 1 条"))).toBeTrue();
+  });
+
+  test("回收伏笔登场章上下文：正文优先注入、未生成章概述兜底，通知带降级计数", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+
+    // 登场章 = 第一章（写正文文件 + 登记元数据）；另一条伏笔登场章 = 第三章（未写正文）
+    const prose = "　　少年把碎片藏进袖中，指腹擦过那道细如发丝的刻痕。\n\n　　宗门的告示贴在市集口，墨迹未干。";
+    const rel = join("灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    writeDocumentArtifact(rel, prose, ctx.outputDir);
+    ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, rel, 52);
+    ctx.foreshadowStore.addForeshadow(NOVEL_ID, {
+      surfaceAction: "碎片刻有宗门印记",
+      hiddenTruth: "碎片是宗门失窃的镇脉之物",
+      attentionLevel: 6,
+      recoveryStatus: "unrecovered",
+      appearChapterId: ctx.chapterNodeId,
+      recoverChapterIds: [ctx.secondChapterNodeId],
+    });
+    ctx.foreshadowStore.addForeshadow(NOVEL_ID, {
+      surfaceAction: "告示墨迹未干",
+      hiddenTruth: "告示出自内鬼",
+      attentionLevel: 5,
+      recoveryStatus: "unrecovered",
+      appearChapterId: ctx.thirdChapterNodeId,
+      recoverChapterIds: [ctx.secondChapterNodeId],
+    });
+
+    const channel = new FakeChannel([]);
+    await writeChapter({
+      channel,
+      novelId: NOVEL_ID,
+      model: DUMMY_MODEL,
+      ...ctx,
+      chapterNodeId: ctx.secondChapterNodeId,
+    });
+
+    const prompt = generateTextCalls[0]!.prompt;
+    expect(prompt).toContain("登场于《第一章》");
+    expect(prompt).toContain("登场章正文（呼应其细节，不要照抄）：");
+    expect(prompt).toContain(prose);
+    expect(prompt).toContain("登场章正文未生成——该章剧情概述：碎片来历初现");
+    expect(prompt).not.toContain("一、本章登场");
+    expect(
+      channel.notifies.some((n) =>
+        n.includes("🔮 本章伏笔：登场 0 条、回收 2 条（1 条登场章正文缺失或超预算，以概述代替）"),
+      ),
+    ).toBeTrue();
   });
 });

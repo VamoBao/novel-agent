@@ -8,6 +8,8 @@ import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldvie
 import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
 import { getDefaultDocumentStore, type DocumentStore } from "../state/document-store";
 import { getDefaultStyleReferenceStore, type StyleReferenceStore } from "../state/style-reference-store";
+import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
+import { buildChapterForeshadowContext } from "./foreshadow-context";
 import { OUTPUT_DIR } from "../output/outline-writer";
 import {
   buildChapterDocumentPath,
@@ -35,6 +37,8 @@ export interface WriteChapterOptions {
   documentStore?: DocumentStore;
   /** 参考文风库；缺省 getDefaultStyleReferenceStore()，测试注入替身 */
   styleReferenceStore?: StyleReferenceStore;
+  /** 伏笔库；缺省 getDefaultForeshadowStore()，测试注入替身 */
+  foreshadowStore?: ForeshadowStore;
 }
 
 export interface WriteChapterResult {
@@ -64,7 +68,8 @@ function characterDigestLine(character: {
 /**
  * 章节正文生成工作流（客户端章节点「✍️ 生成本章正文」入口）：
  * 从库中校验并组装写作上下文（小说名/logline、世界观、角色摘要、所属部/幕
- * 梗概与关键情节点、本章概述、同幕前后章概述），交写作模型（OpenAI 接口
+ * 梗概与关键情节点、本章概述、同幕前后章概述、本章绑定伏笔——登场卡片 /
+ * 回收卡片+登场章上下文），交写作模型（OpenAI 接口
  * 兼容端点，与 Agent 会话模型解耦；WRITING_MODEL_* 未配置时回落 Agent
  * 会话模型 deepseek）单轮生成正文，无确认门——确认在客户端
  * （生成后展示，重写/修订流为后续需求）。
@@ -83,6 +88,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   const characterStore = options.characterStore ?? getDefaultCharacterStore();
   const documentStore = options.documentStore ?? getDefaultDocumentStore();
   const styleReferenceStore = options.styleReferenceStore ?? getDefaultStyleReferenceStore();
+  const foreshadowStore = options.foreshadowStore ?? getDefaultForeshadowStore();
   const outputDir = options.outputDir ?? OUTPUT_DIR;
 
   const novel = novelStore.getNovel(novelId);
@@ -134,7 +140,41 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
     .listStyleReferences(novelId)
     .filter((stored) => stored.styleReference.enabled);
 
+  // 本章伏笔（可选增强，不阻塞生成）：绑定到本章的伏笔——登场注入卡片、回收注入卡片
+  // + 登场章上下文（正文优先、概述兜底、预算护栏，详见 foreshadow-context.ts）
+  const foreshadowContext = buildChapterForeshadowContext({
+    novelId,
+    chapterNodeId,
+    foreshadowStore,
+    outlineStore,
+    documentStore,
+    characterStore,
+    outputDir,
+  });
+  const hasForeshadows = foreshadowContext.lines.length > 0;
+
+  // 条件附加要求（伏笔/文风）编号顺延，末条固定「只输出正文文本」——无附加条时与既有形态一致
+  const extraRequirements: string[] = [];
+  if (hasForeshadows) {
+    extraRequirements.push(
+      "本章如有登场伏笔，按注意度控制显隐程度、自然带出不刻意；如有回收伏笔，呼应登场章的具体细节、不复述登场原文；",
+    );
+  }
+  if (enabledStyles.length > 0) {
+    extraRequirements.push(
+      "模仿参考文风样本的叙事语言、句式节奏与描写风格，但不抄袭其具体情节与专有名词；",
+    );
+  }
+
   channel.notify(`✍️ 正文生成中（《${novel.name ?? "未命名小说"}》· ${chapter.node.name}，写作模型）…`);
+  if (hasForeshadows) {
+    channel.notify(
+      `🔮 本章伏笔：登场 ${foreshadowContext.appearCount} 条、回收 ${foreshadowContext.recoverCount} 条` +
+        (foreshadowContext.degradedCount > 0
+          ? `（${foreshadowContext.degradedCount} 条登场章正文缺失或超预算，以概述代替）`
+          : ""),
+    );
+  }
   if (enabledStyles.length > 0) {
     channel.notify(
       `🖋️ 本次参考文风：${enabledStyles.map((stored) => stored.styleReference.name).join("、")}`,
@@ -175,6 +215,8 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       next
         ? `【下一章（为其留出衔接空间，不要抢写其情节）】\n${next.node.name}：${next.node.summary}`
         : null,
+      // 本章伏笔插在下一章块之后、参考文风之前：核心叙事上下文区，长样本文风仍留尾部
+      ...(hasForeshadows ? ["", ...foreshadowContext.lines] : []),
       // 参考文风放 prompt 尾部：不把世界观/角色/本章概述等核心上下文推远，且紧邻风格指令
       ...(enabledStyles.length > 0
         ? [
@@ -192,12 +234,8 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       "3. 场景化叙述、张弛有度，对话自然贴合各角色性格；",
       "4. 严格遵守世界观禁忌（taboos）；",
       "5. 篇幅约 2000~3000 字；",
-      ...(enabledStyles.length > 0
-        ? ["6. 模仿参考文风样本的叙事语言、句式节奏与描写风格，但不抄袭其具体情节与专有名词；"]
-        : []),
-      enabledStyles.length > 0
-        ? "7. 只输出正文文本：不要章节标题、不要任何说明或元信息。"
-        : "6. 只输出正文文本：不要章节标题、不要任何说明或元信息。",
+      ...extraRequirements.map((text, i) => `${6 + i}. ${text}`),
+      `${6 + extraRequirements.length}. 只输出正文文本：不要章节标题、不要任何说明或元信息。`,
     ]
       .filter((line): line is string => line !== null)
       .join("\n"),
