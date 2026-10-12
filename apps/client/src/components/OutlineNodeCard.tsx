@@ -50,6 +50,8 @@ interface OutlineNodeCardProps {
   writeProgress?: ChapterWriteProgress;
   /** 触发本章正文生成（write-chapter 会话）；不传则不显示入口 */
   onWriteChapter?: () => void;
+  /** 触发本章正文重新生成（覆盖替换，经弹框确认后调用）；有正文且传入时显示入口 */
+  onRegenerateChapter?: () => void;
   /** 本章涉及的伏笔（详情 foreshadows 过滤登场/回收两组；无则不渲染区块） */
   foreshadows?: ChapterForeshadow[];
 }
@@ -82,12 +84,16 @@ export function OutlineNodeCard({
   writing = false,
   writeProgress,
   onWriteChapter,
+  onRegenerateChapter,
   foreshadows,
 }: OutlineNodeCardProps) {
   const legacy = node.summary === null || node.keyPlotPoints === null;
   const showEntry = node.type === "act" && !hasChapters && onPlanChapters !== undefined;
   const showWriteEntry =
     node.type === "chapter" && !document && onWriteChapter !== undefined;
+  // 有正文且传入回调时显示重新生成入口（覆盖替换，确认弹框由调用方渲染）
+  const showRegenEntry =
+    node.type === "chapter" && document !== undefined && onRegenerateChapter !== undefined;
   const showProgress = node.type === "chapter" && writing && writeProgress !== undefined;
   const currentStep = writeProgress
     ? PROGRESS_STEPS.findIndex((step) => step.phases.includes(writeProgress.phase))
@@ -209,6 +215,17 @@ export function OutlineNodeCard({
             onClick={onWriteChapter}
           >
             {writing ? "✍️ 正文生成中…" : "✍️ 生成本章正文"}
+          </button>
+        </div>
+      ) : null}
+      {showRegenEntry ? (
+        <div className="act-actions">
+          <button
+            disabled={writing}
+            title={writing ? "正文生成中…" : "重新生成并覆盖现有正文（会先弹出确认）"}
+            onClick={onRegenerateChapter}
+          >
+            {writing ? "🔄 重新生成中…" : "🔄 重新生成"}
           </button>
         </div>
       ) : null}

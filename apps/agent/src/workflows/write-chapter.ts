@@ -104,11 +104,14 @@ function describeReport(report: ReviewReport): string {
  * 报告：通过（内容与自洽零问题且文风 skipped 或 ≥90 分）才落盘入库；未达标
  * 按报告修订式重写（原上下文 + 上一版正文 + 整改报告），最多 MAX_REVIEW_ROUNDS
  * 轮，第 3 轮仍未达标保存最后一版并警告（产物优先，用户确认的决策）。
+ * 该章已有正文时为**重新生成**：流程完全一致，落库走覆盖替换
+ * （replaceChapterDocument 单事务删旧行插新行），事务提交后清理旧正文文件；
+ * 任一环节失败（校验抛错 / 库故障）新文件回滚删除，旧正文零影响。
  * 正文**存文件系统**（`<output>/<小说名>-<创作ID前8位>/<部名>/<章名>.md`，
- * 人类可直接阅读），先写文件、后经 saveChapterDocument 单事务登记元数据
+ * 人类可直接阅读），先写文件、后经单事务登记元数据
  * （file_path + 字数）并绑定章节点 document_id；库失败时回滚删除已写文件，
  * 不留孤儿。
- * 校验失败（小说/章不存在、非章节点、缺概述、已有正文、世界观未确认）与
+ * 校验失败（小说/章不存在、非章节点、缺概述、世界观未确认）与
  * 校验调用异常（网络 / schema 不合）抛可读错误，由调用方（协议入口）转为
  * fatal error 消息，零落盘零入库。
  */
@@ -148,10 +151,10 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
     throw new Error(`章「${chapter.node.name}」缺少所属部节点，无法组装写作上下文`);
   }
 
-  // 一章一份：已有正文直接拒绝（重写/修订流为后续需求），避免浪费生成调用
-  if (documentStore.getDocumentByChapter(chapterNodeId)) {
-    throw new Error(`章「${chapter.node.name}」已有正文，重新生成为后续需求`);
-  }
+  // 一章一份：已有正文走重生成路径（覆盖替换——同事务换库行、提交后清理旧文件），
+  // 无正文走首次生成；两条路径的生成与校验流程完全一致
+  const existing = documentStore.getDocumentByChapter(chapterNodeId);
+  const isRegen = existing !== undefined;
 
   const storedWorldview = worldviewStore.getWorldview(novelId);
   if (!storedWorldview) {
@@ -199,7 +202,9 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
     );
   }
 
-  channel.notify(`✍️ 正文生成中（《${novel.name ?? "未命名小说"}》· ${chapter.node.name}，写作模型）…`);
+  channel.notify(
+    `${isRegen ? "🔄 重新生成中（将覆盖现有正文）" : "✍️ 正文生成中"}（《${novel.name ?? "未命名小说"}》· ${chapter.node.name}，写作模型）…`,
+  );
   if (hasForeshadows) {
     channel.notify(
       `🔮 本章伏笔：登场 ${foreshadowContext.appearCount} 条、回收 ${foreshadowContext.recoverCount} 条` +
@@ -382,15 +387,28 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   let document: Document;
   try {
     writeDocumentArtifact(relativePath, content, outputDir);
-    document = documentStore.saveChapterDocument(
-      novelId,
-      chapterNodeId,
-      relativePath,
-      countWords(content),
-    );
+    // 重生成走覆盖替换（单事务删旧行插新行），首次生成走既有保存
+    document = isRegen
+      ? documentStore.replaceChapterDocument(
+          novelId,
+          chapterNodeId,
+          relativePath,
+          countWords(content),
+        )
+      : documentStore.saveChapterDocument(
+          novelId,
+          chapterNodeId,
+          relativePath,
+          countWords(content),
+        );
   } catch (error) {
     removeDocumentArtifact(relativePath, outputDir);
     throw error;
+  }
+  // 库事务已提交：清理旧正文文件——路径相同（旧文件本就缺失的孤儿行）时跳过，防误删新文件；
+  // removeDocumentArtifact 幂等，旧文件已被手工移走时静默
+  if (isRegen && existing && existing.filePath !== document.filePath) {
+    removeDocumentArtifact(existing.filePath, outputDir);
   }
   channel.notify(`✍️ 正文已保存：${relativePath}（约 ${document.wordCount} 字）`);
   return {

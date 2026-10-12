@@ -182,4 +182,67 @@ describe("DocumentStore", () => {
     ctx.novelStore.deleteNovel(NOVEL_ID);
     expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(0);
   });
+
+  test("replaceChapterDocument：覆盖替换旧行（行数仍 1、章节点绑定新行）", async () => {
+    const ctx = await setupDb();
+    cleanups.push(ctx.cleanup);
+    const old = ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "n/p/第一章.md", 30);
+
+    const replaced = ctx.documentStore.replaceChapterDocument(
+      NOVEL_ID,
+      ctx.chapterNodeId,
+      "n/p/第一章-2.md",
+      42,
+    );
+
+    // 新行替换旧行：行数仍 1，主键换新、路径与字数为新值
+    expect(replaced.id).not.toBe(old.id);
+    expect(replaced.filePath).toBe("n/p/第一章-2.md");
+    expect(replaced.wordCount).toBe(42);
+    expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(1);
+    expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.id).toBe(replaced.id);
+    // 章节点绑定指向新行、状态保持 completed
+    const chapter = ctx.outlineStore.getOutlineNode(ctx.chapterNodeId)!;
+    expect(chapter.node.documentId).toBe(replaced.id);
+    expect(chapter.node.status).toBe("completed");
+  });
+
+  test("replaceChapterDocument：无旧行时等同首次保存", async () => {
+    const ctx = await setupDb();
+    cleanups.push(ctx.cleanup);
+    const saved = ctx.documentStore.replaceChapterDocument(
+      NOVEL_ID,
+      ctx.chapterNodeId,
+      "n/p/第一章.md",
+      20,
+    );
+    expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(1);
+    const chapter = ctx.outlineStore.getOutlineNode(ctx.chapterNodeId)!;
+    expect(chapter.node.documentId).toBe(saved.id);
+    expect(chapter.node.status).toBe("completed");
+  });
+
+  test("replaceChapterDocument：目标校验同 save（不存在 / 异小说 / 非章节点 / 空路径）", async () => {
+    const ctx = await setupDb();
+    cleanups.push(ctx.cleanup);
+    ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "n/p/第一章.md", 30);
+
+    expect(() =>
+      ctx.documentStore.replaceChapterDocument(NOVEL_ID, "ffffffff-0000-7000-8000-0000000000f9", "a.md", 1),
+    ).toThrow("章节节点不存在或不属于该小说");
+    expect(() =>
+      ctx.documentStore.replaceChapterDocument(OTHER_NOVEL_ID, ctx.chapterNodeId, "a.md", 1),
+    ).toThrow("章节节点不存在或不属于该小说");
+    expect(() =>
+      ctx.documentStore.replaceChapterDocument(NOVEL_ID, ctx.actNodeId, "a.md", 1),
+    ).toThrow("不是章");
+    expect(() =>
+      ctx.documentStore.replaceChapterDocument(NOVEL_ID, ctx.chapterNodeId, "", 1),
+    ).toThrow();
+
+    // 校验失败不破坏既有正文行与绑定
+    expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.filePath).toBe("n/p/第一章.md");
+    const chapter = ctx.outlineStore.getOutlineNode(ctx.chapterNodeId)!;
+    expect(chapter.node.status).toBe("completed");
+  });
 });

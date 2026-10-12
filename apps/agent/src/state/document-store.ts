@@ -57,7 +57,7 @@ export class DocumentStore {
 
   /**
    * 登记章正文元数据并绑定章节点（事务原子）：校验目标为该小说的 chapter 节点、
-   * 尚无正文（一章一份，重新生成为后续需求）且 filePath 非空；
+   * 尚无正文（一章一份）且 filePath 非空；
    * 同事务 UPDATE outlines 回写 document_id + status='completed'。
    */
   saveChapterDocument(
@@ -66,6 +66,47 @@ export class DocumentStore {
     filePath: string,
     wordCount: number,
   ): Document {
+    const chapter = this.requireChapter(novelId, chapterNodeId);
+    if (
+      this.db.prepare("SELECT 1 FROM documents WHERE chapter_id = ?;").get(chapterNodeId)
+    ) {
+      throw new Error(`章「${chapter.name}」已有正文，请走重新生成`);
+    }
+    const validated = this.validatePayload(filePath, wordCount);
+    const insert = this.db.transaction(() => {
+      this.insertDocumentRow(novelId, chapterNodeId, validated);
+      this.bindChapterNode(chapterNodeId);
+    });
+    insert();
+    return this.getDocumentByChapterOrThrow(chapterNodeId);
+  }
+
+  /**
+   * 重新生成场景的覆盖替换（事务原子）：删旧 documents 行 → 插新行 →
+   * 同事务 UPDATE outlines 回写 document_id + status='completed'；
+   * 无旧行时等同首次保存。目标校验同 save（不拒已有正文）。
+   * 新旧文件的清理时序由调用方编排（新文件先写、事务提交后删旧文件、
+   * 失败回滚删新文件——本方法只保证库行原子切换）。
+   */
+  replaceChapterDocument(
+    novelId: string,
+    chapterNodeId: string,
+    filePath: string,
+    wordCount: number,
+  ): Document {
+    this.requireChapter(novelId, chapterNodeId);
+    const validated = this.validatePayload(filePath, wordCount);
+    const replace = this.db.transaction(() => {
+      this.db.prepare("DELETE FROM documents WHERE chapter_id = ?;").run(chapterNodeId);
+      this.insertDocumentRow(novelId, chapterNodeId, validated);
+      this.bindChapterNode(chapterNodeId);
+    });
+    replace();
+    return this.getDocumentByChapterOrThrow(chapterNodeId);
+  }
+
+  /** 章节点存在性 / 归属 / 类型校验（save 与 replace 共用），返回行供错误文案取章名 */
+  private requireChapter(novelId: string, chapterNodeId: string): ChapterRow {
     const chapter = this.db
       .prepare("SELECT novel_id, type, name FROM outlines WHERE id = ?;")
       .get(chapterNodeId) as ChapterRow | null;
@@ -75,31 +116,35 @@ export class DocumentStore {
     if (chapter.type !== "chapter") {
       throw new Error(`所选节点不是章（类型为 ${chapter.type}），无法保存正文：${chapter.name}`);
     }
-    if (
-      this.db.prepare("SELECT 1 FROM documents WHERE chapter_id = ?;").get(chapterNodeId)
-    ) {
-      throw new Error(`章「${chapter.name}」已有正文，重新生成为后续需求`);
-    }
-    const validated = documentSchema.pick({ filePath: true, wordCount: true }).parse({
+    return chapter;
+  }
+
+  /** filePath 非空与字数经 schema 校验（save 与 replace 共用） */
+  private validatePayload(filePath: string, wordCount: number) {
+    return documentSchema.pick({ filePath: true, wordCount: true }).parse({
       filePath,
       wordCount,
     });
+  }
+
+  private insertDocumentRow(
+    novelId: string,
+    chapterNodeId: string,
+    validated: { filePath: string; wordCount: number },
+  ): void {
     const id = generateUuidV7();
     const now = new Date().toISOString();
-    const save = this.db.transaction(() => {
-      this.db
-        .prepare(
-          `INSERT INTO documents (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?);`,
-        )
-        .run(id, novelId, chapterNodeId, validated.filePath, validated.wordCount, now, now);
-      this.db
-        .prepare(
-          "UPDATE outlines SET document_id = ?, status = 'completed', updated_at = ? WHERE id = ?;",
-        )
-        .run(id, now, chapterNodeId);
-    });
-    save();
-    return this.getDocumentByChapterOrThrow(chapterNodeId);
+    this.db
+      .prepare(`INSERT INTO documents (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?);`)
+      .run(id, novelId, chapterNodeId, validated.filePath, validated.wordCount, now, now);
+  }
+
+  private bindChapterNode(chapterNodeId: string): void {
+    this.db
+      .prepare(
+        "UPDATE outlines SET document_id = (SELECT id FROM documents WHERE chapter_id = ?), status = 'completed', updated_at = ? WHERE id = ?;",
+      )
+      .run(chapterNodeId, new Date().toISOString(), chapterNodeId);
   }
 
   /** 按章节点取正文元数据；无记录返回 undefined */

@@ -1,3 +1,12 @@
+## 2026-10-12 章节正文重新生成：覆盖替换旧正文、弹框确认（两项决策经用户确认，设计规格 `docs/superpowers/specs/2026-10-12-chapter-regen-design.md`）
+
+- **背景**：正文「一章一份」双层拒绝（write-chapter 前置校验 + document-store.saveChapterDocument）——用户对正文不满意时没有任何再生成手段，只能手工删库删文件。用户要求：添加重新生成按钮，流程与新生成完全一致（即完整的三段校验-修订闭环）。
+- **决策一：旧正文覆盖替换（用户选定）**：新正文通过校验后，`replaceChapterDocument` 单事务「删旧 documents 行 → 插新行 → 回写章节点」、提交后清理旧正文文件；失败（校验抛错 / 中止 / 库故障）新文件回滚、旧正文行与文件零影响。文件名经既有 `-N` 冲突后缀在 `章名.md`↔`章名-2.md` 间交替，不无限增长。否决「归档历史版本」（需 schema 迁移 + 旧文件保留 + 版本浏览 UI，范围 2~3 倍——归档为后续独立需求，覆盖即失已在客户端弹框明示）。
+- **决策二：弹框确认（用户选定）**：对齐 OutlineRegenDialog 先例——ChapterRegenDialog 模态警示「覆盖且不可恢复 + 完整三段校验流程 + 真实模型调用开销」，确认才发起会话。否决「两段式按钮」（与项目 destructive 操作弹框惯例不一致）与「直接执行」（误点即触发一次完整生成循环且不可逆覆盖）。
+- **设计要点**：协议 / headless / shared 零改动——重新生成与首次生成是同一 write-chapter 会话，仅前置校验移除「已有正文」拒绝（检测到既有 document 即 `isRegen` 分流 notify「🔄 重新生成中（将覆盖现有正文）」与保存路径 save-or-replace）；旧文件清理置于库事务提交之后（路径相同——旧文件本就缺失的孤儿行——跳过防误删新文件；removeDocumentArtifact 幂等容忍缺失）；客户端进度区块与正文卡并存展示（进度区块渲染条件本不依赖「无正文」，复用既有 write-progress 收口零新增订阅）。
+- **结论**：DocumentStore.replaceChapterDocument（与 saveChapterDocument 共用校验与插入助手）+ write-chapter isRegen 分流 + 客户端章卡「🔄 重新生成」入口（有正文时与生成入口互斥显示）+ ChapterRegenDialog 警示弹框（PreviewPane 复用 startWriteChapter 发起同一会话）。AC：typecheck 3 工程 / lint / 361 用例全过（净增 6：document-store 3 + write-chapter 集成 3，前置校验用例「已有正文拒绝」随行为翻转移除）；SSR 冒烟 12 条 transient 实跑过；真实端到端待用户复验。
+
+
 ## 2026-10-12 章节正文生成校验-修订闭环：3 轮上限保底保存、deepseek 校验、修订式重写（三项决策经用户确认，设计规格 `docs/superpowers/specs/2026-10-12-chapter-review-loop-design.md`）
 
 - **背景**：write-chapter 是「单轮生成 → 落盘入库」直通链路，正文质量无事后把关——设定违背、伏笔未体现、文风不像、章内自相矛盾全靠人眼。用户提出：保存前新增校验 subagent（独立 LLM 调用、上下文不继承生成对话），三段校验（内容约束 / 文风相似度 ≥90 分合格 / 前后自洽）汇总为结构化整改报告，未达标按报告重新生成直至验收通过（校验也是 loop），客户端展示全流程进度。
