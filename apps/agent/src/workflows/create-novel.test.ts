@@ -193,6 +193,11 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     const novelStore = new NovelStore(db);
     expect(novelStore.getNovel(state.id)?.name).toBe("灵脉遗孤");
     expect(novelStore.getNovel(state.id)?.description).toBe(outlineFixture.logline);
+    expect(novelStore.getNovel(state.id)).toMatchObject({
+      genre: "仙侠",
+      audience: ["都市青年读者"],
+      coreConflict: { origin: "宗门垄断灵脉", impact: "散修如草芥", idealResolution: "灵脉归于众生" },
+    });
     const worldviewStore = new WorldviewStore(db);
     expect(worldviewStore.getWorldview(state.id)?.worldview.taboos).toEqual(worldviewFixture.taboos);
     const characterStore = new CharacterStore(db);
@@ -319,4 +324,49 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
       }),
     ).rejects.toBeInstanceOf((await import("../ui/aborted")).UserAbortedError);
   });
+
+  const audienceChoice = "都市青年读者——节奏明快的成长与逆袭";
+  const conflict = { origin: "宗门垄断灵脉", impact: "散修如草芥", idealResolution: "灵脉归于众生" };
+  const cases = [
+    { name: "类型后中止", answers: ["", "仙侠", null], expected: { genre: "仙侠", audience: null, coreConflict: null }, withCharacter: false },
+    { name: "受众后中止", answers: ["", "仙侠", [audienceChoice], "重视人物关系", null], expected: { genre: "仙侠", audience: ["都市青年读者", "重视人物关系"], coreConflict: null }, withCharacter: false },
+    { name: "大纲前中止", answers: ["", "仙侠", [audienceChoice], "", "九州大陆", "林恒", ...characterFields.map(() => true), true, "", "宗门垄断灵脉", null], expected: { genre: "仙侠", audience: ["都市青年读者"], coreConflict: conflict }, withCharacter: true },
+  ];
+  for (const scenario of cases) {
+    test(`${scenario.name}：已收集创作条件仍绑定小说并可重开读取`, async () => {
+      const dir = await mkdtemp(join(tmpdir(), "novel-params-abort-"));
+      process.chdir(dir);
+      const path = join(dir, "test.db");
+      const db = openDatabase(path);
+      const id = `params-${scenario.name}`;
+      objectScript = [{ options: [{ label: "都市青年读者", description: "节奏明快的成长与逆袭" }] }, conflict];
+      textScript = scenario.withCharacter ? [
+        [[{ tool: "submit_worldview", args: worldviewFixture }]],
+        [characterFields.map((f) => ({ tool: "save_field", args: f })), [{ tool: "submit_character", args: {} }]],
+      ] : [];
+      try {
+        await expect(createNovel({
+          id,
+          channel: new FakeChannel(scenario.answers),
+          store: memoryNovelStateStore,
+          novelStore: new NovelStore(db),
+          characterStore: new CharacterStore(db),
+          worldviewStore: new WorldviewStore(db),
+          outlineStore: new OutlineStore(db),
+          foreshadowStore: new ForeshadowStore(db),
+          locationStore: new LocationStore(db),
+        })).rejects.toBeInstanceOf((await import("../ui/aborted")).UserAbortedError);
+        expect(new NovelStore(db).getNovel(id)).toMatchObject(scenario.expected);
+      } finally {
+        db.close();
+        process.chdir(originalCwd);
+      }
+      const reopened = openDatabase(path);
+      try { expect(new NovelStore(reopened).getNovel(id)).toMatchObject(scenario.expected); }
+      finally {
+        reopened.close();
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
 });

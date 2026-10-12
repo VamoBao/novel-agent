@@ -130,7 +130,7 @@ export interface CreateOutlineOptions {
 
 /**
  * 大纲生成的创作上下文：世界观与角色必带；类型/受众/核心冲突可选——
- * 重新生成会话只有库内数据（这三项仅存在于创作时的内存 state，未入库），
+ * 重新生成会话从小说记录读取这三项，历史小说未采集的字段可缺失；
  * 缺失时 Agent 依据世界观、角色与书名自行把握。
  */
 export type OutlineContext = Pick<NovelParams, "worldview" | "characters"> &

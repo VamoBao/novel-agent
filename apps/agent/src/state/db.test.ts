@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -210,11 +210,131 @@ function createV9Db(path: string): void {
   legacy.close();
 }
 
-describe("openDatabase 迁移（SCHEMA_VERSION 15）", () => {
+describe("openDatabase 迁移（SCHEMA_VERSION 16）", () => {
   const tempDirs: string[] = [];
 
   afterAll(async () => {
     await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  test("v15 版本标记写入前中断：新增列与版本一起回滚，再打开可恢复", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-db-mig16-interrupt-"));
+    tempDirs.push(dir);
+    const path = join(dir, "test.db");
+    const legacy = new Database(path, { create: true });
+    legacy.exec(`CREATE TABLE novels (id TEXT PRIMARY KEY, name TEXT, author TEXT, description TEXT,
+      pinned INTEGER NOT NULL DEFAULT 0, favorite INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      PRAGMA user_version = 15;`);
+    legacy.close();
+    const originalExec = Database.prototype.exec;
+    let closeInterruptedDb = (): void => {};
+    const interruption = spyOn(Database.prototype, "exec").mockImplementation(function(this: Database, sql: string) {
+      if (sql.includes("PRAGMA user_version = 16")) {
+        closeInterruptedDb = () => this.close();
+        throw new Error("模拟版本标记前中断");
+      }
+      return originalExec.call(this, sql);
+    });
+    try { expect(() => openDatabase(path)).toThrow("模拟版本标记前中断"); }
+    finally {
+      interruption.mockRestore();
+      closeInterruptedDb();
+    }
+    const raw = new Database(path);
+    try {
+      expect(tableColumns(raw, "novels")).not.toContain("genre");
+      expect(raw.query("PRAGMA user_version").get()).toEqual({ user_version: 15 });
+    } finally { raw.close(); }
+    const recovered = openDatabase(path);
+    try {
+      expect(tableColumns(recovered, "novels")).toContain("core_conflict");
+      expect(recovered.query("PRAGMA user_version").get()).toEqual({ user_version: 16 });
+    } finally { recovered.close(); }
+  });
+
+  test("新库小说创作参数三列可用，未采集默认 NULL", () => {
+    const db = openDatabase(":memory:");
+    try {
+      expect(tableColumns(db, "novels")).toContain("genre");
+      expect(tableColumns(db, "novels")).toContain("audience");
+      expect(tableColumns(db, "novels")).toContain("core_conflict");
+      db.prepare("INSERT INTO novels (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(NOVEL_ID, "新小说", NOW, NOW);
+      expect(db.query("SELECT genre, audience, core_conflict FROM novels WHERE id = ?").get(NOVEL_ID)).toEqual({ genre: null, audience: null, core_conflict: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("两连接穿插启动：版本读取后另一连接完成迁移，锁内复查避免重复补列", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-db-mig16-race-"));
+    tempDirs.push(dir);
+    const path = join(dir, "test.db");
+    const legacy = new Database(path, { create: true });
+    legacy.exec(`CREATE TABLE novels (id TEXT PRIMARY KEY, name TEXT, author TEXT, description TEXT,
+      pinned INTEGER NOT NULL DEFAULT 0, favorite INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      PRAGMA user_version = 15;`);
+    legacy.close();
+    const originalQuery = Database.prototype.query;
+    let interleaved = false;
+    // 原生 query 原样返回 Statement；call 转发会丢失泛型，恢复其原有方法签名。
+    const race = spyOn(Database.prototype, "query").mockImplementation((function(this: Database, sql: string) {
+      const statement = originalQuery.call(this, sql);
+      if (sql === "PRAGMA user_version" && !interleaved) {
+        const originalGet = statement.get.bind(statement);
+        statement.get = () => {
+          const snapshot = originalGet();
+          if (!interleaved) {
+            interleaved = true;
+            const other = openDatabase(path);
+            other.close();
+          }
+          return snapshot;
+        };
+      }
+      return statement;
+    }) as Database["query"]);
+    try {
+      const db = openDatabase(path);
+      try {
+        expect(tableColumns(db, "novels")).toContain("core_conflict");
+        expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 16 });
+      } finally { db.close(); }
+    } finally { race.mockRestore(); }
+  });
+
+  test("v15 增量补创作参数：小说与关联世界观保留，重开不重复迁移", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-db-mig15-"));
+    tempDirs.push(dir);
+    const path = join(dir, "v15.db");
+    const legacy = new Database(path, { create: true });
+    legacy.exec(`
+      CREATE TABLE novels (id TEXT PRIMARY KEY, name TEXT, author TEXT, description TEXT,
+        pinned INTEGER NOT NULL DEFAULT 0, favorite INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE worldviews (id TEXT PRIMARY KEY, novel_id TEXT NOT NULL UNIQUE REFERENCES novels(id),
+        geography TEXT NOT NULL, fantasy_attributes TEXT, real_world_mapping TEXT,
+        taboos TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      PRAGMA user_version = 15;
+    `);
+    legacy.prepare("INSERT INTO novels VALUES (?, '旧小说', '作者', '简介', 1, 1, ?, ?)").run(NOVEL_ID, NOW, NOW);
+    legacy.prepare("INSERT INTO worldviews VALUES ('wv-15', ?, '九州', NULL, NULL, '[\"不可复活\"]', ?, ?)").run(NOVEL_ID, NOW, NOW);
+    legacy.close();
+    const db = openDatabase(path);
+    try {
+      expect(tableColumns(db, "novels")).toContain("genre");
+      expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 16 });
+      expect(db.query("SELECT name, author, description, pinned, favorite, genre, audience, core_conflict FROM novels WHERE id = ?").get(NOVEL_ID)).toEqual({ name: "旧小说", author: "作者", description: "简介", pinned: 1, favorite: 1, genre: null, audience: null, core_conflict: null });
+      expect(db.query("SELECT geography, taboos FROM worldviews WHERE novel_id = ?").get(NOVEL_ID)).toEqual({ geography: "九州", taboos: '["不可复活"]' });
+      db.prepare("UPDATE novels SET genre = '仙侠', audience = '[]' WHERE id = ?").run(NOVEL_ID);
+    } finally {
+      db.close();
+    }
+    const reopened = openDatabase(path);
+    try {
+      expect(reopened.query("SELECT genre, audience FROM novels WHERE id = ?").get(NOVEL_ID)).toEqual({ genre: "仙侠", audience: "[]" });
+    } finally {
+      reopened.close();
+    }
   });
 
   test("v5 库迁移：outlines 补内容列、数据无损、版本升 12", async () => {
@@ -254,7 +374,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 15）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(15);
+    ).toBe(16);
     db.close();
   });
 
@@ -302,7 +422,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 15）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(15);
+    ).toBe(16);
     db.close();
   });
 
@@ -356,7 +476,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 15）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(15);
+    ).toBe(16);
     db.close();
   });
 
@@ -400,7 +520,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 15）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(15);
+    ).toBe(16);
     db.close();
   });
 
@@ -454,7 +574,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 15）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(15);
+    ).toBe(16);
     db.close();
   });
 
@@ -477,7 +597,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 15）", () => {
     raw.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(15);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(16);
     const columns = (db.query("PRAGMA table_info(foreshadows)").all() as { name: string }[]).map((c) => c.name);
     expect(columns).toContain("act_node_id");
     const row = db.query("SELECT surface_action, hidden_truth, attention_level, act_node_id FROM foreshadows WHERE id = 'f-1';").get() as Record<string, unknown>;
@@ -533,7 +653,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 15）", () => {
     legacy.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(15);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(16);
     expect(tableColumns(db, "locations")).toEqual([
       "id",
       "novel_id",
@@ -604,7 +724,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 15）", () => {
     legacy.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(15);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(16);
     const columns = (db.query("PRAGMA table_info(foreshadows)").all() as { name: string }[]).map((c) => c.name);
     expect(columns).toContain("recover_act_node_id");
     const row = db.query("SELECT surface_action, act_node_id, recover_act_node_id FROM foreshadows WHERE id = 'f-1';").get() as Record<string, unknown>;
@@ -640,7 +760,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 15）", () => {
     legacy.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(15);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(16);
     // 纯新增表由 CREATE TABLE IF NOT EXISTS 幂等落地，含启用开关 CHECK 与 novel_id 索引
     expect(tableColumns(db, "style_references")).toEqual([
       "id",
@@ -701,7 +821,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 15）", () => {
     ).toBe(1);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(15);
+    ).toBe(16);
     db.close();
   });
 
@@ -720,7 +840,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 15）", () => {
     expect(tableColumns(db, "style_references")).toContain("enabled");
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(15);
+    ).toBe(16);
     db.close();
   });
 });

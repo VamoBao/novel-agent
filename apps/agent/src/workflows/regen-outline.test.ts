@@ -24,12 +24,14 @@ import type { Character, NewCharacterOutline, NewLocation, OutlineNewForeshadow,
 type ScriptedCall = { tool: string; args: unknown };
 type ScriptedTurn = ScriptedCall[];
 let textScript: ScriptedTurn[][] = [];
+let agentPrompts: string[] = [];
 
 type MockTool = { execute: (input: never, options: unknown) => Promise<unknown> };
 
 mock.module("ai", () => ({
   tool: (spec: unknown) => spec,
-  generateText: async ({ tools }: { tools: Record<string, MockTool> }) => {
+  generateText: async ({ tools, messages }: { tools: Record<string, MockTool>; messages: { content: string }[] }) => {
+    agentPrompts.push(messages[0]?.content ?? "");
     const turns = textScript.shift() ?? [];
     let callIndex = 0;
     for (const turn of turns) {
@@ -177,6 +179,33 @@ function optionsFor(world: Seeded, channel: FakeChannel) {
 }
 
 describe("regenerateOutline（FakeChannel + mock LLM 集成）", () => {
+  test("大纲重生成复用数据库中的类型、受众与核心冲突，简介回填保留原条件", async () => {
+    const world = await seed();
+    const params = { genre: "仙侠", audience: ["人物成长读者"], coreConflict: { origin: "宗门独占灵脉", impact: "散修受压迫", idealResolution: "人人都可修炼" } };
+    world.novelStore.updateNovel(NOVEL_ID, params);
+    textScript = [[[{ tool: "save_outline", args: newOutlineFixture(1, 3) }]]];
+    agentPrompts = [];
+    await regenerateOutline(optionsFor(world, new FakeChannel([3, 1, true])));
+    const prompt = agentPrompts[0] ?? "";
+    const context = JSON.parse(prompt.split("创作参数如下（JSON）：\n")[1]!.split("\n\n")[0]!);
+    expect(context).toMatchObject(params);
+    expect(prompt).not.toContain("类型/受众/核心冲突未提供");
+    expect(world.novelStore.getNovel(NOVEL_ID)).toMatchObject(params);
+  });
+
+  test("旧小说未存创作条件时不传 null，重生成沿用缺省策略", async () => {
+    const world = await seed();
+    textScript = [[[{ tool: "save_outline", args: newOutlineFixture(1, 3) }]]];
+    agentPrompts = [];
+    await regenerateOutline(optionsFor(world, new FakeChannel([3, 1, true])));
+    const prompt = agentPrompts[0] ?? "";
+    const context = JSON.parse(prompt.split("创作参数如下（JSON）：\n")[1]!.split("\n\n")[0]!);
+    expect(context).not.toHaveProperty("genre");
+    expect(context).not.toHaveProperty("audience");
+    expect(context).not.toHaveProperty("coreConflict");
+    expect(prompt).toContain("类型/受众/核心冲突未提供");
+  });
+
   test("确认后新版本入库：旧树旧章降级归档，产物覆盖，description 回填", async () => {
     const world = await seed();
     // 种一条库内已有地点：新版清单中同名项应被兜底 diff 剔除（地点只增不改）

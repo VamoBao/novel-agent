@@ -14,6 +14,111 @@ afterAll(async () => {
 
 const V7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
+const creationParams = {
+  genre: "仙侠",
+  audience: ["成长故事读者", "重视人物关系"],
+  coreConflict: { origin: "宗门垄断灵脉", impact: "散修无法修炼", idealResolution: "灵脉归于众生" },
+};
+
+describe("小说创作条件持久化", () => {
+  test("两连接穿插：改名不会覆盖另一连接刚保存的创作条件，null 可显式清空", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-params-race-"));
+    const path = join(dir, "test.db");
+    const dbA = openDatabase(path);
+    const dbB = openDatabase(path);
+    try {
+      const storeB = new NovelStore(dbB);
+      const { id } = storeB.createNovel({ name: "旧名" });
+      let interleaved = false;
+      class InterleavingStore extends NovelStore {
+        override getNovel(novelId: string) {
+          const snapshot = super.getNovel(novelId);
+          if (!interleaved) {
+            interleaved = true;
+            storeB.updateNovel(novelId, creationParams);
+          }
+          return snapshot;
+        }
+      }
+      const storeA = new InterleavingStore(dbA);
+      storeA.updateNovel(id, { name: "新名" });
+      expect(storeB.getNovel(id)).toMatchObject({ ...creationParams, name: "新名" });
+      storeA.updateNovel(id, { genre: undefined, audience: null });
+      expect(storeB.getNovel(id)).toMatchObject({ genre: "仙侠", audience: null, coreConflict: creationParams.coreConflict });
+    } finally {
+      dbA.close();
+      dbB.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("未采集返回 null，创建时可保存数组与结构化冲突", () => {
+    const db = openDatabase(":memory:");
+    try {
+      const store = new NovelStore(db);
+      expect(store.createNovel()).toMatchObject({ genre: null, audience: null, coreConflict: null });
+      const created = store.createNovel(creationParams);
+      expect(created).toMatchObject(creationParams);
+      const row = db.query("SELECT genre, audience, core_conflict FROM novels WHERE id = ?").get(created.id) as { genre: string; audience: string; core_conflict: string };
+      expect(row.genre).toBe("仙侠");
+      expect(JSON.parse(row.audience)).toEqual(["成长故事读者", "重视人物关系"]);
+      expect(JSON.parse(row.core_conflict)).toEqual(creationParams.coreConflict);
+    } finally { db.close(); }
+  });
+
+  test("逐项更新与重开往返，空受众不同于未采集，普通管理保留创作条件", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-params-"));
+    const path = join(dir, "test.db");
+    let store = NovelStore.open(path);
+    try {
+      const { id } = store.createNovel({ name: "旧名" });
+      store.updateNovel(id, { genre: creationParams.genre });
+      store.updateNovel(id, { audience: creationParams.audience });
+      store.updateNovel(id, { coreConflict: creationParams.coreConflict });
+      store.updateNovel(id, { name: "新名", description: "新的梗概" });
+      store.setNovelPinned(id, true);
+      store.setNovelFavorite(id, true);
+      expect(store.getNovel(id)).toMatchObject({ ...creationParams, name: "新名", description: "新的梗概", pinned: true, favorite: true });
+      store.close();
+      store = NovelStore.open(path);
+      expect(store.getNovel(id)).toMatchObject(creationParams);
+      expect(store.listNovels()[0]).toMatchObject(creationParams);
+      expect(store.updateNovel(id, { audience: [] })).toMatchObject({ genre: "仙侠", audience: [], coreConflict: creationParams.coreConflict });
+      expect(store.updateNovel(id, { genre: undefined })).toMatchObject({ genre: "仙侠", audience: [] });
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("非法创作条件拒绝创建或更新，不改变其他字段", () => {
+    const db = openDatabase(":memory:");
+    try {
+      const store = new NovelStore(db);
+      expect(() => store.createNovel({ id: "bad", genre: "" })).toThrow();
+      expect(store.getNovel("bad")).toBeUndefined();
+      const created = store.createNovel({ name: "原名", ...creationParams });
+      expect(() => store.updateNovel(created.id, { name: "不该生效", audience: "不是数组" as never })).toThrow();
+      expect(() => store.updateNovel(created.id, { coreConflict: { origin: "只有由来" } as never })).toThrow();
+      expect(store.getNovel(created.id)).toEqual(created);
+    } finally { db.close(); }
+  });
+
+  test("库内 JSON 损坏或形态非法时，错误定位到小说与字段", () => {
+    const db = openDatabase(":memory:");
+    try {
+      const store = new NovelStore(db);
+      const { id } = store.createNovel({ id: "corrupt-params" });
+      db.prepare("UPDATE novels SET audience = ? WHERE id = ?").run("[", id);
+      expect(() => store.getNovel(id)).toThrow(/corrupt-params.*audience/);
+      db.prepare("UPDATE novels SET audience = ? WHERE id = ?").run("{}", id);
+      expect(() => store.getNovel(id)).toThrow(/corrupt-params.*audience/);
+      db.prepare("UPDATE novels SET audience = NULL, core_conflict = ? WHERE id = ?").run('{"origin":"只有由来"}', id);
+      expect(() => store.getNovel(id)).toThrow(/corrupt-params.*coreConflict/);
+    } finally { db.close(); }
+  });
+});
+
 describe("NovelStore", () => {
   test("createNovel 自动生成 UUIDv7 id，getNovel 取回", async () => {
     tempDir = await mkdtemp(join(tmpdir(), "novel-db-"));
@@ -246,7 +351,7 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     expect(legacyChar.version).toBe(1);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(15);
+    ).toBe(16);
     db.close();
     await rm(dir, { recursive: true, force: true });
   });

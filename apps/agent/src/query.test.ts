@@ -61,6 +61,18 @@ const character = {
 };
 
 describe("query CLI（buildNovelList / buildNovelDetail）", () => {
+  test("详情返回小说创作条件，列表继续使用原有契约，旧小说字段为空", () => {
+    const db = openDatabase(":memory:");
+    try {
+      const novels = new NovelStore(db);
+      novels.createNovel({ id: "params", genre: "悬疑", audience: ["推理读者", "重视公平线索"], coreConflict: { origin: "失踪事件", impact: "信任破裂", idealResolution: "查明真相" } });
+      novels.createNovel({ id: "legacy" });
+      expect(buildNovelDetail(db, "params").novel).toMatchObject({ genre: "悬疑", audience: ["推理读者", "重视公平线索"], coreConflict: { origin: "失踪事件", impact: "信任破裂", idealResolution: "查明真相" } });
+      expect(buildNovelDetail(db, "legacy").novel).toMatchObject({ genre: null, audience: null, coreConflict: null });
+      expect(buildNovelList(db).find((n) => n.id === "params")).not.toHaveProperty("coreConflict");
+    } finally { db.close(); }
+  });
+
   test("空库 list 返回空数组", async () => {
     const { db } = await newFixture();
     expect(buildNovelList(db)).toEqual([]);

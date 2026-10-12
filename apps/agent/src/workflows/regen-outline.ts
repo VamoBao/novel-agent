@@ -84,8 +84,14 @@ export async function regenerateOutline(options: RegenOutlineOptions): Promise<R
   });
 
   const submission = await createOutline(
-    // 类型/受众/核心冲突未入库，仅喂库内数据（worldview + characters）
-    { worldview: storedWorldview.worldview, characters: characters.map((c) => c.character) },
+    // 创作条件逐项入库；历史小说未采集的字段省略，沿用 Agent 的缺省策略。
+    {
+      worldview: storedWorldview.worldview,
+      characters: characters.map((c) => c.character),
+      ...(novel.genre !== null ? { genre: novel.genre } : {}),
+      ...(novel.audience !== null ? { audience: novel.audience } : {}),
+      ...(novel.coreConflict !== null ? { coreConflict: novel.coreConflict } : {}),
+    },
     { novelTitle: novel.name ?? undefined, actCount, partCount, novelId, characterStore, locationStore },
     channel,
   );

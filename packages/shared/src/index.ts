@@ -17,6 +17,7 @@ export {
   type ForeshadowBinding,
 } from "./foreshadow";
 export { coreConflictSchema, type CoreConflict } from "./conflict";
+export { novelCreationParamsSchema, type NovelCreationParams } from "./novel";
 export { outlineSchema, newCharacterSchema, type Outline, type NewCharacterOutline } from "./outline";
 export { chapterPlanSchema, type ChapterPlan } from "./chapter";
 export {

@@ -19,6 +19,21 @@ const validListItem = {
   updatedAt: "2026-09-20T12:00:00.000Z",
 };
 
+describe("小说详情的创作条件契约", () => {
+  const emptyDetail = { novel: validListItem, worldview: null, characters: [], outlineNodes: [], documents: [], foreshadows: [], locations: [], styleReferences: [] };
+
+  test("旧详情载荷缺少创作条件时补 null", () => {
+    expect(novelDetailSchema.parse(emptyDetail).novel).toMatchObject({ genre: null, audience: null, coreConflict: null });
+  });
+
+  test("详情保留结构化创作条件并允许空受众，非法形态拒绝", () => {
+    const params = { genre: "科幻", audience: [], coreConflict: { origin: "资源枯竭", impact: "居民流离失所", idealResolution: "找到新的家园" } };
+    expect(novelDetailSchema.parse({ ...emptyDetail, novel: { ...validListItem, ...params } }).novel).toMatchObject(params);
+    expect(() => novelDetailSchema.parse({ ...emptyDetail, novel: { ...validListItem, audience: "错误" } })).toThrow();
+    expect(() => novelDetailSchema.parse({ ...emptyDetail, novel: { ...validListItem, coreConflict: { origin: "不完整" } } })).toThrow();
+  });
+});
+
 const validCharacter = {
   basicInfo: { name: "林澜" },
   core: { desire: "找到妹妹", fear: "失去同伴", narrativeRole: "主角" },

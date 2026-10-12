@@ -5,6 +5,7 @@ import { locationSchema } from "./location";
 import { outlineNodeTypeSchema } from "./outline-node";
 import { styleReferenceSchema } from "./style-reference";
 import { worldviewSchema } from "./worldview";
+import { novelCreationParamsSchema } from "./novel";
 
 /**
  * 库查询结果契约：agent 一次性查询 CLI（apps/agent/src/query.ts）的序列化输出
@@ -92,7 +93,11 @@ export type StyleReferenceEntry = z.infer<typeof styleReferenceEntrySchema>;
 
 /** 单本小说全量资料：结构数据（世界观 / 角色 / 大纲节点 / 正文 / 伏笔）均可缺失（对应创作中途尚未落库的部分） */
 export const novelDetailSchema = z.object({
-  novel: novelListItemSchema,
+  novel: novelListItemSchema.extend({
+    genre: novelCreationParamsSchema.shape.genre.default(null),
+    audience: novelCreationParamsSchema.shape.audience.default(null),
+    coreConflict: novelCreationParamsSchema.shape.coreConflict.default(null),
+  }),
   worldview: worldviewSchema.nullable().describe("世界观，未确认为 null"),
   characters: z.array(characterEntrySchema).describe("全部角色（按入库顺序）"),
   outlineNodes: z

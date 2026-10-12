@@ -10,7 +10,7 @@ apps/agent/src/workflows/
 ├── index.ts                  # 模块出口：createNovel / planActChapters / regenerateOutline /
 │                             #   polishCharacter / writeChapter / collectWorldview /
 │                             #   createOutline / planChapters
-├── create-novel.ts           # 主编排 createNovel：ID 生成 → 参数收集 → 大纲生成确认（连带新增角色与伏笔清单）→
+├── create-novel.ts           # 主编排 createNovel：ID 生成 → 参数收集（类型/受众/核心冲突逐项入 novels）→ 大纲生成确认（连带新增角色与伏笔清单）→
 │                             #   入库与落盘 → 新增角色兜底 diff + 自动创建入库 → 伏笔清单挂幕入库 → 会话收尾
 │                             #   （章节规划不自动衔接，由客户端单幕会话逐幕手动发起）
 ├── plan-act-chapters.ts      # 单幕章节规划编排 planActChapters：校验（含世界观已确认）并从库组装上下文
@@ -24,7 +24,7 @@ apps/agent/src/workflows/
 │                             #   → generateObject 以表单当前值+世界观单轮全字段润色（无确认门，
 │                             #   结果经 headless polish-result 消息回传客户端表单，不自动入库）
 ├── regen-outline.ts          # 大纲重新生成编排 regenerateOutline：读库校验（小说/世界观/角色）→
-│                             #   幕数/部数表单 → 复用大纲 Agent（仅喂库内数据，清单连带确认）→
+│                             #   幕数/部数表单 → 复用大纲 Agent（库内世界观/角色与小说创作条件，历史缺失项省略，清单连带确认）→
 │                             #   saveOutlineTreeNewVersion 新版本入库（旧版与旧章降级归档）→
 │                             #   新增角色兜底 diff + 自动创建入库 → 伏笔清单挂接新版幕入库
 │                             #   （旧伏笔行保留不动，均同 createNovel 收尾动作）；
@@ -228,3 +228,7 @@ apps/agent/src/workflows/
 ## 测试
 
 模块内测试两层：单测聚焦**可脱离 LLM 的纯函数**——字段协议（`FIELD_SPECS` 完整性、`missingRequiredFields`、`assembleCharacter` 过 schema）、大纲结构校验（`outlineSchemaFor` 恰好 M 部共 N 幕；`saveOutlineInputSchemaFor` 新增角色清单合规通过 / 项内字段空串拒绝 / 清单内名字重复拒绝 / 部幕强校验仍生效）、章节规划入参校验（`saveChaptersInputSchema`：规划 + 新增角色清单均合规通过且空清单合法 / newCharacters 缺失或项内字段空串拒绝 / 清单内名字重复拒绝 / 章节数量约束 1~12 不回归）地点入库（`location-intake.test.ts`：filterNewLocations 库内同名剔除 / 清单去重 / 空名剔除 / 空清单；plantNewLocations 入库与 notify、空清单零调用）；与角色自动创建（`filterNewCharacters` 剔除库内已有名与去重、空清单透传；`autoCreateCharacters` 经 mock ai 全清单入库含守卫拒绝后修正、maxSteps 耗尽抛可读错误且已入库卡保留；`extraContext` 传入时进 prompt、不传不出现）；伏笔入库（`foreshadow-intake.test.ts`：`resolveCharacterIds` trim 全等 / 未解析名单 / 重复幂等；`buildChapterOrder` 部→幕→章展开；大纲路径幕未匹配与服务角色全失败跳过、部分失败剔除并警告、回收幕匹配挂幕与漂移留空警告；章节路径新伏笔带登场章与幕入库、绑定序号越界 / 章名未匹配跳过、合法绑定 patch appearChapterId（含对称校验）、回收绑定成功与多步回收合并 / 越界 / 章名漂移 / 登场未绑 / 顺序不满足跳过）；`create-novel.test.ts` / `plan-act-chapters.test.ts` / `regen-outline.test.ts` / `polish-character.test.ts` / `write-chapter.test.ts` 为**全流程 / 会话集成测试**——mock `ai` 模块（generateObject 返回 fixture、generateText 按脚本逐轮执行工具 execute）+ `FakeChannel` 脚本化应答 + 临时 SQLite，不依赖真实 LLM 验证全链路：create-novel 全流程至大纲入库落盘、新增地点确定性入库（先于角色）与新增角色自动入库（清单角色入库 / 库内已有名被兜底 diff 剔除零调用 / 空清单跳过；章节规划已不在新建流程内）与伏笔挂幕入库；plan-act-chapters 含六类前置校验（小说不存在 / 异小说 / 非幕 / 旧数据缺内容 / 已有章节 / 世界观未确认）、成功路径断言确认视图与新增角色自动入库、空清单跳过（零 LLM 调用）与确认门中止，及本幕未绑伏笔回传与确认后新伏笔入库 / 既有伏笔绑定登场章 / 本幕待回收伏笔绑定回收章（prompt 清单与落库断言）、新增地点确定性入库（库内同名剔除、先于角色）、本幕无伏笔且规划未引入时跳过伏笔处理（零额外调用）；regen-outline 断言新版本入库（旧树旧章降级归档 / 产物覆盖 / description 回填）、确认循环（拒绝→反馈→再确认）与三类前置校验，及新版清单地点确定性入库（地点只增不改）与角色自动入库、伏笔挂接新版（第 2 版）树的幕节点而非旧版归档节点；write-chapter 断言文件落盘层级与内容（临时 output 目录注入）、元数据绑定（document_id 回写 + status=completed）、同名冲突后缀 / 库失败回滚删文件 / prompt 上下文与前置校验 / 写作模型未配置回落 deepseek / 空正文拒绝，及参考文风注入四态（无启用文风零注入零通知 / 启用样本段落位置与模仿要求与名单通知 / 全停用同无文风 / 混合只注入启用条）与本章伏笔注入三态（无绑定零注入零通知且写作要求编号不变 / 登场与同章种收的块位置（【下一章】后【参考文风】前）与条件要求编号顺延与 notify 统计 / 回收登场章正文优先与未写概述兜底及 notify 降级计数），及校验-修订循环五路径（一次通过——进度事件序列 drafting→review-*→saving 且校验调用全部用注入的 reviewModel / 第 2 轮修订——修订 prompt 含【上一版正文】与【整改报告】块且 saving 报告 round=2 / 3 轮保底——照常落盘入库 + 警告通知含文风分与问题计数 / 无启用文风——文风段 skipped 零调用且事件序列无 review-style / 校验抛错——会话终止零残留）及重生成三路径（覆盖替换成功——行数仍 1、旧文件清理、notify「🔄 重新生成中」/ 库故障回滚——旧行与旧文件零影响、新文件无残留 / 校验抛错保旧——保存段未到达旧行旧文件原样）；`chapter-review.test.ts` 单测（mock generateObject 按 prompt 段落标识脚本化）：三段按序独立调用与载荷断言（③不含世界观/概述）、无文风样本 skipped 零调用、onProgress 段开始事件序列、isReportPassing 四态（①③有 issue 不通过 / 文风低于合格线不通过 / 恰达 90 或 skipped 通过 / 全绿通过）、formatRevisionBlock 问题逐条类别建议与文风分数段、校验调用抛错透传；`foreshadow-context.test.ts` 单测覆盖分组（登场卡片全字段与可选缺省、同章种收只归回收组）、登场章上下文兜底链（正文优先 / 未写概述 / 文件缺失 / 节点不可解析 / 归档章照常解析）、预算护栏（按登场章序扣减、超限整条降级不截断）、回收组章序排序与多步回收既往章概述筛选，及服务角色名解析（未匹配兜底原 ID——SQL 直插模拟 store 校验拦不住的手工改库异常）。真实 LLM 端到端验证记录见 PROGRESS。
+
+## 小说创作条件的持久化边界
+
+createNovel 在类型选择、受众多选与补充、核心冲突归一化展示完成时，分别调用 NovelStore.updateNovel 保存 genre / audience / coreConflict；后续中止不撤回已采集结果。regenerateOutline 从小说行读取各非 null 条件传入 OutlineContext；旧小说缺失项省略，沿用大纲 Agent 缺省策略。共享字段 schema、JSON 编解码、迁移与详情契约见根 ARCHITECTURE.md。

@@ -1,3 +1,9 @@
+## 2026-10-12 小说创作条件：绑定 novels、分阶段持久化、历史留空
+
+背景：类型、受众与核心冲突仅在内存 state，重生成无法复用原创作意图。用户确认任务包并指示开始（设计见 `docs/superpowers/specs/2026-10-12-novel-creation-params-design.md`）。
+
+采用 novels 的 genre TEXT / audience JSON 数组 / core_conflict JSON 对象三列，复用小说生命周期与部分更新；相比独立 1:1 参数表减少当前无收益的模块，相比单个 JSON 列支持分阶段直接保存。15→16 补列与版本号同一 immediate 事务提交、锁内复查防并发重复迁移；小说更新仅修改 patch 明确字段，防跨进程改名覆盖创作条件。历史 NULL 不推断回填，空受众数组不同于未采集。新建逐阶段保存，详情查询暴露原生值，重生成读取各非 null 条件；会话整体恢复及编辑界面为后续需求。
+
 ## 2026-10-12 章节正文重新生成：覆盖替换旧正文、弹框确认（两项决策经用户确认，设计规格 `docs/superpowers/specs/2026-10-12-chapter-regen-design.md`）
 
 - **背景**：正文「一章一份」双层拒绝（write-chapter 前置校验 + document-store.saveChapterDocument）——用户对正文不满意时没有任何再生成手段，只能手工删库删文件。用户要求：添加重新生成按钮，流程与新生成完全一致（即完整的三段校验-修订闭环）。

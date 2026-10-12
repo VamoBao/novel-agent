@@ -128,7 +128,12 @@ export function buildNovelDetail(
     .listStyleReferences(novelId)
     .map(toStyleReferenceEntry);
   return novelDetailSchema.parse({
-    novel: toListItem(novel),
+    novel: {
+      ...toListItem(novel),
+      genre: novel.genre,
+      audience: novel.audience,
+      coreConflict: novel.coreConflict,
+    },
     worldview,
     characters,
     outlineNodes,

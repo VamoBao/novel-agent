@@ -1,9 +1,10 @@
 import type { Database } from "bun:sqlite";
+import { novelCreationParamsSchema, type NovelCreationParams } from "@novel/shared";
 import { DEFAULT_DB_PATH, getDefaultDatabase, openDatabase } from "./db";
 import { generateNovelId } from "./id";
 
 /** novels 表记录：小说基本信息（name 在大纲确认后回填；pinned / favorite 为书库管理标记） */
-export interface NovelRecord {
+export interface NovelRecord extends NovelCreationParams {
   id: string;
   name: string | null;
   author: string | null;
@@ -14,7 +15,7 @@ export interface NovelRecord {
   updatedAt: string;
 }
 
-export interface NovelInput {
+export interface NovelInput extends Partial<NovelCreationParams> {
   /** 指定 ID（如工作流已生成的创作 ID）；缺省自动生成 UUIDv7 */
   id?: string;
   name?: string;
@@ -22,20 +23,20 @@ export interface NovelInput {
   description?: string;
 }
 
-export type NovelPatch = Partial<Pick<NovelInput, "name" | "author" | "description">>;
+export type NovelPatch = Partial<Pick<NovelInput, "name" | "author" | "description" | keyof NovelCreationParams>>;
 
 const INSERT_SQL = `
-  INSERT INTO novels (id, name, author, description, created_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?);
+  INSERT INTO novels (id, name, author, description, genre, audience, core_conflict, created_at, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 `;
 
 const SELECT_SQL = `
-  SELECT id, name, author, description, pinned, favorite, created_at, updated_at
+  SELECT id, name, author, description, genre, audience, core_conflict, pinned, favorite, created_at, updated_at
   FROM novels WHERE id = ?;
 `;
 
 const LIST_SQL = `
-  SELECT id, name, author, description, pinned, favorite, created_at, updated_at
+  SELECT id, name, author, description, genre, audience, core_conflict, pinned, favorite, created_at, updated_at
   FROM novels ORDER BY pinned DESC, created_at DESC, id DESC;
 `;
 
@@ -53,6 +54,11 @@ export class NovelStore {
 
   /** 创建小说记录；ID 重复抛错 */
   createNovel(input: NovelInput = {}): NovelRecord {
+    const params = novelCreationParamsSchema.parse({
+      genre: input.genre ?? null,
+      audience: input.audience ?? null,
+      coreConflict: input.coreConflict ?? null,
+    });
     const id = input.id ?? generateNovelId();
     if (this.getNovel(id)) {
       throw new Error(`小说已存在：${id}`);
@@ -60,7 +66,17 @@ export class NovelStore {
     const now = new Date().toISOString();
     this.db
       .prepare(INSERT_SQL)
-      .run(id, input.name ?? null, input.author ?? null, input.description ?? null, now, now);
+      .run(
+        id,
+        input.name ?? null,
+        input.author ?? null,
+        input.description ?? null,
+        params.genre,
+        encodeJson(params.audience),
+        encodeJson(params.coreConflict),
+        now,
+        now,
+      );
     return this.getNovelOrThrow(id);
   }
 
@@ -104,23 +120,31 @@ export class NovelStore {
     })();
   }
 
-  /** 部分更新（name/author/description），自动盖章 updated_at */
+  /** 部分更新基本信息与创作条件；创作条件 undefined=保留、null=清空，写前校验。 */
   updateNovel(id: string, patch: NovelPatch): NovelRecord {
-    const current = this.getNovel(id);
-    if (!current) {
+    if (!this.getNovel(id)) {
       throw new Error(`小说不存在，无法更新：${id}`);
     }
+    const params = novelCreationParamsSchema.partial().parse(patch);
+    // 只写显式给定字段，不用读取快照回填未修改列：查询进程改名与 Agent
+    // 保存创作条件可并发，后提交的改名不能覆盖先提交的条件。
+    const assignments: string[] = [];
+    const values: (string | null)[] = [];
+    const set = (column: string, value: string | null | undefined): void => {
+      if (value === undefined) return;
+      assignments.push(`${column} = ?`);
+      values.push(value);
+    };
+    set("name", patch.name ?? undefined);
+    set("author", patch.author ?? undefined);
+    set("description", patch.description ?? undefined);
+    set("genre", params.genre);
+    set("audience", params.audience === undefined ? undefined : encodeJson(params.audience));
+    set("core_conflict", params.coreConflict === undefined ? undefined : encodeJson(params.coreConflict));
+    set("updated_at", new Date().toISOString());
     this.db
-      .prepare(
-        "UPDATE novels SET name = ?, author = ?, description = ?, updated_at = ? WHERE id = ?;",
-      )
-      .run(
-        patch.name ?? current.name,
-        patch.author ?? current.author,
-        patch.description ?? current.description,
-        new Date().toISOString(),
-        id,
-      );
+      .prepare(`UPDATE novels SET ${assignments.join(", ")} WHERE id = ?;`)
+      .run(...values, id);
     return this.getNovelOrThrow(id);
   }
 
@@ -151,6 +175,9 @@ interface NovelRow {
   name: string | null;
   author: string | null;
   description: string | null;
+  genre: string | null;
+  audience: string | null;
+  core_conflict: string | null;
   pinned: number;
   favorite: number;
   created_at: string;
@@ -158,7 +185,17 @@ interface NovelRow {
 }
 
 function rowToNovel(row: NovelRow): NovelRecord {
+  const params = novelCreationParamsSchema.safeParse({
+    genre: row.genre,
+    audience: decodeJson(row.id, "audience", row.audience),
+    coreConflict: decodeJson(row.id, "coreConflict", row.core_conflict),
+  });
+  if (!params.success) {
+    const issue = params.error.issues[0];
+    throw new Error(`小说 ${row.id} 的 ${issue?.path.join(".") ?? "创作条件"} 字段损坏：${issue?.message ?? "格式不合法"}`, { cause: params.error });
+  }
   return {
+    ...params.data,
     id: row.id,
     name: row.name,
     author: row.author,
@@ -168,6 +205,19 @@ function rowToNovel(row: NovelRow): NovelRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function encodeJson(value: NovelCreationParams["audience"] | NovelCreationParams["coreConflict"]): string | null {
+  return value === null ? null : JSON.stringify(value);
+}
+
+function decodeJson(novelId: string, field: string, raw: string | null): unknown {
+  if (raw === null) return null;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    throw new Error(`小说 ${novelId} 的 ${field} 字段损坏：JSON 解析失败`, { cause: error });
+  }
 }
 
 let defaultStore: NovelStore | undefined;

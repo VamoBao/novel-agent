@@ -108,6 +108,7 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
   // 1. 类型
   channel.stage("type");
   const genre = await channel.askSelect("【1/5】选择小说类型", GENRES, { allowCustom: true });
+  novelStore.updateNovel(id, { genre });
 
   // 2. 受众（LLM 根据类型推断候选，用户多选 + 可补充）
   channel.stage("audience");
@@ -125,6 +126,7 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
     (display) => suggestion.options[audienceOptions.indexOf(display)]?.label ?? display,
   );
   const audience = [...audienceLabels, ...(supplement.length > 0 ? [supplement] : [])];
+  novelStore.updateNovel(id, { audience });
 
   // 3. 世界观（独立 ReAct Agent 多轮收集）
   channel.stage("worldview");
@@ -184,6 +186,7 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
     prompt: `小说类型：${genre}。用户对核心冲突的描述：\n${conflictDescription}\n\n请整理为结构化核心冲突，三项均需基于用户描述提炼，可合理细化但不得虚构冲突主轴。`,
   });
   channel.present({ kind: "conflict", conflict });
+  novelStore.updateNovel(id, { coreConflict: conflict });
 
   // 参数收集完毕，落 state
   const params: NovelParams = { genre, audience, worldview, characters, coreConflict: conflict };
