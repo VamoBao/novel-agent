@@ -607,6 +607,63 @@ button.danger {
   word-break: break-word;
 }
 
+/* 正文生成进度（OutlineNodeCard 章节点，write-progress 消息驱动）：步骤条 + 报告摘要 */
+.write-progress .progress-steps {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 13px;
+}
+
+.write-progress .progress-steps li {
+  color: var(--fg-subtle);
+}
+
+.write-progress .progress-steps li.current {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.write-progress .progress-steps li.done {
+  color: var(--success);
+}
+
+.write-progress .write-report {
+  border-top: 1px solid var(--border-default);
+  padding-top: 8px;
+}
+
+.write-progress .report-verdict {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.write-progress .report-verdict.pass {
+  color: var(--success);
+}
+
+.write-progress .report-verdict.fail {
+  color: var(--danger);
+}
+
+.write-progress .write-report details summary {
+  font-size: 12px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.write-progress .report-issues {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--fg-notify);
+}
+
 /* ViewCard（创作流大纲/章节视图）情节点行——与 plot-list 独立 */
 .viewcard .plot {
   padding-left: 16px;

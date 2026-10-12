@@ -2,7 +2,8 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
 import { model as agentModel } from "./deepseek";
 
-/** 写作模型三项环境变量是否配置齐全（空串视为未配置）；headless 启动检查与回落判定共用 */
+/** 写作模型三项环境变量是否配置齐全（空串视为未配置）；getWritingModel 回落判定用
+ *  （校验模型独立走 Agent 会话模型 deepseek，write-chapter 会话不再据此豁免 Key 检查） */
 export function isWritingModelConfigured(): boolean {
   return Boolean(
     process.env.WRITING_MODEL_NAME &&

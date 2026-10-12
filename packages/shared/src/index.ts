@@ -30,6 +30,16 @@ export {
   type OutlineNodePatch,
 } from "./outline-node";
 export { documentSchema, type Document } from "./document";
+export {
+  reviewIssueKindSchema,
+  reviewIssueSchema,
+  styleReviewSchema,
+  reviewReportSchema,
+  type ReviewIssueKind,
+  type ReviewIssue,
+  type StyleReview,
+  type ReviewReport,
+} from "./review";
 export { styleReferenceSchema, type StyleReference } from "./style-reference";
 export { audienceSuggestionSchema, type AudienceSuggestion } from "./audience";
 export {
@@ -52,10 +62,12 @@ export {
   PROTOCOL_VERSION,
   stageSchema,
   askSchema,
+  writeProgressPhaseSchema,
   agentMessageSchema,
   clientMessageSchema,
   type Stage,
   type Ask,
+  type WriteProgressPhase,
   type AgentMessage,
   type ClientMessage,
   type AgentStartOptions,

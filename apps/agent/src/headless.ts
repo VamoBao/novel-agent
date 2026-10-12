@@ -4,7 +4,6 @@ import { createNovel, planActChapters, polishCharacter, regenerateOutline, write
 import { UserAbortedError } from "./ui/aborted";
 import { ProtocolChannel } from "./ui/protocol-channel";
 import { OUTPUT_DIR } from "./output/outline-writer";
-import { isWritingModelConfigured } from "./providers/writing-model";
 
 /**
  * 协议模式入口：不触碰 TTY，stdin/stdout 按行收发 JSON 消息（协议见 @novel/shared protocol.ts）。
@@ -15,9 +14,9 @@ import { isWritingModelConfigured } from "./providers/writing-model";
  * `regen-outline <novelId>` = 既有小说大纲重新生成（新版本入库，旧版本归档）；
  * `polish-character <novelId> [characterId] <formJson>` = 角色 AI 润色（编辑流传角色 ID，
  * 新建流缺省；formJson 为表单当前值 JSON——argv 传参，结果经 polish-result 消息回传）；
- * `write-chapter <novelId> <chapterNodeId>` = 章节正文生成（写作模型单轮生成入库，
- * 章节点绑定 document_id；写作模型未配置时回落 Agent 会话模型 deepseek，
- * 仅写作模型配置齐全时本会话不经 DeepSeek、免 Key 检查）。
+ * `write-chapter <novelId> <chapterNodeId>` = 章节正文生成（写作模型单轮生成，
+ * 三段校验 + 修订循环后入库；流程经 write-progress 消息实时回传；
+ * 校验经 Agent 会话模型 deepseek，故本会话与其余会话同样需要 DEEPSEEK_API_KEY）。
  */
 
 /** 会话模式：与 client 侧 AgentStartOptions（@novel/shared）一一对应 */
@@ -91,6 +90,16 @@ async function runSession(session: Session, channel: ProtocolChannel, send: (mes
           channel,
           novelId: session.novelId,
           chapterNodeId: session.chapterNodeId,
+          // 流程进度透传：生成/校验/修订/保存各阶段实时回传客户端（章卡进度区块）
+          onProgress: (event) =>
+            send({
+              type: "write-progress",
+              chapterNodeId: event.chapterNodeId,
+              round: event.round,
+              totalRounds: event.totalRounds,
+              phase: event.phase,
+              ...(event.report ? { report: event.report } : {}),
+            }),
         })
       ).novelId;
   }
@@ -98,11 +107,10 @@ async function runSession(session: Session, channel: ProtocolChannel, send: (mes
 
 async function main(): Promise<void> {
   const session = parseSession(process.argv.slice(2));
-  // DeepSeek Key 为 Agent 会话模型（四个 ReAct 会话）所需；正文生成会话在写作模型
-  // 未配置时回落 Agent 模型（deepseek），同样经 DeepSeek——仅「write-chapter 且写作
-  // 模型三项环境变量配置齐全」可免 Key 检查
-  const writingModelOnly = session.kind === "write-chapter" && isWritingModelConfigured();
-  if (!writingModelOnly && !process.env.DEEPSEEK_API_KEY) {
+  // DeepSeek Key 为 Agent 会话模型（四个 ReAct 会话）与正文校验模型（chapter-review
+  // 三段校验）所需——write-chapter 会话经校验模型同样依赖 DeepSeek，与其余会话
+  // 一致地要求 Key（写作模型配置齐不再豁免）
+  if (!process.env.DEEPSEEK_API_KEY) {
     process.stderr.write("NOVEL_AGENT_FATAL: 未设置 DEEPSEEK_API_KEY\n");
     process.exit(1);
   }

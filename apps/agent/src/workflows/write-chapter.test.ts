@@ -16,26 +16,67 @@ import { ForeshadowStore } from "../state/foreshadow-store";
 import { FakeChannel } from "../ui/fake-channel";
 import { writeDocumentArtifact } from "../output/document-writer";
 import type { Character, Worldview } from "@novel/shared";
+import type { WriteProgressEvent } from "./write-chapter";
 
 /**
- * writeChapter 集成测试：mock 掉 'ai' 模块（generateText 按脚本返回正文），
- * 交互经 FakeChannel 记录；持久化落在临时目录 SQLite 与临时 output 目录上——
- * 正文按「小说名/部名/章名.md」层级落文件、库内只登记元数据；
- * 前置校验路径（小说 / 章节点 / 已有正文 / 世界观 / 写作模型未配置）不依赖 LLM。
+ * writeChapter 集成测试：mock 掉 'ai' 模块（generateText 按脚本返回正文；
+ * generateObject 按 prompt 段落标识脚本化返回三段校验结果——默认全绿一次通过，
+ * 用例可覆盖分段结果或注入多轮脚本），交互经 FakeChannel 记录；持久化落在
+ * 临时目录 SQLite 与临时 output 目录上——正文按「小说名/部名/章名.md」层级
+ * 落文件、库内只登记元数据；前置校验路径（小说 / 章节点 / 世界观 /
+ * 写作模型未配置）不依赖 LLM；重新生成路径（覆盖替换）与新生成同套校验循环。
  */
 
 type GenerateTextArgs = { model: unknown; prompt: string };
+type GenerateObjectArgs = { model: unknown; prompt: string };
 let generateTextCalls: GenerateTextArgs[] = [];
 let generateTextResult = "";
+/** 多轮正文脚本：非空时逐轮 shift，耗尽后回落 generateTextResult */
+let generateTextQueue: string[] = [];
+let generateObjectCalls: GenerateObjectArgs[] = [];
+/** 校验三段脚本（键 = prompt 段落标识；值可为单结果或逐次 shift 的数组；缺省全绿一次通过） */
+let reviewScript: {
+  content?: unknown;
+  style?: unknown;
+  consistency?: unknown;
+  error?: Error;
+} = {};
+
+/** 校验段落标识 → 脚本键（与 chapter-review.ts 的 prompt 开场文案对应） */
+function reviewScriptKey(prompt: string): "content" | "style" | "consistency" {
+  if (prompt.includes("设定审校编辑")) return "content";
+  if (prompt.includes("文风比对评审")) return "style";
+  return "consistency";
+}
+
+/** 脚本值解析：数组逐次 shift（多轮），单值恒定复用；缺省全绿 */
+const DEFAULT_REVIEW: Record<string, unknown> = {
+  content: { issues: [] },
+  style: { score: 95, rationale: "贴合样本", suggestions: [] },
+  consistency: { issues: [] },
+};
+
+function nextReviewObject(key: "content" | "style" | "consistency"): unknown {
+  const scripted = reviewScript[key];
+  if (Array.isArray(scripted)) {
+    if (scripted.length > 1) return scripted.shift();
+    return scripted[0];
+  }
+  if (scripted !== undefined) return scripted;
+  return DEFAULT_REVIEW[key];
+}
 
 mock.module("ai", () => ({
   tool: (spec: unknown) => spec,
-  generateObject: async () => {
-    throw new Error("正文生成工作流不应调用 generateObject");
+  generateObject: async (args: GenerateObjectArgs) => {
+    if (reviewScript.error) throw reviewScript.error;
+    generateObjectCalls.push(args);
+    return { object: nextReviewObject(reviewScriptKey(args.prompt)) };
   },
   generateText: async (args: GenerateTextArgs) => {
     generateTextCalls.push(args);
-    return { text: generateTextResult };
+    const text = generateTextQueue.length > 0 ? (generateTextQueue.shift() ?? "") : generateTextResult;
+    return { text };
   },
 }));
 
@@ -72,6 +113,10 @@ beforeEach(() => {
     savedEnv[key] = process.env[key];
     delete process.env[key];
   }
+  // 校验循环脚本状态复位（缺省 = 一次通过；用例内按需覆盖）
+  generateTextQueue = [];
+  generateObjectCalls = [];
+  reviewScript = {};
 });
 
 afterEach(() => {
@@ -203,11 +248,7 @@ describe("writeChapter", () => {
       writeChapter({ ...base, novelId: NOVEL_ID, chapterNodeId: ctx.actNodeId }),
     ).rejects.toThrow("不是章");
 
-    // 已有正文
-    ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "n/p/1.md", 8);
-    await expect(
-      writeChapter({ ...base, novelId: NOVEL_ID, chapterNodeId: ctx.chapterNodeId }),
-    ).rejects.toThrow("已有正文");
+    // 已有正文不再拒绝：走重新生成路径（覆盖替换，见下方重生成用例）
 
     // 世界观未确认（另一章，避开上一用例的正文占用）
     const noWorldview = await setupDb({ withWorldview: false });
@@ -520,5 +561,287 @@ describe("writeChapter", () => {
         n.includes("🔮 本章伏笔：登场 0 条、回收 2 条（1 条登场章正文缺失或超预算，以概述代替）"),
       ),
     ).toBeTrue();
+  });
+
+  test("校验一次通过：三段校验调用注入模型，进度事件按序触发，saving 事件携带通过报告", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+    ctx.styleReferenceStore.addStyleReference(NOVEL_ID, { name: "样本", content: "文风文本。" });
+
+    const REVIEW_MODEL = { modelId: "dummy-review-model" } as unknown as LanguageModelV4;
+    const events: WriteProgressEvent[] = [];
+    const channel = new FakeChannel([]);
+    await writeChapter({
+      channel,
+      novelId: NOVEL_ID,
+      model: DUMMY_MODEL,
+      reviewModel: REVIEW_MODEL,
+      onProgress: (event) => events.push(event),
+      ...ctx,
+    });
+
+    // 生成 1 次 + 校验 3 次（有启用文风），校验调用全部用注入的校验模型
+    expect(generateTextCalls).toHaveLength(1);
+    expect(generateObjectCalls).toHaveLength(3);
+    expect(generateObjectCalls.every((call) => call.model === REVIEW_MODEL)).toBeTrue();
+
+    // 进度事件序列：drafting → 三段校验 → saving；chapterNodeId / totalRounds 随行
+    expect(events.map((event) => event.phase)).toEqual([
+      "drafting",
+      "review-content",
+      "review-style",
+      "review-consistency",
+      "saving",
+    ]);
+    expect(events.every((event) => event.chapterNodeId === ctx.chapterNodeId)).toBeTrue();
+    expect(events.every((event) => event.totalRounds === 3)).toBeTrue();
+    // 段开始事件不带报告；saving 事件携带通过报告
+    expect(events[1]!.report).toBeUndefined();
+    expect(events[4]!.report).toMatchObject({ passed: true, round: 1 });
+
+    // 通知：通过轮次与摘要
+    expect(channel.notifies.some((n) => n.includes("✅ 校验通过（第 1 轮）"))).toBeTrue();
+  });
+
+  test("首轮不达标：第 2 轮修订 prompt 含上一版正文与整改报告，修订稿通过后入库", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = "";
+    generateTextQueue = [PROSE, "　　修订后的正文，矛盾已统一为五个字。"];
+    // 首轮内容校验报 1 处问题，修订轮转绿；文风未启用（跳过段）
+    reviewScript = {
+      content: [
+        { issues: [{ kind: "consistency", description: "五个字写成四个字", suggestion: "统一为五个字" }] },
+        { issues: [] },
+      ],
+    };
+
+    const events: WriteProgressEvent[] = [];
+    const channel = new FakeChannel([]);
+    await writeChapter({
+      channel,
+      novelId: NOVEL_ID,
+      model: DUMMY_MODEL,
+      onProgress: (event) => events.push(event),
+      ...ctx,
+    });
+
+    // 两轮生成；修订轮 prompt 携带上一版正文与整改报告（问题与建议逐条）
+    expect(generateTextCalls).toHaveLength(2);
+    expect(generateTextCalls[0]!.prompt).not.toContain("【上一版正文");
+    const revisionPrompt = generateTextCalls[1]!.prompt;
+    expect(revisionPrompt).toContain("【上一版正文（在其基础上修订）】");
+    expect(revisionPrompt).toContain(PROSE.trim());
+    expect(revisionPrompt).toContain("【整改报告（请逐条修订）】");
+    expect(revisionPrompt).toContain("五个字写成四个字");
+    expect(revisionPrompt).toContain("→ 建议：统一为五个字");
+    expect(revisionPrompt).toContain("6. 按整改报告逐条修订上一版正文");
+
+    // 修订轮进度事件携带首轮报告；saving 事件报告转绿且轮次 2
+    const revising = events.find((event) => event.phase === "revising")!;
+    expect(revising.round).toBe(2);
+    expect(revising.report).toMatchObject({ passed: false, round: 1 });
+    const saving = events.find((event) => event.phase === "saving")!;
+    expect(saving.report).toMatchObject({ passed: true, round: 2 });
+
+    // 入库的是修订稿；通知含修订轮次与通过轮次
+    const artifact = join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    expect(readFileSync(artifact, "utf8")).toContain("矛盾已统一为五个字");
+    expect(channel.notifies.some((n) => n.includes("♻️ 第 2 轮：上一版未达标准"))).toBeTrue();
+    expect(channel.notifies.some((n) => n.includes("✅ 校验通过（第 2 轮）"))).toBeTrue();
+  });
+
+  test("3 轮仍未达标：保底保存最后一版并警告（含文风分与问题计数）", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+    ctx.styleReferenceStore.addStyleReference(NOVEL_ID, { name: "样本", content: "文风文本。" });
+    // 三轮全部不达标（单值脚本恒定复用）
+    reviewScript = {
+      content: { issues: [{ kind: "summary", description: "偏离概述", suggestion: "回调情节" }] },
+      style: { score: 82, rationale: "句式偏短促", suggestions: ["增加环境描写"] },
+      consistency: { issues: [] },
+    };
+
+    const events: WriteProgressEvent[] = [];
+    const channel = new FakeChannel([]);
+    const result = await writeChapter({
+      channel,
+      novelId: NOVEL_ID,
+      model: DUMMY_MODEL,
+      onProgress: (event) => events.push(event),
+      ...ctx,
+    });
+
+    // 3 生成 + 9 校验（每轮 3 段），轮次事件 3 轮齐全
+    expect(generateTextCalls).toHaveLength(3);
+    expect(generateObjectCalls).toHaveLength(9);
+    expect(events.filter((event) => event.phase === "revising")).toHaveLength(2);
+
+    // 照常落盘入库（最后一版）
+    const artifact = join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    expect(existsSync(artifact)).toBe(true);
+    expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.id).toBe(result.documentId);
+
+    // 警告通知含摘要（文风分 + 问题计数）；saving 事件报告 passed=false round=3
+    expect(
+      channel.notifies.some((n) =>
+        n.includes("⚠️ 3 轮未全部达标，保存最后一版（内容 1 处、文风 82 分、自洽 0 处）"),
+      ),
+    ).toBeTrue();
+    expect(events.find((event) => event.phase === "saving")!.report).toMatchObject({
+      passed: false,
+      round: 3,
+    });
+  });
+
+  test("无启用文风：文风段 skipped 零调用，进度事件不含 review-style", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+
+    const events: WriteProgressEvent[] = [];
+    await writeChapter({
+      channel: new FakeChannel([]),
+      novelId: NOVEL_ID,
+      model: DUMMY_MODEL,
+      onProgress: (event) => events.push(event),
+      ...ctx,
+    });
+
+    // 只调内容约束与自洽两段
+    expect(generateObjectCalls).toHaveLength(2);
+    expect(events.map((event) => event.phase)).toEqual([
+      "drafting",
+      "review-content",
+      "review-consistency",
+      "saving",
+    ]);
+    expect(events.find((event) => event.phase === "saving")!.report).toMatchObject({
+      passed: true,
+      style: { skipped: true },
+    });
+  });
+
+  test("校验调用抛错：会话终止零残留（无文件、库无记录）", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+    reviewScript = { error: new Error("校验模型超时") };
+
+    await expect(
+      writeChapter({
+        channel: new FakeChannel([]),
+        novelId: NOVEL_ID,
+        model: DUMMY_MODEL,
+        ...ctx,
+      }),
+    ).rejects.toThrow("校验模型超时");
+    expect(existsSync(join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md"))).toBe(false);
+    expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(0);
+    expect(ctx.outlineStore.getOutlineNode(ctx.chapterNodeId)!.node.documentId).toBeNull();
+  });
+
+  test("重新生成成功：覆盖替换库行、清理旧正文文件，流程与新生成一致", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    // 预置旧正文（行 + 文件）
+    const oldRel = join("灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    writeDocumentArtifact(oldRel, "旧版正文内容。", ctx.outputDir);
+    const old = ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, oldRel, 7);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+
+    const channel = new FakeChannel([]);
+    const result = await writeChapter({
+      channel,
+      novelId: NOVEL_ID,
+      model: DUMMY_MODEL,
+      ...ctx,
+    });
+
+    // 库行覆盖替换：行数仍 1，主键换新、路径与字数为新值，章节点绑定新行
+    expect(result.documentId).not.toBe(old.id);
+    expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(1);
+    expect(result.wordCount).toBe(38);
+    const chapter = ctx.outlineStore.getOutlineNode(ctx.chapterNodeId)!;
+    expect(chapter.node.documentId).toBe(result.documentId);
+    expect(chapter.node.status).toBe("completed");
+
+    // 旧文件清理、新文件落盘（旧名被旧文件占用 → 新文件 -2 后缀）
+    expect(existsSync(join(ctx.outputDir, oldRel))).toBe(false);
+    const newRel = join("灵脉拾遗-eeeeeeee", "第一部", "第一章-2.md");
+    expect(readFileSync(join(ctx.outputDir, newRel), "utf8")).toBe(PROSE.trim());
+
+    // 生成与校验流程与新生成一致（1 生成 + 2 校验，无文风），notify 区分重生成
+    expect(generateTextCalls).toHaveLength(1);
+    expect(generateObjectCalls).toHaveLength(2);
+    expect(channel.notifies.some((n) => n.includes("🔄 重新生成中（将覆盖现有正文）"))).toBeTrue();
+    expect(channel.notifies.some((n) => n.includes("✅ 校验通过（第 1 轮）"))).toBeTrue();
+    expect(channel.notifies.some((n) => n.includes("正文已保存"))).toBeTrue();
+  });
+
+  test("重新生成库故障：回滚删新文件，旧正文行与文件零影响", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    const oldRel = join("灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    writeDocumentArtifact(oldRel, "旧版正文内容。", ctx.outputDir);
+    const old = ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, oldRel, 7);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+
+    // store 替身：查重返回旧行、替换时抛错（模拟库故障）
+    const failingStore = {
+      getDocumentByChapter: () => old,
+      replaceChapterDocument: () => {
+        throw new Error("模拟库写入失败");
+      },
+    } as unknown as DocumentStore;
+
+    await expect(
+      writeChapter({
+        channel: new FakeChannel([]),
+        novelId: NOVEL_ID,
+        model: DUMMY_MODEL,
+        ...ctx,
+        documentStore: failingStore,
+      }),
+    ).rejects.toThrow("模拟库写入失败");
+
+    // 旧正文行与文件原样保留；新文件（-2）无残留
+    expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.id).toBe(old.id);
+    expect(readFileSync(join(ctx.outputDir, oldRel), "utf8")).toBe("旧版正文内容。");
+    expect(existsSync(join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章-2.md"))).toBe(false);
+  });
+
+  test("重新生成校验抛错：终止会话，旧正文行与文件零影响", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    const oldRel = join("灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    writeDocumentArtifact(oldRel, "旧版正文内容。", ctx.outputDir);
+    const old = ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, oldRel, 7);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+    reviewScript = { error: new Error("校验模型超时") };
+
+    await expect(
+      writeChapter({
+        channel: new FakeChannel([]),
+        novelId: NOVEL_ID,
+        model: DUMMY_MODEL,
+        ...ctx,
+      }),
+    ).rejects.toThrow("校验模型超时");
+
+    // 旧正文原样保留（保存段未到达，新文件未写）
+    expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.id).toBe(old.id);
+    expect(readFileSync(join(ctx.outputDir, oldRel), "utf8")).toBe("旧版正文内容。");
+    expect(existsSync(join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章-2.md"))).toBe(false);
   });
 });

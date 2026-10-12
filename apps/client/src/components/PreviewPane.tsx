@@ -10,11 +10,12 @@ import type {
   View,
 } from "@novel/shared";
 import { CharacterEditForm } from "./CharacterEditForm";
+import { ChapterRegenDialog } from "./ChapterRegenDialog";
 import { ForeshadowEditForm, recoveryLabel, type ChapterOption } from "./ForeshadowEditForm";
 import { StyleEditForm } from "./StyleEditForm";
 import { ViewCard } from "./ViewCard";
 import { OutlineNodeCard } from "./OutlineNodeCard";
-import type { ChapterForeshadow } from "./OutlineNodeCard";
+import type { ChapterForeshadow, ChapterWriteProgress } from "./OutlineNodeCard";
 import type { Selection } from "./StructureTreePanel";
 import { globalChapterOrder } from "../chapter-order";
 
@@ -302,25 +303,42 @@ export function PreviewPane({
 }: PreviewPaneProps) {
   /** 正文生成中的章节点 ID（null = 空闲）；agent 会话单例，进行中禁用各章入口 */
   const [writingNodeId, setWritingNodeId] = useState<string | null>(null);
+  /** 目标章的生成进度（write-progress 消息驱动；报告在轮次间保持展示直至新一轮报告到达） */
+  const [writeProgress, setWriteProgress] = useState<ChapterWriteProgress | null>(null);
+  /** 待确认重生成的章节点（弹框确认后发起会话；生成与重生成走同一 write-chapter 会话） */
+  const [regenConfirmNode, setRegenConfirmNode] = useState<OutlineNodeEntry | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);
 
   // 正文生成会话消息订阅（对齐 CharacterEditForm 润色订阅模式）：
-  // run_finished → 清生成态并刷新详情；error → 展示错误；exit 兜底复位
+  // write-progress → 更新目标章流程进度；run_finished → 清生成态并刷新详情；
+  // error → 展示错误；exit 兜底复位
   useEffect(() => {
     const offMessage = window.agent.onMessage((message) => {
       if (writingNodeId === null) return;
       if (message.type === "run_finished") {
         setWritingNodeId(null);
+        setWriteProgress(null);
         setWriteError(null);
         onDocumentSaved?.();
+      } else if (message.type === "write-progress" && message.chapterNodeId === writingNodeId) {
+        setWriteProgress({
+          round: message.round,
+          totalRounds: message.totalRounds,
+          phase: message.phase,
+          report: message.report,
+        });
       } else if (message.type === "error") {
         setWritingNodeId(null);
+        setWriteProgress(null);
         setWriteError(message.message);
         // 收尾兜底：确保单例 agent 空闲（对已退出进程是空操作）
         void window.agent.stop();
       }
     });
-    const offExit = window.agent.onExit(() => setWritingNodeId(null));
+    const offExit = window.agent.onExit(() => {
+      setWritingNodeId(null);
+      setWriteProgress(null);
+    });
     return () => {
       offMessage();
       offExit();
@@ -337,9 +355,10 @@ export function PreviewPane({
     [],
   );
 
-  /** 发起本章正文生成（write-chapter 会话，写作模型单轮生成入库） */
+  /** 发起本章正文生成（write-chapter 会话，写作模型生成 → 三段校验 → 修订循环 → 入库） */
   const startWriteChapter = (novelId: string, chapterNodeId: string): void => {
     setWritingNodeId(chapterNodeId);
+    setWriteProgress(null);
     setWriteError(null);
     void window.agent.start({ mode: "write-chapter", novelId, chapterNodeId });
   };
@@ -386,9 +405,15 @@ export function PreviewPane({
             node.type === "chapter" ? toChapterForeshadows(detail, node.id) : undefined
           }
           writing={writingNodeId !== null}
+          writeProgress={writingNodeId === node.id ? (writeProgress ?? undefined) : undefined}
           onWriteChapter={
             node.type === "chapter"
               ? () => startWriteChapter(detail.novel.id, node.id)
+              : undefined
+          }
+          onRegenerateChapter={
+            node.type === "chapter" && node.summary !== null
+              ? () => setRegenConfirmNode(node)
               : undefined
           }
         />
@@ -452,5 +477,20 @@ export function PreviewPane({
   }
 
   // 不再展示小说名标题行——左栏书库选中高亮已表明当前小说，右栏只留内容
-  return <section className="preview">{body}</section>;
+  return (
+    <section className="preview">
+      {body}
+      {regenConfirmNode && detail ? (
+        <ChapterRegenDialog
+          chapterName={regenConfirmNode.name}
+          onCancel={() => setRegenConfirmNode(null)}
+          onConfirm={() => {
+            const target = regenConfirmNode;
+            setRegenConfirmNode(null);
+            startWriteChapter(detail.novel.id, target.id);
+          }}
+        />
+      ) : null}
+    </section>
+  );
 }

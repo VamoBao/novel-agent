@@ -90,6 +90,50 @@ describe("protocol schemas", () => {
     expect(agentMessageSchema.safeParse({ type: "hello", protoVersion: 1 }).success).toBe(false);
   });
 
+  test("agent 消息：write-progress 正文生成流程进度（report 可选）", () => {
+    const base = { type: "write-progress", chapterNodeId: "ch1", round: 1, totalRounds: 3 };
+    for (const phase of [
+      "drafting",
+      "revising",
+      "review-content",
+      "review-style",
+      "review-consistency",
+      "saving",
+    ]) {
+      expect(agentMessageSchema.parse({ ...base, phase })).toMatchObject({ phase });
+    }
+    expect(agentMessageSchema.safeParse({ ...base, phase: "unknown" }).success).toBe(false);
+    // 无 report（阶段事件）合法
+    expect(
+      agentMessageSchema.parse({ ...base, phase: "drafting" }),
+    ).toMatchObject({ round: 1 });
+    // 携带报告合法（三段校验完成）
+    const withReport = {
+      ...base,
+      phase: "review-consistency",
+      report: {
+        round: 1,
+        passed: false,
+        content: { issues: [] },
+        style: { skipped: false, score: 82, rationale: "偏短促", suggestions: ["增加环境描写"] },
+        consistency: {
+          issues: [{ kind: "consistency", description: "前后矛盾", suggestion: "统一" }],
+        },
+      },
+    };
+    expect(agentMessageSchema.parse(withReport)).toMatchObject({ report: { round: 1 } });
+    // report 缺必填段（style）拒绝
+    expect(
+      agentMessageSchema.safeParse({
+        ...withReport,
+        report: { round: 1, passed: false, content: { issues: [] }, consistency: { issues: [] } },
+      }).success,
+    ).toBe(false);
+    // chapterNodeId / round 缺失拒绝
+    expect(agentMessageSchema.safeParse({ type: "write-progress", round: 1, totalRounds: 3, phase: "drafting" }).success).toBe(false);
+    expect(agentMessageSchema.safeParse({ type: "write-progress", chapterNodeId: "ch1", round: 0, totalRounds: 3, phase: "drafting" }).success).toBe(false);
+  });
+
   test("client 消息：response 四种 answer 类型", () => {
     for (const answer of ["文本", ["甲", "乙"], true, 5]) {
       expect(clientMessageSchema.parse({ type: "response", id: 1, answer })).toMatchObject({
