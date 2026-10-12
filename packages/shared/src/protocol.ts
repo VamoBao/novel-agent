@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { characterSchema } from "./character";
-import { reviewReportSchema } from "./review";
+import { reviewReportSchema, reviewStageResultSchema } from "./review";
 import { viewSchema } from "./views";
 
 /** stdio JSON 行协议版本；hello 时不一致由 client 拒绝继续 */
@@ -93,8 +93,8 @@ export const agentMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("polish-result"), character: characterSchema }),
   /**
    * 章节正文生成流程进度（write-chapter 会话专属）：round 当前轮次（1 起始）、
-   * totalRounds 循环上限（当前 3）、phase 流程阶段；report 仅在三轮校验全部完成时
-   * 携带最新整改报告（客户端据此展示问题摘要与文风评分）。chapterNodeId 供客户端
+   * totalRounds 循环上限（当前 3）、phase 流程阶段；stageResult 在单项校验结束时
+   * 携带该项结果，report 在修订/保存阶段携带完整报告。chapterNodeId 供客户端
    * 路由到目标章卡。
    */
   z.object({
@@ -104,6 +104,7 @@ export const agentMessageSchema = z.discriminatedUnion("type", [
     totalRounds: z.number().int().min(1),
     phase: writeProgressPhaseSchema,
     report: reviewReportSchema.optional(),
+    stageResult: reviewStageResultSchema.optional(),
   }),
   z.object({ type: z.literal("error"), message: z.string(), fatal: z.boolean() }),
 ]);

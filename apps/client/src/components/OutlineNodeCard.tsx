@@ -1,4 +1,4 @@
-import type { DocumentEntry, OutlineNodeEntry, ReviewReport, WriteProgressPhase } from "@novel/shared";
+import type { DocumentEntry, OutlineNodeEntry, ReviewReport, ReviewStageResult, WriteProgressPhase } from "@novel/shared";
 
 /** 章卡伏笔显示模型（PreviewPane 过滤登场/回收两组并解析角色名后传入，卡片纯渲染） */
 export interface ChapterForeshadow {
@@ -17,6 +17,7 @@ export interface ChapterWriteProgress {
   totalRounds: number;
   phase: WriteProgressPhase;
   report?: ReviewReport;
+  stageResults: ReviewStageResult[];
 }
 
 /** 进度步骤（drafting 与 revising 同属「正文生成」步——修订轮即新一轮生成） */
@@ -69,7 +70,7 @@ function reportSummary(report: ReviewReport): string {
  * 据幕缺梗概/情节点（无规划种子内容），禁用并提示原因。
  * 章节点：无正文时同样右对齐显示「✍️ 生成本章正文」入口（写作模型生成，
  * write-chapter 会话）；生成中由 writeProgress 渲染流程进度区块（步骤条 +
- * 整改报告摘要，write-progress 消息驱动）；已有正文则在梗概卡下追加正文卡
+ * 单段校验反馈及整改报告摘要，write-progress 消息驱动）；已有正文则在梗概卡下追加正文卡
  * （约 N 字 + 全文——内容存 output 落盘文件，库内只留元数据；重写/修订流为
  * 后续需求）。
  * 浏览路径专用，不进 shared 的 View 体系——
@@ -157,15 +158,36 @@ export function OutlineNodeCard({
             生成进度 · 第 {writeProgress.round}/{writeProgress.totalRounds} 轮
           </p>
           <ol className="progress-steps">
-            {PROGRESS_STEPS.map((step, index) => (
-              <li
-                key={step.label}
-                className={index === currentStep ? "current" : index < currentStep ? "done" : undefined}
-              >
-                {index < currentStep ? "✓ " : ""}
-                {step.label}
-              </li>
-            ))}
+            {PROGRESS_STEPS.map((step, index) => {
+              const stage = writeProgress.stageResults.find((item) => step.phases.includes(item.phase));
+              const failed = stage?.phase === "review-style"
+                ? !stage.result.skipped && stage.result.score < 90
+                : stage !== undefined && stage.result.issues.length > 0;
+              const skipped = stage?.phase === "review-style" && stage.result.skipped;
+              return (
+                <li
+                  key={step.label}
+                  className={failed ? "warning" : skipped ? "skipped" : index === currentStep && !stage ? "current" : stage || index < currentStep ? "done" : undefined}
+                >
+                  <span>{failed ? "⚠ " : skipped ? "— " : stage || index < currentStep ? "✓ " : ""}{step.label}{skipped ? "（已跳过）" : ""}</span>
+                  {stage?.phase === "review-style" && !stage.result.skipped ? (
+                    <div className="stage-feedback">
+                      <p>文风 {stage.result.score} 分：{stage.result.rationale}</p>
+                      {failed && stage.result.suggestions.length > 0 ? (
+                        <ul>{stage.result.suggestions.map((suggestion, i) => <li key={i}>{suggestion}</li>)}</ul>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {stage && stage.phase !== "review-style" && stage.result.issues.length > 0 ? (
+                    <ul className="stage-feedback">
+                      {stage.result.issues.map((issue, i) => (
+                        <li key={i}>[{ISSUE_KIND_LABELS[issue.kind]}] {issue.description} → {issue.suggestion}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
           </ol>
           {report ? (
             <div className="write-report">

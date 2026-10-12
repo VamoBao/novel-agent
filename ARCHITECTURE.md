@@ -97,7 +97,7 @@ apps/agent/src/
     │                    #   → isReportPassing 通过跳出 / 未达标按报告修订式重写（原上下文+上一版正文+整改报告），
     │                    #   3 轮仍未达标保底保存最后一版并警告 → 正文落文件（层级目录）+
     │                    #   saveChapterDocument 元数据入库绑定；进度经 Options 注入的 onProgress 回调透传
-    │                    #   （headless 映射 write-progress 协议消息）
+    │                    #   （单段结束即回传 stageResult，完整报告在 revising/saving 回传；headless 映射 write-progress 协议消息）
     ├── chapter-review.ts # 校验 subAgent 模块（无 ReAct）：reviewChapter 三段独立单轮 generateObject——
     │                    #   ①内容约束（世界观/章节概述/本章伏笔——与写作者同源的 foreshadowContext.lines）
     │                    #   ②文风相似度评分（≥STYLE_PASS_SCORE=90 合格；无启用样本 skipped 零调用）
@@ -247,6 +247,7 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 1. **前置校验**（全部抛可读错误，由协议入口转 fatal error）：小说存在 → 章节点存在、同小说且类型为 chapter → 章剧情概述非空（旧数据缺内容拒绝）→ 所属幕与部节点存在 → 世界观已确认（worldviews 表有记录）；已有正文不再拒绝——检测到既有 document 即走重新生成路径（isRegen 分流 notify 与保存路径，流程与首次生成完全一致）
 2. **上下文组装（全取自库）**：书名 / logline + 世界观 JSON + 角色摘要行（名/定位/外貌/性格/渴望/恐惧，控制 prompt 体积）+ 部名与部梗概 + 幕名与幕梗概及关键情节点 + 本章名与剧情概述 + 同幕前后章名与概述（衔接上文、给下文留空间）+ **本章绑定伏笔（可选增强）**：`buildChapterForeshadowContext`（workflows/foreshadow-context）——登场注入卡片、回收组按登场章全局章序升序注入卡片 + 登场章上下文（正文优先、8000 字符预算内整条注入，未生成/文件缺失/超预算降级概述）+ 多步回收既往回收章概述，【本章伏笔】块插【下一章】块后【参考文风】段前、写作要求条件附加编号顺延、生成前 notify「🔮 本章伏笔」统计与降级计数；无绑定伏笔零注入零通知 + **参考文风（可选增强）**：style_references 表按启用过滤（enabled=1），非空在 prompt 尾部【下一章】块之后插【参考文风】段（每条「（名字）\n内容」，长样本置尾不推远核心上下文且紧邻风格指令）、写作要求附模仿条（模仿叙事语言 / 句式节奏 / 描写风格，不抄袭具体情节与专有名词）、生成前 notify「🖋️ 本次参考文风：名单」；无启用文风零注入零通知（行为与无此功能逐字节一致）
 3. **生成-校验-修订循环与落盘**：`getWritingModel()`（providers/writing-model，OpenAI 接口兼容端点，`WRITING_MODEL_*` 三环境变量齐才启用，任一未配置回落 Agent 会话模型 deepseek）单轮 `generateText`（非 ReAct——无工具无提问），写作要求含 2000~3000 字、遵守世界观禁忌、只输出正文文本；空结果拒绝且零残留。每轮生成后经 `reviewChapter`（chapter-review，deepseek 三段独立校验——①内容约束（世界观/章节概述/本章伏笔）②文风相似度（≥90 合格，无启用样本 skipped）③前后自洽）产出结构化整改报告：`isReportPassing` 通过（①③零问题且文风达标）→ 落盘；未达标按报告修订式重写（prompt 追加【上一版正文】+【整改报告】块，末条要求替换为按报告逐条修订），最多 3 轮；第 3 轮仍未达标 → ⚠️ 警告（含文风分与问题计数）后保底保存最后一版。进度全程经 onProgress 回调透传（drafting/review-*/revising/saving，报告附着在 revising/saving 事件）。正文经 document-writer 写 `output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`（sanitize 段清理，同名冲突加 `-N` 后缀不覆盖既有文件），文件先落、库后入，库失败回滚删除文件
+   三项校验各在开始与结束时发送 `write-progress`，结束事件附 `stageResult`；客户端按轮累积阶段结果，有问题即在对应阶段显示警告与建议，新轮清空阶段结果。完整 `report` 仍随修订 / 保存事件供末尾汇总。
 4. **元数据入库绑定**：首次生成走 `saveChapterDocument`、重新生成走 `replaceChapterDocument`（单事务删旧行插新行）插 documents 行（file_path 相对路径 + 字数，内容不进库）+ 章节点回写 `document_id` 并置 `status=completed`；重生成在事务提交后清理旧正文文件（新旧路径相同——旧文件本就缺失——时跳过防误删新文件；幂等容忍缺失）；任一环节失败回滚删新文件，旧正文行与文件零影响；notify 保存路径与字数；run_finished 携带小说 ID 供客户端刷新详情（章节点 ID 稳定，选中与正文展示保持）；大纲重生成只降级归档章节点，documents 行与正文文件保留（旧正文与归档章的关联留存）
 
 ## ReAct 终态工具模式（src/agents/react.ts）

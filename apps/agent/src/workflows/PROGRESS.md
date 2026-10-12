@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-12 [feat] 正文校验阶段结束即时回传单项结果；主任务清单、验证结果与全量测试环境限制见仓库根目录 `PROGRESS.md`。
+
 - 2026-10-12 [feat] 章节正文重新生成——覆盖替换 + 弹框确认（跨模块需求，设计规格 `docs/superpowers/specs/2026-10-12-chapter-regen-design.md` + 实现计划 `docs/superpowers/plans/2026-10-12-chapter-regen.md`，4 任务逐一实现后清单归一；两项决策经用户确认：旧正文覆盖替换 / 弹框确认，决策见根 DECISIONS）：**本模块仅 write-chapter.ts 改动**——前置校验移除「已有正文」拒绝（getDocumentByChapter 有行即 isRegen 分流：notify「🔄 重新生成中（将覆盖现有正文）」、落库走 replaceChapterDocument 覆盖替换、事务提交后清理旧正文文件——路径相同跳过防误删、幂等容忍缺失；任一环节失败回滚删新文件旧正文零影响）；生成与校验流程与首次生成完全一致（同一会话、协议与 headless 零改动）。document-store replaceChapterDocument 与客户端重生成入口/弹框见根 PROGRESS 当日条目。AC：typecheck 3 工程 / lint / 361 用例全过（本模块净增 3 条重生成集成用例——覆盖替换成功 / 库故障回滚 / 校验抛错保旧；前置校验用例「已有正文拒绝」随行为翻转移除，既有用例全数保留）；真实端到端待用户复验
 
 - 2026-10-12 [feat] 章节正文生成校验-修订闭环（跨模块需求，设计规格 `docs/superpowers/specs/2026-10-12-chapter-review-loop-design.md` + 实现计划 `docs/superpowers/plans/2026-10-12-chapter-review-loop.md`，6 任务逐一实现后清单归一；三项决策经用户确认：3 轮上限仍未达标保底保存最后一版并警告 / 校验模型用 Agent 会话模型 deepseek / 修订式重写，决策见根 DECISIONS）：**本模块净增 chapter-review.ts 校验 subAgent（reviewChapter 三段独立单轮 generateObject——①内容约束（世界观/章节概述/本章伏笔同源 lines）②文风相似度（≥90 合格、无启用样本 skipped 段事件零发送）③前后自洽（仅正文、kind 代码补全）+ isReportPassing + formatRevisionBlock；reviewModel 与 onProgress 注入、异常直接抛错）与 write-chapter.ts 循环化改造（生成段包进 3 轮循环、修订轮 prompt 追加【上一版正文】+【整改报告】块、3 轮保底保存警告、Options 增 reviewModel/onProgress 注入）**；shared review schema 与 write-progress 协议、headless 接线与 Key 检查收窄（write-chapter 自此始终要求 DEEPSEEK_API_KEY）、客户端进度区块见根 PROGRESS 当日条目。AC：typecheck 3 工程 / lint / 355 用例全过（本模块净增 13：chapter-review 8 + write-chapter 集成 5，既有 334 全数保留——初稿 prompt 逐字节回归、伏笔/文风注入用例全保留）；真实 LLM / 写作模型端到端待用户复验

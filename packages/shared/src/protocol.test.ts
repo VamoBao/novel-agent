@@ -122,6 +122,16 @@ describe("protocol schemas", () => {
       },
     };
     expect(agentMessageSchema.parse(withReport)).toMatchObject({ report: { round: 1 } });
+    expect(agentMessageSchema.parse({
+      ...base,
+      phase: "review-content",
+      stageResult: { phase: "review-content", result: { issues: [] } },
+    })).toMatchObject({ stageResult: { phase: "review-content" } });
+    expect(agentMessageSchema.safeParse({
+      ...base,
+      phase: "review-style",
+      stageResult: { phase: "review-style", result: { skipped: false, score: 101 } },
+    }).success).toBe(false);
     // report 缺必填段（style）拒绝
     expect(
       agentMessageSchema.safeParse({
