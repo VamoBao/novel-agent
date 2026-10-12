@@ -132,16 +132,23 @@ describe("reviewChapter", () => {
     expect(report.passed).toBeTrue();
   });
 
-  test("onProgress 逐段开始回调：review-content → review-style → review-consistency（报告由编排层附着后续事件，模块不重复发段事件）", async () => {
+  test("onProgress 逐段开始及结束回调：每段结束立即带该段结果", async () => {
     generateObjectCalls = [];
     scriptedResults = { content: CONTENT_ISSUES, style: STYLE_SCORED, consistency: CONSISTENCY_ISSUES };
-    const phases: string[] = [];
+    const events: { phase: string; result?: unknown }[] = [];
 
-    await reviewChapter(baseInput(), baseDeps((phase) => {
-      phases.push(phase);
+    await reviewChapter(baseInput(), baseDeps((phase, stageResult) => {
+      events.push({ phase, result: stageResult });
     }));
 
-    expect(phases).toEqual(["review-content", "review-style", "review-consistency"]);
+    expect(events.map((event) => event.phase)).toEqual([
+      "review-content", "review-content", "review-style", "review-style",
+      "review-consistency", "review-consistency",
+    ]);
+    expect(events[0]!.result).toBeUndefined();
+    expect(events[1]!.result).toMatchObject({ phase: "review-content", result: CONTENT_ISSUES });
+    expect(events[3]!.result).toMatchObject({ phase: "review-style", result: { score: 82 } });
+    expect(events[5]!.result).toMatchObject({ phase: "review-consistency", result: { issues: [{ kind: "consistency" }] } });
   });
 
   test("全部通过路径：报告 passed=true", async () => {

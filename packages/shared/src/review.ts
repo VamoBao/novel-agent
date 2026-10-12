@@ -47,3 +47,11 @@ export const reviewReportSchema = z.object({
   consistency: z.object({ issues: z.array(reviewIssueSchema) }),
 });
 export type ReviewReport = z.infer<typeof reviewReportSchema>;
+
+/** 单项校验结束即回传的结果；完整报告仍在修订 / 保存阶段回传。 */
+export const reviewStageResultSchema = z.discriminatedUnion("phase", [
+  z.object({ phase: z.literal("review-content"), result: reviewReportSchema.shape.content }),
+  z.object({ phase: z.literal("review-style"), result: styleReviewSchema }),
+  z.object({ phase: z.literal("review-consistency"), result: reviewReportSchema.shape.consistency }),
+]);
+export type ReviewStageResult = z.infer<typeof reviewStageResultSchema>;

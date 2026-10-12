@@ -5,6 +5,7 @@ import {
   reviewIssueSchema,
   type ReviewIssue,
   type ReviewReport,
+  type ReviewStageResult,
   type StyleReview,
   type WriteProgressPhase,
 } from "@novel/shared";
@@ -47,8 +48,8 @@ export interface ChapterReviewInput {
 export interface ChapterReviewDeps {
   /** 校验模型（结构化分析任务，独立于写作模型注入） */
   reviewModel: LanguageModelV4;
-  /** 段落开始回调（write-chapter 编排层透传客户端；逐段开始前触发，报告由编排层附着到后续阶段事件） */
-  onProgress?: (phase: WriteProgressPhase) => void;
+  /** 每段开始与结束回调；结束时附该段结果。 */
+  onProgress?: (phase: WriteProgressPhase, stageResult?: ReviewStageResult) => void;
 }
 
 /** 问题类别 → 中文标签（修订块与报告展示共用） */
@@ -105,12 +106,14 @@ export async function reviewChapter(
     schema: z.object({ issues: z.array(reviewIssueSchema) }),
     prompt: contentPrompt,
   });
+  onProgress?.("review-content", { phase: "review-content", result: contentResult });
 
-  // ② 文风对比：无启用文风整段跳过（与生成侧「零注入」对称——段事件也不发）；
+  // ② 文风对比：无启用文风不调模型，但回传 skipped 供客户端显示；
   // 模型只产评分三字段，skipped 包装由代码完成（避免模型自行声明跳过）
   let style: StyleReview;
   if (input.styleSamples.length === 0) {
     style = { skipped: true };
+    onProgress?.("review-style", { phase: "review-style", result: style });
   } else {
     onProgress?.("review-style");
     const styleScoreSchema = z.object({
@@ -136,6 +139,7 @@ export async function reviewChapter(
       ].join("\n"),
     });
     style = { skipped: false, ...styleResult };
+    onProgress?.("review-style", { phase: "review-style", result: style });
   }
 
   // ③ 前后自洽：仅正文全文（章内属性，不携带世界观/概述等外部上下文）
@@ -167,6 +171,10 @@ export async function reviewChapter(
     description: issue.description,
     suggestion: issue.suggestion,
   }));
+  onProgress?.("review-consistency", {
+    phase: "review-consistency",
+    result: { issues: consistencyIssues },
+  });
 
   const report: ReviewReport = {
     round: input.round,

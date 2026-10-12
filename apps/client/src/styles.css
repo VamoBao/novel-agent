@@ -610,9 +610,8 @@ button.danger {
 /* 正文生成进度（OutlineNodeCard 章节点，write-progress 消息驱动）：步骤条 + 报告摘要 */
 .write-progress .progress-steps {
   list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
+  display: grid;
+  gap: 6px;
   margin: 0 0 8px;
   padding: 0;
   font-size: 13px;
@@ -630,6 +629,26 @@ button.danger {
 .write-progress .progress-steps li.done {
   color: var(--success);
 }
+
+.write-progress .progress-steps li.warning {
+  color: var(--danger);
+}
+
+.write-progress .progress-steps li.skipped {
+  color: var(--fg-muted);
+}
+
+.write-progress .stage-feedback {
+  margin: 4px 0 6px 20px;
+  color: var(--fg-notify);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.7;
+}
+
+.write-progress .stage-feedback p { margin: 0; }
+.write-progress .stage-feedback ul,
+.write-progress ul.stage-feedback { padding-left: 18px; }
 
 .write-progress .write-report {
   border-top: 1px solid var(--border-default);

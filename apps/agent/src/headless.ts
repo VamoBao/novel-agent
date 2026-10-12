@@ -99,6 +99,7 @@ async function runSession(session: Session, channel: ProtocolChannel, send: (mes
               totalRounds: event.totalRounds,
               phase: event.phase,
               ...(event.report ? { report: event.report } : {}),
+              ...(event.stageResult ? { stageResult: event.stageResult } : {}),
             }),
         })
       ).novelId;

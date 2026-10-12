@@ -35,10 +35,12 @@ export {
   reviewIssueSchema,
   styleReviewSchema,
   reviewReportSchema,
+  reviewStageResultSchema,
   type ReviewIssueKind,
   type ReviewIssue,
   type StyleReview,
   type ReviewReport,
+  type ReviewStageResult,
 } from "./review";
 export { styleReferenceSchema, type StyleReference } from "./style-reference";
 export { audienceSuggestionSchema, type AudienceSuggestion } from "./audience";

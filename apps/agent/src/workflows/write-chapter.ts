@@ -1,6 +1,6 @@
 import { generateText } from "ai";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
-import type { ReviewReport, WriteProgressPhase } from "@novel/shared";
+import type { ReviewReport, ReviewStageResult, WriteProgressPhase, Document } from "@novel/shared";
 import type { UiChannel } from "../ui/channel";
 import { getWritingModel } from "../providers/writing-model";
 import { model as agentSessionModel } from "../providers/deepseek";
@@ -24,15 +24,15 @@ import {
   removeDocumentArtifact,
   writeDocumentArtifact,
 } from "../output/document-writer";
-import type { Document } from "@novel/shared";
 
-/** 正文生成流程进度事件（headless 映射为 write-progress 协议消息；report 仅附着在 revising / saving 事件上） */
+/** 正文生成流程进度事件：单段完成附 stageResult；完整 report 附在 revising / saving。 */
 export interface WriteProgressEvent {
   chapterNodeId: string;
   round: number;
   totalRounds: number;
   phase: WriteProgressPhase;
   report?: ReviewReport;
+  stageResult?: ReviewStageResult;
 }
 
 export interface WriteChapterOptions {
@@ -349,8 +349,11 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       },
       {
         reviewModel,
-        onProgress: (phase) =>
-          onProgress?.({ chapterNodeId, round, totalRounds: MAX_REVIEW_ROUNDS, phase }),
+        onProgress: (phase, stageResult) =>
+          onProgress?.({
+            chapterNodeId, round, totalRounds: MAX_REVIEW_ROUNDS, phase,
+            ...(stageResult ? { stageResult } : {}),
+          }),
       },
     );
     passed = report.passed;

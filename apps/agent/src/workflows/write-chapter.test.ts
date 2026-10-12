@@ -591,15 +591,21 @@ describe("writeChapter", () => {
     expect(events.map((event) => event.phase)).toEqual([
       "drafting",
       "review-content",
+      "review-content",
       "review-style",
+      "review-style",
+      "review-consistency",
       "review-consistency",
       "saving",
     ]);
     expect(events.every((event) => event.chapterNodeId === ctx.chapterNodeId)).toBeTrue();
     expect(events.every((event) => event.totalRounds === 3)).toBeTrue();
-    // 段开始事件不带报告；saving 事件携带通过报告
+    // 段开始事件不带报告，段结束带单项结果；saving 携带完整报告
     expect(events[1]!.report).toBeUndefined();
-    expect(events[4]!.report).toMatchObject({ passed: true, round: 1 });
+    expect(events[2]!.stageResult).toMatchObject({ phase: "review-content", result: { issues: [] } });
+    expect(events[4]!.stageResult).toMatchObject({ phase: "review-style", result: { skipped: false } });
+    expect(events[6]!.stageResult).toMatchObject({ phase: "review-consistency", result: { issues: [] } });
+    expect(events[7]!.report).toMatchObject({ passed: true, round: 1 });
 
     // 通知：通过轮次与摘要
     expect(channel.notifies.some((n) => n.includes("✅ 校验通过（第 1 轮）"))).toBeTrue();
@@ -699,7 +705,7 @@ describe("writeChapter", () => {
     });
   });
 
-  test("无启用文风：文风段 skipped 零调用，进度事件不含 review-style", async () => {
+  test("无启用文风：文风段 skipped 零调用，进度事件显示跳过", async () => {
     const ctx = await setupDb();
     cleanupAll.push(ctx.cleanup);
     generateTextCalls = [];
@@ -719,9 +725,15 @@ describe("writeChapter", () => {
     expect(events.map((event) => event.phase)).toEqual([
       "drafting",
       "review-content",
+      "review-content",
+      "review-style",
+      "review-consistency",
       "review-consistency",
       "saving",
     ]);
+    expect(events.find((event) => event.phase === "review-style")!.stageResult).toEqual({
+      phase: "review-style", result: { skipped: true },
+    });
     expect(events.find((event) => event.phase === "saving")!.report).toMatchObject({
       passed: true,
       style: { skipped: true },

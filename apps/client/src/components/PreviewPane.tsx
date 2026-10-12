@@ -303,7 +303,7 @@ export function PreviewPane({
 }: PreviewPaneProps) {
   /** 正文生成中的章节点 ID（null = 空闲）；agent 会话单例，进行中禁用各章入口 */
   const [writingNodeId, setWritingNodeId] = useState<string | null>(null);
-  /** 目标章的生成进度（write-progress 消息驱动；报告在轮次间保持展示直至新一轮报告到达） */
+  /** 目标章的生成进度；单段结果按轮累积，完整报告在轮次间保持展示。 */
   const [writeProgress, setWriteProgress] = useState<ChapterWriteProgress | null>(null);
   /** 待确认重生成的章节点（弹框确认后发起会话；生成与重生成走同一 write-chapter 会话） */
   const [regenConfirmNode, setRegenConfirmNode] = useState<OutlineNodeEntry | null>(null);
@@ -321,11 +321,18 @@ export function PreviewPane({
         setWriteError(null);
         onDocumentSaved?.();
       } else if (message.type === "write-progress" && message.chapterNodeId === writingNodeId) {
-        setWriteProgress({
-          round: message.round,
-          totalRounds: message.totalRounds,
-          phase: message.phase,
-          report: message.report,
+        setWriteProgress((previous) => {
+          const sameRound = previous?.round === message.round;
+          const priorResults = sameRound ? previous.stageResults : [];
+          return {
+            round: message.round,
+            totalRounds: message.totalRounds,
+            phase: message.phase,
+            report: message.report ?? previous?.report,
+            stageResults: message.stageResult
+              ? [...priorResults.filter((item) => item.phase !== message.stageResult?.phase), message.stageResult]
+              : priorResults,
+          };
         });
       } else if (message.type === "error") {
         setWritingNodeId(null);
