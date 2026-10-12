@@ -81,7 +81,7 @@ agentMessageSchema 增：
     phase: writeProgressPhaseSchema, report?: reviewReportSchema }
 ```
 
-- 传递路径：`WriteChapterOptions` 增可选 `onProgress?: (event: WriteProgressEvent) => void` 回调（对齐 polish-result 由 headless 层 send 收口的先例——工作流不感知协议，CLI 模式不传即零开销）；headless 把回调映射为 `write-progress` 协议消息。`chapterNodeId` 随消息携带，客户端据此路由到目标章卡。
+- 传递路径：`WriteChapterOptions` 增可选 `onProgress?: (event: WriteProgressEvent) => void` 回调（对齐 polish-result 由 headless 层 send 收口的先例——工作流不感知协议，CLI 模式不传即零开销）；headless 把回调映射为 `write-progress` 协议消息。`chapterNodeId` 随消息携带，客户端据此路由到目标章卡。报告不随校验段事件重复携带（校验模块只发三段开始事件），由编排层附着到其后的 `revising`（按此报告修订）或 `saving`（按此报告保存/已通过）事件上透传。
 - 里程碑文案仍同步 `channel.notify`（CLI 与协议双通道可读）：「✍️ 第 N 轮：正文生成中…」「🔍 校验中：内容约束 / 文风 / 前后自洽…」「♻️ 校验未通过（内容 N 处、文风 X 分、自洽 M 处），按整改报告修订…」「✅ 校验通过（第 N 轮）」「⚠️ 3 轮仍未达标，保存最后一版（文风 X 分，内容 N 处、自洽 M 处问题）——建议人工复核或重新发起生成」。
 
 ### 3.5 writeChapter 循环编排（write-chapter.ts）
@@ -91,7 +91,7 @@ agentMessageSchema 增：
   - 第 1 轮 prompt 与现状逐字节一致（含伏笔/文风条件附加编号顺延逻辑不动）；
   - 修订轮在既有 prompt 尾部（写作要求之后）追加两块：`【上一版正文】\n<content>` 与 `【整改报告（请逐条修订）】\n<formatRevisionBlock(report)>`，并把末条「只输出正文文本」顺延为最后一条（编号顺延逻辑内聚在块组装处）；
   - 每轮生成前 `onProgress({ phase: round === 1 ? "drafting" : "revising", round, ... })`；
-  - 校验三段各自 onProgress（`review-content` / `review-style` / `review-consistency`，报告在三段全部完成后随最后一个事件携带——客户端在报告到达时一次性展示摘要）；
+  - 校验三段各自 onProgress（`review-content` / `review-style` / `review-consistency`，段开始事件；报告附着在其后的 `revising` / `saving` 事件上携带——客户端在报告到达时展示摘要）；
   - `isReportPassing` → 通过：notify + `onProgress({ phase: "saving" })` → 既有落盘入库链路（文件先落、库失败回滚删文件，零改动）；未通过且 round < 3 → notify + 下一轮；
   - round = 3 仍未通过：notify 警告（含文风分与问题计数）→ 照常落盘入库。
 - `write-chapter.test.ts` 既有用例适配：mock 写作模型 + 新增 mock reviewModel 脚本（三段 generateObject fixture）；「一次通过」路径下断言既有入库/prompt 断言不回归。

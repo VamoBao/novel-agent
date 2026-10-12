@@ -1,4 +1,4 @@
-import type { DocumentEntry, OutlineNodeEntry } from "@novel/shared";
+import type { DocumentEntry, OutlineNodeEntry, ReviewReport, WriteProgressPhase } from "@novel/shared";
 
 /** 章卡伏笔显示模型（PreviewPane 过滤登场/回收两组并解析角色名后传入，卡片纯渲染） */
 export interface ChapterForeshadow {
@@ -11,6 +11,31 @@ export interface ChapterForeshadow {
   characterNames: string[];
 }
 
+/** 正文生成进度显示模型（PreviewPane 从 write-progress 消息提取后传入） */
+export interface ChapterWriteProgress {
+  round: number;
+  totalRounds: number;
+  phase: WriteProgressPhase;
+  report?: ReviewReport;
+}
+
+/** 进度步骤（drafting 与 revising 同属「正文生成」步——修订轮即新一轮生成） */
+const PROGRESS_STEPS: { phases: WriteProgressPhase[]; label: string }[] = [
+  { phases: ["drafting", "revising"], label: "正文生成" },
+  { phases: ["review-content"], label: "内容约束校验" },
+  { phases: ["review-style"], label: "文风校验" },
+  { phases: ["review-consistency"], label: "前后自洽校验" },
+  { phases: ["saving"], label: "保存入库" },
+];
+
+/** 问题类别 → 中文标签（与 agent 侧 ISSUE_KIND_LABELS 同义；client 不依赖 agent 代码故独立维护） */
+const ISSUE_KIND_LABELS: Record<ReviewReport["content"]["issues"][number]["kind"], string> = {
+  worldview: "世界观",
+  foreshadow: "伏笔",
+  summary: "剧情概述",
+  consistency: "前后矛盾",
+};
+
 interface OutlineNodeCardProps {
   node: OutlineNodeEntry;
   /** 幕下已有章节点时不再显示生成入口（重新规划/修订流为后续需求） */
@@ -21,10 +46,18 @@ interface OutlineNodeCardProps {
   document?: DocumentEntry;
   /** 正文生成会话进行中（单例 agent：进行中禁用各章入口，目标章显示生成中） */
   writing?: boolean;
+  /** 本章正文生成进度（write-progress 消息；仅目标章传入，其余章 undefined） */
+  writeProgress?: ChapterWriteProgress;
   /** 触发本章正文生成（write-chapter 会话）；不传则不显示入口 */
   onWriteChapter?: () => void;
   /** 本章涉及的伏笔（详情 foreshadows 过滤登场/回收两组；无则不渲染区块） */
   foreshadows?: ChapterForeshadow[];
+}
+
+/** 报告 → 摘要行（内容 N 处 · 文风 X 分或无文风要求 · 自洽 M 处） */
+function reportSummary(report: ReviewReport): string {
+  const styleText = report.style.skipped ? "无文风要求" : `文风 ${report.style.score} 分`;
+  return `内容 ${report.content.issues.length} 处 · ${styleText} · 自洽 ${report.consistency.issues.length} 处`;
 }
 
 /**
@@ -33,8 +66,10 @@ interface OutlineNodeCardProps {
  * 树为准（点击时已高亮），右栏不再重复；入口仅未规划过章节的幕显示，旧数
  * 据幕缺梗概/情节点（无规划种子内容），禁用并提示原因。
  * 章节点：无正文时同样右对齐显示「✍️ 生成本章正文」入口（写作模型生成，
- * write-chapter 会话）；已有正文则在梗概卡下追加正文卡（约 N 字 + 全文——
- * 内容存 output 落盘文件，库内只留元数据；重写/修订流为后续需求）。
+ * write-chapter 会话）；生成中由 writeProgress 渲染流程进度区块（步骤条 +
+ * 整改报告摘要，write-progress 消息驱动）；已有正文则在梗概卡下追加正文卡
+ * （约 N 字 + 全文——内容存 output 落盘文件，库内只留元数据；重写/修订流为
+ * 后续需求）。
  * 浏览路径专用，不进 shared 的 View 体系——
  * 避免浏览专用视图渗入创作流协议（protocol.ts 内嵌 viewSchema）。
  * 历史数据（6 版迁移前入库）summary / keyPlotPoints 为 null，展示空占位。
@@ -45,6 +80,7 @@ export function OutlineNodeCard({
   onPlanChapters,
   document,
   writing = false,
+  writeProgress,
   onWriteChapter,
   foreshadows,
 }: OutlineNodeCardProps) {
@@ -52,6 +88,17 @@ export function OutlineNodeCard({
   const showEntry = node.type === "act" && !hasChapters && onPlanChapters !== undefined;
   const showWriteEntry =
     node.type === "chapter" && !document && onWriteChapter !== undefined;
+  const showProgress = node.type === "chapter" && writing && writeProgress !== undefined;
+  const currentStep = writeProgress
+    ? PROGRESS_STEPS.findIndex((step) => step.phases.includes(writeProgress.phase))
+    : -1;
+  const report = writeProgress?.report;
+  const reportIssues = report
+    ? [
+        ...report.content.issues.map((issue) => ({ ...issue, key: `c-${issue.description}` })),
+        ...report.consistency.issues.map((issue) => ({ ...issue, key: `s-${issue.description}` })),
+      ]
+    : [];
 
   return (
     <>
@@ -96,6 +143,43 @@ export function OutlineNodeCard({
               {f.characterNames.length > 0 ? `，服务：${f.characterNames.join("、")}` : ""}）
             </p>
           ))}
+        </section>
+      ) : null}
+      {showProgress && writeProgress ? (
+        <section className="viewcard write-progress">
+          <p className="card-label">
+            生成进度 · 第 {writeProgress.round}/{writeProgress.totalRounds} 轮
+          </p>
+          <ol className="progress-steps">
+            {PROGRESS_STEPS.map((step, index) => (
+              <li
+                key={step.label}
+                className={index === currentStep ? "current" : index < currentStep ? "done" : undefined}
+              >
+                {index < currentStep ? "✓ " : ""}
+                {step.label}
+              </li>
+            ))}
+          </ol>
+          {report ? (
+            <div className="write-report">
+              <p className={report.passed ? "report-verdict pass" : "report-verdict fail"}>
+                {report.passed ? "✅ 已达标" : "⚠️ 未达标"}（{reportSummary(report)}）
+              </p>
+              {reportIssues.length > 0 ? (
+                <details>
+                  <summary>{reportIssues.length} 条问题与建议</summary>
+                  <ul className="report-issues">
+                    {reportIssues.map((issue) => (
+                      <li key={issue.key}>
+                        [{ISSUE_KIND_LABELS[issue.kind]}] {issue.description} → {issue.suggestion}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </div>
+          ) : null}
         </section>
       ) : null}
       {showEntry ? (

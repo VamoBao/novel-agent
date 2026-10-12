@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { characterSchema } from "./character";
+import { reviewReportSchema } from "./review";
 import { viewSchema } from "./views";
 
 /** stdio JSON 行协议版本；hello 时不一致由 client 拒绝继续 */
@@ -16,6 +17,22 @@ export const stageSchema = z.enum([
   "chapter",
 ]);
 export type Stage = z.infer<typeof stageSchema>;
+
+/**
+ * 章节正文生成会话的流程阶段（write-progress 消息载荷）：drafting 初稿生成 /
+ * revising 按整改报告修订重写 / review-content 内容约束校验 / review-style 文风
+ * 校验 / review-consistency 前后自洽校验 / saving 落盘入库。round 随消息携带，
+ * 客户端据此显示「第 N/3 轮」。
+ */
+export const writeProgressPhaseSchema = z.enum([
+  "drafting",
+  "revising",
+  "review-content",
+  "review-style",
+  "review-consistency",
+  "saving",
+]);
+export type WriteProgressPhase = z.infer<typeof writeProgressPhaseSchema>;
 
 /** 提问载荷：与 UiChannel 提问原语一一对应（line 为 ask_user 工具的原始行提问） */
 export const askSchema = z.discriminatedUnion("type", [
@@ -74,6 +91,20 @@ export const agentMessageSchema = z.discriminatedUnion("type", [
   }),
   /** 角色润色结果：LLM 全字段润色后的完整角色卡（客户端回填表单，不自动入库） */
   z.object({ type: z.literal("polish-result"), character: characterSchema }),
+  /**
+   * 章节正文生成流程进度（write-chapter 会话专属）：round 当前轮次（1 起始）、
+   * totalRounds 循环上限（当前 3）、phase 流程阶段；report 仅在三轮校验全部完成时
+   * 携带最新整改报告（客户端据此展示问题摘要与文风评分）。chapterNodeId 供客户端
+   * 路由到目标章卡。
+   */
+  z.object({
+    type: z.literal("write-progress"),
+    chapterNodeId: z.string(),
+    round: z.number().int().min(1),
+    totalRounds: z.number().int().min(1),
+    phase: writeProgressPhaseSchema,
+    report: reviewReportSchema.optional(),
+  }),
   z.object({ type: z.literal("error"), message: z.string(), fatal: z.boolean() }),
 ]);
 export type AgentMessage = z.infer<typeof agentMessageSchema>;

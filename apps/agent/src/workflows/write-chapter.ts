@@ -1,7 +1,9 @@
 import { generateText } from "ai";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
+import type { ReviewReport, WriteProgressPhase } from "@novel/shared";
 import type { UiChannel } from "../ui/channel";
 import { getWritingModel } from "../providers/writing-model";
+import { model as agentSessionModel } from "../providers/deepseek";
 import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
 import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
 import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
@@ -10,6 +12,11 @@ import { getDefaultDocumentStore, type DocumentStore } from "../state/document-s
 import { getDefaultStyleReferenceStore, type StyleReferenceStore } from "../state/style-reference-store";
 import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
 import { buildChapterForeshadowContext } from "./foreshadow-context";
+import {
+  MAX_REVIEW_ROUNDS,
+  formatRevisionBlock,
+  reviewChapter,
+} from "./chapter-review";
 import { OUTPUT_DIR } from "../output/outline-writer";
 import {
   buildChapterDocumentPath,
@@ -18,6 +25,15 @@ import {
   writeDocumentArtifact,
 } from "../output/document-writer";
 import type { Document } from "@novel/shared";
+
+/** 正文生成流程进度事件（headless 映射为 write-progress 协议消息；report 仅附着在 revising / saving 事件上） */
+export interface WriteProgressEvent {
+  chapterNodeId: string;
+  round: number;
+  totalRounds: number;
+  phase: WriteProgressPhase;
+  report?: ReviewReport;
+}
 
 export interface WriteChapterOptions {
   /** 交互通道（终端 / 协议 / 测试替身），业务交互的唯一出口 */
@@ -28,6 +44,10 @@ export interface WriteChapterOptions {
   chapterNodeId: string;
   /** 写作模型实例；缺省 getWritingModel()（OpenAI 接口兼容端点，环境变量配置，测试注入替身） */
   model?: LanguageModelV4;
+  /** 校验模型实例（三段校验独立调用）；缺省 Agent 会话模型 deepseek——配置了独立写作模型时天然「他评」 */
+  reviewModel?: LanguageModelV4;
+  /** 流程进度回调（headless 映射为 write-progress 协议消息；CLI / 测试可不传） */
+  onProgress?: (event: WriteProgressEvent) => void;
   /** 正文产物根目录；缺省 output（NOVEL_OUTPUT_DIR，协议模式下宿主传绝对路径），测试注入临时目录 */
   outputDir?: string;
   novelStore?: NovelStore;
@@ -65,20 +85,32 @@ function characterDigestLine(character: {
   return `${character.basicInfo.name}（${parts.join("；")}）`;
 }
 
+/** 报告 → 一行摘要（notify 文案用）：内容 N 处、文风 X 分（或无文风要求）、自洽 M 处 */
+function describeReport(report: ReviewReport): string {
+  const styleText = report.style.skipped
+    ? "无文风要求"
+    : `文风 ${report.style.score} 分`;
+  return `内容 ${report.content.issues.length} 处、${styleText}、自洽 ${report.consistency.issues.length} 处`;
+}
+
 /**
  * 章节正文生成工作流（客户端章节点「✍️ 生成本章正文」入口）：
  * 从库中校验并组装写作上下文（小说名/logline、世界观、角色摘要、所属部/幕
  * 梗概与关键情节点、本章概述、同幕前后章概述、本章绑定伏笔——登场卡片 /
  * 回收卡片+登场章上下文），交写作模型（OpenAI 接口
  * 兼容端点，与 Agent 会话模型解耦；WRITING_MODEL_* 未配置时回落 Agent
- * 会话模型 deepseek）单轮生成正文，无确认门——确认在客户端
- * （生成后展示，重写/修订流为后续需求）。
+ * 会话模型 deepseek）生成正文；生成后、落盘前经校验 subAgent（chapter-review，
+ * deepseek 三段独立调用——内容约束 / 文风相似度 / 前后自洽）产出结构化整改
+ * 报告：通过（内容与自洽零问题且文风 skipped 或 ≥90 分）才落盘入库；未达标
+ * 按报告修订式重写（原上下文 + 上一版正文 + 整改报告），最多 MAX_REVIEW_ROUNDS
+ * 轮，第 3 轮仍未达标保存最后一版并警告（产物优先，用户确认的决策）。
  * 正文**存文件系统**（`<output>/<小说名>-<创作ID前8位>/<部名>/<章名>.md`，
  * 人类可直接阅读），先写文件、后经 saveChapterDocument 单事务登记元数据
  * （file_path + 字数）并绑定章节点 document_id；库失败时回滚删除已写文件，
  * 不留孤儿。
- * 校验失败（小说/章不存在、非章节点、缺概述、已有正文、世界观未确认）
- * 抛可读错误，由调用方（协议入口）转为 fatal error 消息。
+ * 校验失败（小说/章不存在、非章节点、缺概述、已有正文、世界观未确认）与
+ * 校验调用异常（网络 / schema 不合）抛可读错误，由调用方（协议入口）转为
+ * fatal error 消息，零落盘零入库。
  */
 export async function writeChapter(options: WriteChapterOptions): Promise<WriteChapterResult> {
   const { channel, novelId, chapterNodeId } = options;
@@ -141,7 +173,8 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
     .filter((stored) => stored.styleReference.enabled);
 
   // 本章伏笔（可选增强，不阻塞生成）：绑定到本章的伏笔——登场注入卡片、回收注入卡片
-  // + 登场章上下文（正文优先、概述兜底、预算护栏，详见 foreshadow-context.ts）
+  // + 登场章上下文（正文优先、概述兜底、预算护栏，详见 foreshadow-context.ts）；
+  // 同一份 lines 同时进写作 prompt 与校验 ①（校验所见即写作者所见）
   const foreshadowContext = buildChapterForeshadowContext({
     novelId,
     chapterNodeId,
@@ -180,10 +213,16 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       `🖋️ 本次参考文风：${enabledStyles.map((stored) => stored.styleReference.name).join("、")}`,
     );
   }
+
   const model = options.model ?? getWritingModel();
-  const { text } = await generateText({
-    model,
-    prompt: [
+  const reviewModel = options.reviewModel ?? agentSessionModel;
+  const { onProgress } = options;
+
+  /** 写作 prompt（初稿与修订版共用主体；修订版追加上一版正文与整改报告块，末条要求替换为修订指令） */
+  const buildPrompt = (
+    revision: { previousContent: string; revisionBlock: string } | null,
+  ): string =>
+    [
       "你是一位经验丰富的小说作者，请依据下面的资料把指定章节的剧情概述扩写为小说正文。",
       "",
       "【小说】",
@@ -227,6 +266,17 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
               .join("\n\n"),
           ]
         : []),
+      // 修订材料置于写作要求之前：与文风样本同属尾部上下文区，要求清单保持最后
+      ...(revision
+        ? [
+            "",
+            "【上一版正文（在其基础上修订）】",
+            revision.previousContent,
+            "",
+            "【整改报告（请逐条修订）】",
+            revision.revisionBlock,
+          ]
+        : []),
       "",
       "写作要求：",
       "1. 依据本章剧情概述展开正文，可合理补充场景、对话与细节，但不得偏离概述的情节走向；",
@@ -235,16 +285,89 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       "4. 严格遵守世界观禁忌（taboos）；",
       "5. 篇幅约 2000~3000 字；",
       ...extraRequirements.map((text, i) => `${6 + i}. ${text}`),
-      `${6 + extraRequirements.length}. 只输出正文文本：不要章节标题、不要任何说明或元信息。`,
+      revision
+        ? `${6 + extraRequirements.length}. 按整改报告逐条修订上一版正文（只修正报告指出的问题，报告未涉及的情节与表达尽量保持原样），只输出修订后的正文文本：不要章节标题、不要任何说明或元信息。`
+        : `${6 + extraRequirements.length}. 只输出正文文本：不要章节标题、不要任何说明或元信息。`,
     ]
       .filter((line): line is string => line !== null)
-      .join("\n"),
-  });
+      .join("\n");
 
-  const content = text.trim();
-  if (content.length === 0) {
-    throw new Error("写作模型返回了空正文，请稍后重试");
+  // 生成-校验-修订循环：初稿 + 最多 MAX_REVIEW_ROUNDS-1 轮修订；通过才跳出，
+  // 3 轮仍未达标保底保存最后一版并警告（产物优先）
+  let content = "";
+  let report: ReviewReport | null = null;
+  let passed = false;
+
+  for (let round = 1; round <= MAX_REVIEW_ROUNDS; round++) {
+    const isRevision = round > 1;
+    onProgress?.({
+      chapterNodeId,
+      round,
+      totalRounds: MAX_REVIEW_ROUNDS,
+      phase: isRevision ? "revising" : "drafting",
+      ...(isRevision && report ? { report } : {}),
+    });
+    if (isRevision && report) {
+      channel.notify(
+        `♻️ 第 ${round} 轮：上一版未达标准（${describeReport(report)}），按整改报告修订重写…`,
+      );
+    }
+
+    const { text } = await generateText({
+      model,
+      prompt: buildPrompt(
+        isRevision && report
+          ? { previousContent: content, revisionBlock: formatRevisionBlock(report) }
+          : null,
+      ),
+    });
+
+    content = text.trim();
+    if (content.length === 0) {
+      throw new Error("写作模型返回了空正文，请稍后重试");
+    }
+
+    // 三段校验（chapter-review，deepseek 独立调用；异常直接抛错终止会话零残留）
+    report = await reviewChapter(
+      {
+        novelId,
+        chapterName: chapter.node.name,
+        summary: chapter.node.summary ?? "",
+        worldview: storedWorldview.worldview,
+        foreshadowLines: foreshadowContext.lines,
+        styleSamples: enabledStyles.map((stored) => ({
+          name: stored.styleReference.name,
+          content: stored.styleReference.content,
+        })),
+        content,
+        round,
+      },
+      {
+        reviewModel,
+        onProgress: (phase) =>
+          onProgress?.({ chapterNodeId, round, totalRounds: MAX_REVIEW_ROUNDS, phase }),
+      },
+    );
+    passed = report.passed;
+    if (passed) {
+      channel.notify(`✅ 校验通过（第 ${round} 轮）：${describeReport(report)}`);
+      break;
+    }
   }
+  if (!passed && report) {
+    channel.notify(
+      `⚠️ ${MAX_REVIEW_ROUNDS} 轮未全部达标，保存最后一版（${describeReport(report)}）——建议人工复核或重新发起生成`,
+    );
+  }
+
+  // 落盘事件携带最终报告（通过 → 已达标依据；保底 → 未达标摘要）
+  onProgress?.({
+    chapterNodeId,
+    round: report?.round ?? MAX_REVIEW_ROUNDS,
+    totalRounds: MAX_REVIEW_ROUNDS,
+    phase: "saving",
+    ...(report ? { report } : {}),
+  });
 
   // 正文落盘（小说名-<id前8位>/部名/章名层级，同名小说不共享文件夹），库绑定失败时回滚删除文件
   const relativePath = buildChapterDocumentPath(

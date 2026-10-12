@@ -12,8 +12,9 @@ apps/agent/src/
 │                         #   = 单幕章节规划，`regen-outline <novelId>` = 大纲重新生成（新版本入库），
 │                         #   `polish-character <novelId> [characterId] <formJson>` = 角色 AI 润色
 │                         #   （编辑流传角色 ID、新建流不带；结果经 polish-result 消息回传），
-│                         #   `write-chapter <novelId> <chapterNodeId>` = 章节正文生成（写作模型
-│                         #   未配置回落 deepseek——仅写作模型配置齐全时免 DeepSeek Key 检查）
+│                         #   `write-chapter <novelId> <chapterNodeId>` = 章节正文生成（生成 → 三段
+│                         #   校验+修订循环 → 落盘入库；进度经 write-progress 消息回传——onProgress
+│                         #   回调映射协议消息；校验经 deepseek，会话始终要求 DEEPSEEK_API_KEY）
 ├── query.ts              # 库查询与管理入口：一次性 CLI——查询（list / get——get 携带世界观+角色
 │                         #   +大纲当前版本节点+章节正文 documents+伏笔 foreshadows+地点 locations
 │                         #   +参考文风 style_references 全量行按入库顺序）+ 管理
@@ -89,8 +90,18 @@ apps/agent/src/
     │                    #   （部/幕/前后章/角色摘要）+ 本章绑定伏笔（foreshadow-context：登场卡片 /
     │                    #   回收卡片+登场章上下文——正文优先概述兜底+预算护栏）+ 参考文风（style-reference-store
     │                    #   按启用过滤，非空注入【参考文风】段于 prompt 尾部 + 模仿要求 + notify 名单，无启用零改动）
-    │                    #   → 写作模型 getWritingModel() 单轮 generateText
-    │                    #   （无确认门）→ 正文落文件（层级目录）+ saveChapterDocument 元数据入库绑定
+    │                    #   → 生成-校验-修订循环（最多 MAX_REVIEW_ROUNDS=3 轮）：写作模型 getWritingModel()
+    │                    #   单轮 generateText（无确认门）→ chapter-review 三段校验（deepseek）产出整改报告
+    │                    #   → isReportPassing 通过跳出 / 未达标按报告修订式重写（原上下文+上一版正文+整改报告），
+    │                    #   3 轮仍未达标保底保存最后一版并警告 → 正文落文件（层级目录）+
+    │                    #   saveChapterDocument 元数据入库绑定；进度经 Options 注入的 onProgress 回调透传
+    │                    #   （headless 映射 write-progress 协议消息）
+    ├── chapter-review.ts # 校验 subAgent 模块（无 ReAct）：reviewChapter 三段独立单轮 generateObject——
+    │                    #   ①内容约束（世界观/章节概述/本章伏笔——与写作者同源的 foreshadowContext.lines）
+    │                    #   ②文风相似度评分（≥STYLE_PASS_SCORE=90 合格；无启用样本 skipped 零调用）
+    │                    #   ③前后自洽（仅正文全文，kind 由代码补全 consistency）+ isReportPassing 通过判定
+    │                    #   + formatRevisionBlock 报告→修订 prompt 块；校验模型与 onProgress 注入；
+    │                    #   调用异常直接抛错（编排层终止会话零残留），不入 index.ts 出口
     ├── foreshadow-context.ts # 本章伏笔 prompt 块构建纯函数（无 LLM）：绑定到本章的伏笔分登场/回收两组
     │                    #   （同章种收只归回收组标「登场于本章」），登场注入卡片；回收组按登场章全局章序升序
     │                    #   注入卡片 + 登场章上下文（正文优先——FORESHADOW_PROSE_BUDGET=8000 预算内整条注入
@@ -229,11 +240,11 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 
 ## 章节正文生成工作流（src/workflows/write-chapter.ts）
 
-客户端章节点卡「✍️ 生成本章正文」入口的会话编排（headless `write-chapter <novelId> <chapterNodeId>` 模式；写作模型未配置回落 Agent 会话模型——headless 的 Key 检查仅在「write-chapter 且写作模型配置齐全」时跳过）：
+客户端章节点卡「✍️ 生成本章正文」入口的会话编排（headless `write-chapter <novelId> <chapterNodeId>` 模式；写作模型未配置回落 Agent 会话模型——校验模型固定走 deepseek，会话始终要求 DEEPSEEK_API_KEY）：
 
 1. **前置校验**（全部抛可读错误，由协议入口转 fatal error）：小说存在 → 章节点存在、同小说且类型为 chapter → 章剧情概述非空（旧数据缺内容拒绝）→ 所属幕与部节点存在 → 该章尚无正文（documents 一章一份，重新生成为后续需求）→ 世界观已确认（worldviews 表有记录）
 2. **上下文组装（全取自库）**：书名 / logline + 世界观 JSON + 角色摘要行（名/定位/外貌/性格/渴望/恐惧，控制 prompt 体积）+ 部名与部梗概 + 幕名与幕梗概及关键情节点 + 本章名与剧情概述 + 同幕前后章名与概述（衔接上文、给下文留空间）+ **本章绑定伏笔（可选增强）**：`buildChapterForeshadowContext`（workflows/foreshadow-context）——登场注入卡片、回收组按登场章全局章序升序注入卡片 + 登场章上下文（正文优先、8000 字符预算内整条注入，未生成/文件缺失/超预算降级概述）+ 多步回收既往回收章概述，【本章伏笔】块插【下一章】块后【参考文风】段前、写作要求条件附加编号顺延、生成前 notify「🔮 本章伏笔」统计与降级计数；无绑定伏笔零注入零通知 + **参考文风（可选增强）**：style_references 表按启用过滤（enabled=1），非空在 prompt 尾部【下一章】块之后插【参考文风】段（每条「（名字）\n内容」，长样本置尾不推远核心上下文且紧邻风格指令）、写作要求附模仿条（模仿叙事语言 / 句式节奏 / 描写风格，不抄袭具体情节与专有名词）、生成前 notify「🖋️ 本次参考文风：名单」；无启用文风零注入零通知（行为与无此功能逐字节一致）
-3. **生成与落盘**：`getWritingModel()`（providers/writing-model，OpenAI 接口兼容端点，`WRITING_MODEL_*` 三环境变量齐才启用，任一未配置回落 Agent 会话模型 deepseek）单轮 `generateText`（非 ReAct——无工具无提问），写作要求含 2000~3000 字、遵守世界观禁忌、只输出正文文本；空结果拒绝且零残留。正文经 document-writer 写 `output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`（sanitize 段清理，同名冲突加 `-N` 后缀不覆盖既有文件），文件先落、库后入，库失败回滚删除文件
+3. **生成-校验-修订循环与落盘**：`getWritingModel()`（providers/writing-model，OpenAI 接口兼容端点，`WRITING_MODEL_*` 三环境变量齐才启用，任一未配置回落 Agent 会话模型 deepseek）单轮 `generateText`（非 ReAct——无工具无提问），写作要求含 2000~3000 字、遵守世界观禁忌、只输出正文文本；空结果拒绝且零残留。每轮生成后经 `reviewChapter`（chapter-review，deepseek 三段独立校验——①内容约束（世界观/章节概述/本章伏笔）②文风相似度（≥90 合格，无启用样本 skipped）③前后自洽）产出结构化整改报告：`isReportPassing` 通过（①③零问题且文风达标）→ 落盘；未达标按报告修订式重写（prompt 追加【上一版正文】+【整改报告】块，末条要求替换为按报告逐条修订），最多 3 轮；第 3 轮仍未达标 → ⚠️ 警告（含文风分与问题计数）后保底保存最后一版。进度全程经 onProgress 回调透传（drafting/review-*/revising/saving，报告附着在 revising/saving 事件）。正文经 document-writer 写 `output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`（sanitize 段清理，同名冲突加 `-N` 后缀不覆盖既有文件），文件先落、库后入，库失败回滚删除文件
 4. **元数据入库绑定**：`saveChapterDocument` 单事务插 documents 行（file_path 相对路径 + 字数，内容不进库）+ 章节点回写 `document_id` 并置 `status=completed`；notify 保存路径与字数；run_finished 携带小说 ID 供客户端刷新详情（章节点 ID 稳定，选中与正文展示保持）；大纲重生成只降级归档章节点，documents 行与正文文件保留（旧正文与归档章的关联留存）
 
 ## ReAct 终态工具模式（src/agents/react.ts）
