@@ -59,7 +59,7 @@ describe("OutlineNodeCard 正文生成进度", () => {
   });
 });
 
-describe("OutlineNodeCard 角色陈旧提示", () => {
+describe("OutlineNodeCard 迁移陈旧提示", () => {
   const document: DocumentEntry = {
     id: "doc-1",
     chapterId: "chapter-1",
@@ -69,24 +69,24 @@ describe("OutlineNodeCard 角色陈旧提示", () => {
     content: "正文内容。",
   };
 
-  test("登场角色卡在正文之后被更新：正文卡给出陈旧提示（含当前版本与重生成建议）", () => {
+  test("登场角色的迁移计划在正文之后更新：正文卡给出陈旧提示（含字段与序号与重生成建议）", () => {
     const html = renderToStaticMarkup(
       <OutlineNodeCard
         node={chapter}
         document={document}
-        staleCast={[{ name: "林恒", version: 3 }]}
+        staleMigrations={[{ name: "林恒", fieldLabel: "性格", sequence: 2 }]}
       />,
     );
-    expect(html).toContain("登场角色卡已更新");
-    expect(html).toContain("林恒 现 v3");
+    expect(html).toContain("登场角色的迁移计划已更新");
+    expect(html).toContain("林恒 性格 第 2 条");
     expect(html).toContain("🔄 重新生成");
   });
 
-  test("无陈旧角色（空数组）不渲染提示", () => {
+  test("无陈旧迁移（空数组）不渲染提示", () => {
     const html = renderToStaticMarkup(
-      <OutlineNodeCard node={chapter} document={document} staleCast={[]} />,
+      <OutlineNodeCard node={chapter} document={document} staleMigrations={[]} />,
     );
-    expect(html).not.toContain("登场角色卡已更新");
+    expect(html).not.toContain("迁移计划已更新");
   });
 });
 

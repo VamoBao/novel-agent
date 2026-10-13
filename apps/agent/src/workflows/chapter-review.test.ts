@@ -61,6 +61,7 @@ function baseInput(overrides: Partial<Parameters<typeof reviewChapter>[0]> = {})
     summary: "少年拾得碎片",
     worldview: worldviewFixture,
     foreshadowLines: [],
+    characterLines: [],
     styleSamples: [{ name: "江南式打斗", content: "刀光一闪。" }],
     content: "　　正文全文。",
     round: 1,
@@ -119,6 +120,33 @@ describe("reviewChapter", () => {
       { kind: "consistency", description: "前文五个字后文四个字", suggestion: "统一为五个字" },
     ]);
     expect(report.passed).toBeFalse();
+  });
+
+  test("① 载入本章角色状态与变化计划，并给出 character 审查维度", async () => {
+    generateObjectCalls = [];
+    scriptedResults = { content: { issues: [] }, style: STYLE_SCORED, consistency: { issues: [] } };
+
+    await reviewChapter(
+      baseInput({
+        characterLines: [
+          "【登场角色状态（角色基准卡 + 已结束迁移后的状态）】",
+          "林恒（定位：主角；性格：热情）",
+          "【本章角色变化计划（创作计划，不是已经发生的事实）】",
+          "- 性格（进行中，第 2 章起至第 5 章）：旧值「热情」→ 目标「谨慎」",
+        ],
+      }),
+      baseDeps(),
+    );
+
+    const content = generateObjectCalls.find((call) => call.prompt.includes("设定审校编辑"))!;
+    expect(content.prompt).toContain("【本章角色状态与变化计划（正文应遵守）】");
+    expect(content.prompt).toContain("旧值「热情」→ 目标「谨慎」");
+    expect(content.prompt).toContain("4. character——角色变化是否符合");
+    // 无角色行时不注入该段（现状回归）
+    generateObjectCalls = [];
+    await reviewChapter(baseInput(), baseDeps());
+    const bare = generateObjectCalls.find((call) => call.prompt.includes("设定审校编辑"))!;
+    expect(bare.prompt).not.toContain("【本章角色状态与变化计划（正文应遵守）】");
   });
 
   test("无文风样本：② 跳过零调用，报告 style.skipped=true 且计为通过", async () => {

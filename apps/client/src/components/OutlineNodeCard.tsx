@@ -1,5 +1,5 @@
 import type { DocumentEntry, OutlineNodeEntry, ReviewReport, ReviewStageResult, WriteProgressPhase } from "@novel/shared";
-import type { StaleCastCharacter } from "../character-staleness";
+import type { StaleCastMigration } from "../character-staleness";
 
 /** 章卡伏笔显示模型（PreviewPane 过滤登场/回收两组并解析角色名后传入，卡片纯渲染） */
 export interface ChapterForeshadow {
@@ -35,6 +35,7 @@ const ISSUE_KIND_LABELS: Record<ReviewReport["content"]["issues"][number]["kind"
   worldview: "世界观",
   foreshadow: "伏笔",
   summary: "剧情概述",
+  character: "角色变化",
   consistency: "前后矛盾",
 };
 
@@ -49,9 +50,9 @@ interface OutlineNodeCardProps {
   /** 本章登场人物名（章节规划确认时绑定的 characterIds 经详情 characters 解析，
    *  未匹配兜底原 ID；未绑定（旧数据）传 null/undefined 不渲染区块） */
   castNames?: string[] | null;
-  /** 正文生成后被编辑过的登场角色（详情比对 updatedAt 得出）；有则在正文卡给出
+  /** 影响本章的已确认迁移（详情按迁移影响范围得出）；有则在正文卡给出
    *  「建议重新生成」提示，不做自动重写 */
-  staleCast?: StaleCastCharacter[];
+  staleMigrations?: StaleCastMigration[];
   /** 正文生成会话进行中（单例 agent：进行中禁用各章入口，目标章显示生成中） */
   writing?: boolean;
   /** 本章正文生成进度（write-progress 消息；仅目标章传入，其余章 undefined） */
@@ -90,7 +91,7 @@ export function OutlineNodeCard({
   onPlanChapters,
   document,
   castNames,
-  staleCast,
+  staleMigrations,
   writing = false,
   writeProgress,
   onWriteChapter,
@@ -149,10 +150,13 @@ export function OutlineNodeCard({
       {node.type === "chapter" && document ? (
         <section className="viewcard">
           <p className="card-label">正文 · 约 {document.wordCount} 字</p>
-          {staleCast && staleCast.length > 0 ? (
+          {staleMigrations && staleMigrations.length > 0 ? (
             <p className="cast-stale">
-              ⚠️ 登场角色卡已更新（{staleCast.map((c) => `${c.name} 现 v${c.version}`).join("、")}
-              ）——本章正文生成于更新之前，如需保持一致建议「🔄 重新生成」
+              ⚠️ 登场角色的迁移计划已更新（
+              {staleMigrations
+                .map((m) => `${m.name} ${m.fieldLabel} 第 ${m.sequence} 条`)
+                .join("、")}
+              ）——本章正文生成于该计划确认之前，如需保持一致建议「🔄 重新生成」
             </p>
           ) : null}
           {document.content ? (

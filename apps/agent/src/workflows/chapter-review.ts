@@ -12,8 +12,8 @@ import {
 
 /**
  * 章节正文校验模块（校验 subAgent，无 ReAct、无确认门）：对生成的正文做三段
- * 独立校验——① 内容约束（世界观 / 章节概述 / 本章伏笔）、② 文风相似度评分、
- * ③ 前后自洽。三段各自单轮 generateObject、上下文互不继承（也不继承生成轮
+ * 独立校验——① 内容约束（世界观 / 章节概述 / 本章伏笔 / **本章角色状态与迁移计划**）、
+ * ② 文风相似度评分、③ 前后自洽。三段各自单轮 generateObject、上下文互不继承（也不继承生成轮
  * 对话），结果并入一份 ReviewReport 供 write-chapter 循环判定与修订。
  * 校验模型独立注入（缺省由调用方传 Agent 会话模型 deepseek——配置了独立写作
  * 模型时天然「他评」）；调用异常直接抛错，由编排层终止会话，零残留。
@@ -37,6 +37,8 @@ export interface ChapterReviewInput {
   worldview: unknown;
   /** 本章伏笔上下文行（buildChapterForeshadowContext().lines，与写作者同源；空数组 = 无绑定伏笔） */
   foreshadowLines: string[];
+  /** 本章角色状态与变化计划行（buildCharacterStateContext().lines，与写作者同源；空数组 = 无角色） */
+  characterLines: string[];
   /** 启用的参考文风样本；空数组 = 无启用文风，② 整段跳过零调用 */
   styleSamples: StyleSample[];
   /** 待审正文全文 */
@@ -57,6 +59,7 @@ const ISSUE_KIND_LABELS: Record<ReviewIssue["kind"], string> = {
   worldview: "世界观",
   foreshadow: "伏笔",
   summary: "剧情概述",
+  character: "角色变化",
   consistency: "前后矛盾",
 };
 
@@ -73,7 +76,7 @@ export async function reviewChapter(
 ): Promise<ReviewReport> {
   const { reviewModel, onProgress } = deps;
 
-  // ① 内容约束：世界观 + 章节概述 + 本章伏笔 + 正文
+  // ① 内容约束：世界观 + 章节概述 + 本章伏笔 + 本章角色状态与迁移计划 + 正文
   onProgress?.("review-content");
   const contentPrompt = [
     "你是一位严格的小说设定审校编辑。请对照资料审查章节正文，只报告确实存在的问题，不要为凑数而编造问题。",
@@ -90,6 +93,13 @@ export async function reviewChapter(
           ...input.foreshadowLines,
         ]
       : []),
+    ...(input.characterLines.length > 0
+      ? [
+          "",
+          "【本章角色状态与变化计划（正文应遵守）】",
+          ...input.characterLines,
+        ]
+      : []),
     "",
     "【待审正文】",
     input.content,
@@ -97,9 +107,10 @@ export async function reviewChapter(
     "审查维度（逐条检查）：",
     "1. worldview——正文是否存在与世界观相违背的内容（世界设定、禁忌 taboos、地理势力、力量体系等）；",
     "2. foreshadow——本章伏笔是否在正文中体现：登场伏笔的表面行为是否自然带出、有无点破「不得点破」的隐藏真相；回收伏笔是否呼应登场细节并揭晓真相；",
-    "3. summary——正文是否与章节剧情概述的情节走向匹配（可合理补充细节，但不得偏离走向、不得缺失关键情节）。",
+    "3. summary——正文是否与章节剧情概述的情节走向匹配（可合理补充细节，但不得偏离走向、不得缺失关键情节）；",
+    "4. character——角色变化是否符合【本章角色状态与变化计划】：是否过早改变（把「进行中」的目标状态当作已经完成）、缺少过渡（未呈现诱因与渐变过程）、未保留应保留的特征（把目标新值提前覆盖全部既有特征），或让角色凭空声称此前未发生的事；创作指导类字段不得被角色当作已知信息。",
     "",
-    "每条问题给出 kind（worldview / foreshadow / summary 三选一）、description（引用正文依据）、suggestion（具体改进建议）；没有问题输出空 issues 数组。",
+    "每条问题给出 kind（worldview / foreshadow / summary / character 四选一）、description（引用正文依据）、suggestion（具体改进建议）；没有问题输出空 issues 数组。",
   ].join("\n");
   const { object: contentResult } = await generateObject({
     model: reviewModel,

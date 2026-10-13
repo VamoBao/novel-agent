@@ -58,19 +58,6 @@ const SELECT_BY_ID_SQL = `
   SELECT ${CARD_COLUMNS} FROM characters WHERE id = ?;
 `;
 
-const UPDATE_SQL = `
-  UPDATE characters SET name = ?, gender = ?, appearance = ?, desire = ?, fear = ?,
-    narrative_role = ?, background = ?, personality = ?, character_goal = ?,
-    creation_purpose = ?, trajectory = ?, ending_direction = ?, relationships = ?,
-    version = ?, updated_at = ?
-  WHERE id = ?;
-`;
-
-const SNAPSHOT_INSERT_SQL = `
-  INSERT INTO character_versions (id, character_id, novel_id, version, character, created_at)
-  VALUES (?, ?, ?, ?, ?, ?);
-`;
-
 function rowToCharacter(row: CharacterRow): Character {
   // 列值经 schema 还原为角色卡结构，读侧同样过 zod 校验（库内数据完整性兜底）
   return characterSchema.parse({
@@ -96,9 +83,10 @@ function rowToCharacter(row: CharacterRow): Character {
 
 /**
  * 角色持久化：按创作 ID 绑定存储角色卡。
- * 创作流收集的内核/背景/创作目的/结局方向为固定属性；浏览期编辑经
- * updateCharacter 版本化更新（旧卡快照归档 character_versions，主行 version 递增、
- * updated_at 刷新——主行原地更新而非新增行，id 稳定使外部引用不失效）。
+ * 角色首次入库的第一版即**固定基准**——基准卡只增不改（旧 update-character 版本化
+ * 编辑路径已退役），人物后续变化一律经 `character_migrations` 迁移计划表达
+ * （见 migration-store）。`character_versions` 保留历史编辑快照供 18→19 升级导入
+ * 与追溯，运行期不再写入。
  */
 export class CharacterStore {
   /** 共享数据库连接构造（与其他 store 同库不同表） */
@@ -157,64 +145,6 @@ export class CharacterStore {
           character: rowToCharacter(row),
         }
       : null;
-  }
-
-  /**
-   * 编辑更新角色（事务原子）——版本化编辑流：
-   * 旧卡整卡 JSON 快照归档入 character_versions（version = 编辑前版本号），主行
-   * 全量更新并递增 version、刷新 updated_at；id / novel_id / created_at 不变，
-   * 外部引用（如伏笔与章节的登场角色 IDs）与客户端选中态不因编辑换代失效。
-   * 角色不存在或异小说报可读错误，入参先过 schema 校验，任一步失败整体回滚
-   * （不留快照、不改主行）。
-   */
-  updateCharacter(novelId: string, characterId: string, character: Character): StoredCharacter {
-    const validated = characterSchema.parse(character);
-    const apply = this.db.transaction((): StoredCharacter => {
-      const current = this.getCharacter(characterId);
-      if (!current) {
-        throw new Error(`角色不存在，无法更新：${characterId}`);
-      }
-      if (current.novelId !== novelId) {
-        throw new Error(`角色不属于该小说，无法更新：${characterId}`);
-      }
-      // 快照时间与主行 updated_at 同刻：快照时间即「该版本被替换的时刻」
-      const now = new Date().toISOString();
-      this.db.prepare(SNAPSHOT_INSERT_SQL).run(
-        generateUuidV7(),
-        characterId,
-        current.novelId,
-        current.version,
-        JSON.stringify(current.character),
-        now,
-      );
-      this.db.prepare(UPDATE_SQL).run(
-        validated.basicInfo.name,
-        validated.basicInfo.gender ?? null,
-        validated.basicInfo.appearance ?? null,
-        validated.core.desire,
-        validated.core.fear,
-        validated.core.narrativeRole,
-        validated.background,
-        validated.personality ?? null,
-        validated.characterGoal ?? null,
-        validated.creationPurpose,
-        validated.trajectory ?? null,
-        validated.endingDirection,
-        validated.relationships ?? null,
-        current.version + 1,
-        now,
-        characterId,
-      );
-      return {
-        id: characterId,
-        novelId: current.novelId,
-        createdAt: current.createdAt,
-        updatedAt: now,
-        version: current.version + 1,
-        character: validated,
-      };
-    });
-    return apply();
   }
 
   /** 取某本小说的全部角色（按入库顺序） */

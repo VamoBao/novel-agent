@@ -1,13 +1,214 @@
 import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import {
+  CHARACTER_FIELD_PATHS,
+  characterSchema,
+  readCharacterField,
+  type Character,
+} from "@novel/shared";
+import { generateUuidV7 } from "./id";
 
 /** 数据库文件路径（相对项目根；可用环境变量 NOVEL_DB_PATH 覆盖，测试用） */
 export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 18;
+const SCHEMA_VERSION = 19;
+
+/** character_migrations 建表（18→19 迁移段与基线 DDL 共用，保证两处形态一致） */
+const CREATE_CHARACTER_MIGRATIONS_SQL = `
+  CREATE TABLE IF NOT EXISTS character_migrations (
+    id TEXT PRIMARY KEY,
+    novel_id TEXT NOT NULL REFERENCES novels(id),
+    character_id TEXT NOT NULL REFERENCES characters(id),
+    outline_version INTEGER,
+    migrate_field TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    start_chapter_id TEXT,
+    end_chapter_id TEXT,
+    trigger TEXT,
+    transition_guidance TEXT,
+    sequence INTEGER NOT NULL CHECK (sequence >= 1),
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'confirmed', 'cancelled')),
+    group_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+`;
+
+/** character_migration_versions 建表（被修订记录的完整 JSON 快照，与角色卡历史表区分） */
+const CREATE_CHARACTER_MIGRATION_VERSIONS_SQL = `
+  CREATE TABLE IF NOT EXISTS character_migration_versions (
+    id TEXT PRIMARY KEY,
+    migration_id TEXT NOT NULL REFERENCES character_migrations(id),
+    novel_id TEXT NOT NULL REFERENCES novels(id),
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    migration TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+`;
+
+/**
+ * 18→19 历史数据升级：固定角色基准 + 逐字段差异导入草案。
+ *
+ * - version=1 的角色保持原卡（首版即基准）
+ * - version>1 的角色从 character_versions 的**第 1 版快照**恢复基准写入主行
+ *   （id / novel_id / created_at / version / updated_at 保持稳定），随后沿
+ *   「快照版本升序 + 当前卡」的变化链逐字段比较，改动项各建一条 draft 迁移
+ *   （old_value = 前一版值、new_value = 后一版值、同次编辑的多个字段共用 group_id），
+ *   未改字段不建迁移；历史草案不猜测起始章 / 结束章 / 诱因 / 过渡过程
+ * - 找不到或校验不过第一版时**抛错回滚**（由调用方事务保证库不变），绝不把当前卡冒充第一版
+ * - 原 character_versions 历史记录保留；旧正文文件与章节不被改写
+ */
+function migrateCharactersToMigrations(db: Database): void {
+  const tableExists = (name: string): boolean =>
+    db
+      .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(name) !== null;
+  // 非完整形态的旧库（异常版本兜底重建路径 / 早期最小化夹具）没有角色表：无数据可导入。
+  // character_versions 缺失时不可能存在 version>1 的角色（两表同段落地），同样直接跳过
+  if (!tableExists("characters") || !tableExists("character_versions")) return;
+
+  interface LegacyCharacterRow {
+    id: string;
+    novel_id: string;
+    name: string;
+    gender: string | null;
+    appearance: string | null;
+    desire: string;
+    fear: string;
+    narrative_role: string;
+    background: string;
+    personality: string | null;
+    character_goal: string | null;
+    creation_purpose: string;
+    trajectory: string | null;
+    ending_direction: string;
+    relationships: string | null;
+    version: number;
+    created_at: string;
+  }
+  const characters = db
+    .prepare(
+      `SELECT id, novel_id, name, gender, appearance, desire, fear, narrative_role,
+              background, personality, character_goal, creation_purpose, trajectory,
+              ending_direction, relationships, version, created_at
+       FROM characters ORDER BY created_at ASC, id ASC;`,
+    )
+    .all() as LegacyCharacterRow[];
+
+  const restoreSql = `
+    UPDATE characters SET name = ?, gender = ?, appearance = ?, desire = ?, fear = ?,
+      narrative_role = ?, background = ?, personality = ?, character_goal = ?,
+      creation_purpose = ?, trajectory = ?, ending_direction = ?, relationships = ?
+    WHERE id = ?;
+  `;
+  const insertSql = `
+    INSERT INTO character_migrations (
+      id, novel_id, character_id, outline_version, migrate_field, old_value, new_value,
+      start_chapter_id, end_chapter_id, trigger, transition_guidance, sequence, revision,
+      status, group_id, created_at, updated_at
+    ) VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, NULL, NULL, NULL, ?, 1, 'draft', ?, ?, ?);
+  `;
+  const restore = db.prepare(restoreSql);
+  const insert = db.prepare(insertSql);
+  const snapshotsStmt = db.prepare(
+    "SELECT version, character FROM character_versions WHERE character_id = ? ORDER BY version ASC, created_at ASC;",
+  );
+  const now = new Date().toISOString();
+
+  for (const row of characters) {
+    if (row.version <= 1) continue;
+
+    const current: Character = characterSchema.parse({
+      basicInfo: {
+        name: row.name,
+        gender: row.gender ?? undefined,
+        appearance: row.appearance ?? undefined,
+      },
+      core: { desire: row.desire, fear: row.fear, narrativeRole: row.narrative_role },
+      background: row.background,
+      personality: row.personality ?? undefined,
+      characterGoal: row.character_goal ?? undefined,
+      creationPurpose: row.creation_purpose,
+      trajectory: row.trajectory ?? undefined,
+      endingDirection: row.ending_direction,
+      relationships: row.relationships ?? undefined,
+    });
+
+    const snapshots = snapshotsStmt.all(row.id) as Array<{ version: number; character: string }>;
+    const baselineRow = snapshots.find((snapshot) => snapshot.version === 1);
+    if (!baselineRow) {
+      throw new Error(
+        `角色「${row.name}」（${row.id}）缺少第一版快照（character_versions 无 version=1 行），无法恢复固定基准——升级中止，库未改动`,
+      );
+    }
+    const parseCard = (json: string, label: string): Character => {
+      try {
+        return characterSchema.parse(JSON.parse(json));
+      } catch (cause) {
+        throw new Error(
+          `角色「${row.name}」（${row.id}）的${label}快照损坏，无法恢复固定基准——升级中止，库未改动`,
+          { cause },
+        );
+      }
+    };
+    const baseline = parseCard(baselineRow.character, "第一版");
+    restore.run(
+      baseline.basicInfo.name,
+      baseline.basicInfo.gender ?? null,
+      baseline.basicInfo.appearance ?? null,
+      baseline.core.desire,
+      baseline.core.fear,
+      baseline.core.narrativeRole,
+      baseline.background,
+      baseline.personality ?? null,
+      baseline.characterGoal ?? null,
+      baseline.creationPurpose,
+      baseline.trajectory ?? null,
+      baseline.endingDirection,
+      baseline.relationships ?? null,
+      row.id,
+    );
+
+    // 变化链 = 历史快照（版本升序，含第 1 版）+ 主行当前卡；逐对比较相邻版本
+    const chain: Character[] = [
+      ...snapshots.map((snapshot) => parseCard(snapshot.character, `第 ${snapshot.version} 版`)),
+      current,
+    ];
+    let sequence = 0;
+    for (let step = 0; step + 1 < chain.length; step++) {
+      const from = chain[step];
+      const to = chain[step + 1];
+      if (!from || !to) continue;
+      const changed = CHARACTER_FIELD_PATHS.filter(
+        (field) => readCharacterField(from, field) !== readCharacterField(to, field),
+      );
+      if (changed.length === 0) continue;
+      // 同一次历史编辑的多个字段差异共用 group_id（保留来源版本关联）
+      const groupId = generateUuidV7();
+      for (const field of changed) {
+        sequence += 1;
+        insert.run(
+          generateUuidV7(),
+          row.novel_id,
+          row.id,
+          field,
+          readCharacterField(from, field),
+          readCharacterField(to, field),
+          sequence,
+          groupId,
+          now,
+          now,
+        );
+      }
+    }
+  }
+}
+
 
 /**
  * 打开（必要时创建）数据库并完成建表。
@@ -38,6 +239,14 @@ const SCHEMA_VERSION = 18;
  *   （TEXT 列，不落文件：文风是喂给 LLM 的素材而非人类阅读产物，体量小而恒定，
  *   每次生成正文都全量注入无懒加载空间），每本小说独立（novel_id 外键），
  *   enabled 控制生成正文时是否注入
+ * - character_migrations：角色迁移（一行一个角色的一个字段变化）——固定基准后，人物变化
+ *   经迁移表达；migrate_field 为受控字段路径，old_value 由服务端派生（只读），
+ *   start/end_chapter_id 绑定区间（确认时须绑起始章、结束章可空 = 开放区间），
+ *   trigger / transition_guidance 为创作计划文本，sequence 同角色内原子分配不复用，
+ *   revision 每次编辑或状态变更递增，status 草案 / 已确认 / 已取消（草案与取消项不参与解析），
+ *   outline_version 绑定全书大纲版本（未绑定草案可空）
+ * - character_migration_versions：迁移记录的修订快照（每次编辑或状态变更前整行 JSON 归档，
+ *   与角色卡历史表 character_versions 区分）
  */
 /**
  * 10→11 数据迁移：documents 表正文改文件存储。
@@ -237,10 +446,11 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       // 17→18：characters 增列 updated_at（角色卡最近更新时间——客户端章卡据此判断已生成正文
       // 是否早于角色设定更新）。补列与版本同事务提交、锁内复查版本防并发；回填取「最新编辑
       // 快照时间，从未编辑（无快照）则取 created_at」，存量数据语义即「末次变更时刻」。
-      // 表缺失（非完整形态库）或列已存在时只写版本标记，由下方 CREATE TABLE IF NOT EXISTS 直建
+      // 表缺失（非完整形态库）或列已存在时只写版本标记，由下方 CREATE TABLE IF NOT EXISTS 直建。
+      // 段内显式写 18（非 SCHEMA_VERSION），让后续 18→19 段在链式直升时继续执行
       db.transaction(() => {
         const lockedVersion = db.query("PRAGMA user_version").get() as { user_version: number };
-        if (lockedVersion.user_version === SCHEMA_VERSION) return;
+        if (lockedVersion.user_version >= 18) return;
         const characterCols = db.query("PRAGMA table_info(characters)").all() as Array<{ name: string }>;
         if (characterCols.length > 0 && !characterCols.some((col) => col.name === "updated_at")) {
           db.exec("ALTER TABLE characters ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';");
@@ -257,14 +467,43 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
               : "UPDATE characters SET updated_at = created_at;",
           );
         }
-        db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+        db.exec("PRAGMA user_version = 18;");
+      }).immediate();
+      // 18→19：固定角色基准与角色迁移。新增 character_migrations 与
+      // character_migration_versions 两表（幂等建表），并把 version>1 的角色主行内容
+      // 恢复为第一版快照、沿历史版本逐字段差异导入 draft 迁移。建表 / 恢复 / 导入与
+      // 版本推进同事务原子提交：任一步失败整体回滚（含「缺少第一版」的拒绝猜测）。
+      // 重复打开不重复导入：版本已 19 直接返回，且导入前复查迁移表为空
+      db.transaction(() => {
+        const lockedVersion = db.query("PRAGMA user_version").get() as { user_version: number };
+        if (lockedVersion.user_version >= 19) return;
+        db.exec(CREATE_CHARACTER_MIGRATIONS_SQL);
+        db.exec(CREATE_CHARACTER_MIGRATION_VERSIONS_SQL);
+        db.exec(
+          "CREATE INDEX IF NOT EXISTS idx_character_migrations_character_id ON character_migrations(character_id);",
+        );
+        db.exec(
+          "CREATE INDEX IF NOT EXISTS idx_character_migrations_novel_id ON character_migrations(novel_id);",
+        );
+        db.exec(
+          "CREATE INDEX IF NOT EXISTS idx_character_migration_versions_migration_id ON character_migration_versions(migration_id);",
+        );
+        const existing = db
+          .query("SELECT COUNT(*) AS c FROM character_migrations;")
+          .get() as { c: number };
+        if (existing.c === 0) {
+          migrateCharactersToMigrations(db);
+        }
+        db.exec("PRAGMA user_version = 19;");
       }).immediate();
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>18 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>19 的库被旧代码打开）：重建兜底
       db.exec("DROP TABLE IF EXISTS documents;");
       db.exec("DROP TABLE IF EXISTS outlines;");
       db.exec("DROP TABLE IF EXISTS locations;");
       db.exec("DROP TABLE IF EXISTS foreshadows;");
+      db.exec("DROP TABLE IF EXISTS character_migration_versions;");
+      db.exec("DROP TABLE IF EXISTS character_migrations;");
       db.exec("DROP TABLE IF EXISTS characters;");
       db.exec("DROP TABLE IF EXISTS worldviews;");
       db.exec("DROP TABLE IF EXISTS novels;");
@@ -440,6 +679,17 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
   `);
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_style_references_novel_id ON style_references(novel_id);",
+  );
+  db.exec(CREATE_CHARACTER_MIGRATIONS_SQL);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_character_migrations_character_id ON character_migrations(character_id);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_character_migrations_novel_id ON character_migrations(novel_id);",
+  );
+  db.exec(CREATE_CHARACTER_MIGRATION_VERSIONS_SQL);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_character_migration_versions_migration_id ON character_migration_versions(migration_id);",
   );
   return db;
 }

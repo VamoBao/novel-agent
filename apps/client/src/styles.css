@@ -817,7 +817,7 @@ button.danger {
   font-size: 13px;
 }
 
-/* 章卡登场角色陈旧提示：角色卡在正文生成后被编辑（复用 warning 语义变量，暗色自适应） */
+/* 章卡登场角色陈旧提示：影响本章的迁移计划在正文生成后确认（复用 warning 语义变量，暗色自适应） */
 .viewcard .cast-stale {
   background: var(--bg-warning-subtle);
   border: 1px solid var(--border-warning);
@@ -832,6 +832,58 @@ button.danger {
   display: flex;
   justify-content: flex-end;
   margin-top: 12px;
+}
+
+/* 角色迁移清单（固定基准下的「人物线」维护面）：组头 + 逐条迁移行 + 行内动作 */
+.migration-panel .migration-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.migration-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.migration-row {
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--bg-subtle);
+}
+
+/* 已取消的迁移弱化展示（不参与角色状态解析） */
+.migration-row.cancelled {
+  opacity: 0.62;
+}
+
+.migration-row .migration-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.migration-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.migration-actions button {
+  padding: 3px 9px;
+  font-size: 12px;
+}
+
+.migration-form .hint {
+  margin: 8px 0 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .question {

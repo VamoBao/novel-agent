@@ -1,5 +1,25 @@
 export { worldviewSchema, type Worldview } from "./worldview";
 export { characterSchema, type Character } from "./character";
+export {
+  characterFieldPathSchema,
+  CHARACTER_FIELD_PATHS,
+  CHARACTER_FIELD_SPECS,
+  characterMigrationStatusSchema,
+  characterMigrationSchema,
+  newCharacterMigrationSchema,
+  characterMigrationPatchSchema,
+  characterMigrationEntrySchema,
+  normalizeMigrationValue,
+  migrationValueError,
+  readCharacterField,
+  applyCharacterField,
+  type CharacterFieldPath,
+  type CharacterMigrationStatus,
+  type CharacterMigration,
+  type NewCharacterMigration,
+  type CharacterMigrationPatch,
+  type CharacterMigrationEntry,
+} from "./character-migration";
 export { locationSchema, newLocationSchema, type Location, type NewLocation } from "./location";
 export {
   foreshadowRecoveryStatusSchema,
@@ -31,6 +51,7 @@ export {
   type OutlineNodePatch,
 } from "./outline-node";
 export { documentSchema, type Document } from "./document";
+export { buildChapterOrder, type ChapterOrderNode } from "./outline-order";
 export {
   reviewIssueKindSchema,
   reviewIssueSchema,

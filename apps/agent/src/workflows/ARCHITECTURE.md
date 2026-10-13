@@ -31,11 +31,13 @@ apps/agent/src/workflows/
 │                             #   客户端「📖 大纲」组头刷新按钮的会话（headless regen-outline 模式）
 ├── write-chapter.ts          # 章节正文生成编排 writeChapter：读库校验（小说/章节点/概述/世界观——
 │                             #   已有正文不再拒绝，getDocumentByChapter 有行即 isRegen 重生成路径）
-│                             #   → 库内组上下文（部/幕/前后章/角色摘要）+ 本章绑定伏笔
+│                             #   → 库内组上下文（部/幕/角色状态与迁移阶段（chapter-context）/
+│                             #   跨幕前后章衔接（chapter-context））+ 本章绑定伏笔
 │                             #   （foreshadow-context：登场卡片 / 回收卡片+登场章上下文）+ 参考文风
 │                             #   （style-reference-store 按启用过滤，非空注入【参考文风】段于
 │                             #   prompt 尾部 + 模仿要求 + notify 名单；无启用文风零改动）
-│                             #   → 生成-校验-修订循环（最多 MAX_REVIEW_ROUNDS=3 轮）：写作模型
+│                             #   → 生成-校验-修订循环（最多 MAX_REVIEW_ROUNDS=3 轮；写作要求含角色变化
+│                             #   计划条件条——编号顺延于伏笔/文风之前）：写作模型
 │                             #   getWritingModel() 单轮 generateText（无确认门；WRITING_MODEL_*
 │                             #   未配置回落 deepseek）→ chapter-review 三段校验（reviewModel 缺省
 │                             #   Agent 会话模型 deepseek）产出整改报告 → isReportPassing 通过跳出 /
@@ -49,9 +51,25 @@ apps/agent/src/workflows/
 │                             #   进度经 Options 注入的 onProgress 回调透传（WriteProgressEvent，
 │                             #   报告附着 revising/saving 事件）；客户端章节点「✍️ 生成本章正文」
 │                             #   /「🔄 重新生成」入口的会话（headless write-chapter 模式）
+├── chapter-context.ts        # 章节上下文纯函数模块（无 LLM、零 schema 迁移）：
+│                             #   buildCharacterStateContext——角色状态与迁移阶段（阶段**相对目标章**计算，
+│                             #   非随生成顺序更新的全局状态：早于起始章=未开始沿用此前状态 / 进行中=
+│                             #   旧值+目标值+诱因+过渡描述 / 本章=结束章=本章完成变化 / 晚于结束章=沿用
+│                             #   新值；开放区间到起始章后恒为进行中）。登场角色按章节点 character_ids
+│                             #   收窄（未绑定回退全库并置 fallbackToLibrary）；**基准卡 + 已结束迁移**
+│                             #   组成该章角色参考，进行中与结束章的变化作为**独立计划块**传入，不让目标
+│                             #   新值提前覆盖既有特征；诱因与过渡描述标注为创作计划（不得当作已发生），
+│                             #   创作目的/结局方向等作者规划字段明确标为「创作指导，不是角色已知信息」。
+│                             #   只取**同一全书大纲版本**（章所在树根节点 version）的已确认迁移——换版后
+│                             #   旧迁移保留在旧版本、不混入新版；倒序生成/重生成旧章天然不使用未来状态。
+│                             #   buildNeighborChapterContext——前后章按**全书章序**（部→幕→章，可跨幕）
+│                             #   取紧邻前/后章：上一章正文在 PREVIOUS_CHAPTER_PROSE_BUDGET=8000 内整条
+│                             #   注入（超出/缺失回退概述），下一章只取概述。migrationPhaseAt 纯函数判定
+│                             #   四阶段；write-chapter 直接导入，不入 index.ts 出口
 ├── chapter-review.ts         # 校验 subAgent 模块（无 ReAct、无确认门）：reviewChapter 三段独立
-│                             #   单轮 generateObject——①内容约束（世界观 JSON/章名概述/本章伏笔行——
-│                             #   与写作者同源的 foreshadowContext.lines）②文风相似度评分
+│                             #   单轮 generateObject——①内容约束（世界观 JSON/章名概述/本章伏笔行/
+│                             #   本章角色状态与变化计划行——与写作者同源，含 character 维度：过早改变、
+│                             #   缺少过渡、未保留应保留特征）②文风相似度评分
 │                             #   （≥STYLE_PASS_SCORE=90 合格；无启用样本 skipped 且段事件零发送，
 │                             #   模型只产 score/rationale/suggestions、skipped 包装由代码完成）
 │                             #   ③前后自洽（仅正文全文，kind 由代码补全 consistency 杜绝类别漂移）
@@ -145,6 +163,12 @@ apps/agent/src/workflows/
     │                             #   优先与概述兜底及降级计数 / 校验循环五路径——一次通过事件序列
     │                             #   与校验模型注入、第 2 轮修订 prompt 含上一版正文与整改报告、
     │                             #   3 轮保底保存与警告通知、无文风 skipped、校验抛错零残留）
+    ├── chapter-context.test.ts   # 章节上下文单测（临时库 + 临时 output：migrationPhaseAt 四阶段与
+    │                             #   单章变化与开放区间；buildCharacterStateContext 各章参考与计划块
+    │                             #   （未开始/进行中/本章完成/已结束）、同字段多段链与不同字段并行、
+    │                             #   倒序生成不用未来状态、旧版本迁移不混入新版、绑定收窄与回退全库、
+    │                             #   创作指导字段声明；buildNeighborChapterContext 跨幕前后章与
+    │                             #   上一章正文预算回退）
     ├── chapter-review.test.ts    # 校验模块单测（mock ai generateObject 按 prompt 段落标识脚本化：
     │                             #   三段按序调用与载荷断言（③不含世界观/概述）、无文风 skipped
     │                             #   零调用、onProgress 段开始事件序列、isReportPassing 四态、
@@ -172,8 +196,9 @@ apps/agent/src/workflows/
 - `plan-act-chapters.ts` → `ui/`（UiChannel 注入）、`state/`（novel-store / outline-store / worldview-store / character-store / foreshadow-store——`listUnboundByAct` 回传本幕未绑伏笔——location-store——list_locations 工具与地点入库）、`output/`（outline-writer readOutlineTheme）、`@novel/shared`（Outline 类型——自动创建的伪 Outline 上下文）、本模块 `agents/`（planChapters + auto-character-agent 的 autoCreateCharacters / filterNewCharacters / collectChapterCharacters）、`chapter-cast-intake.ts`（bindChapterCasts 各章登场名单名字→ID 回填绑定）、`foreshadow-intake.ts`（plantChapterForeshadows 新伏笔入库与既有未绑伏笔绑定登场章）与 `location-intake.ts`（章节规划新增地点确定性入库）——不直接触碰 `ai` / `providers/`（模型调用都在章节 Agent 内）；store 可注入（缺省默认 SQLite store，测试替换）
 - `regen-outline.ts` → `ui/`（UiChannel 注入）、`state/`（novel-store / worldview-store / character-store / outline-store / foreshadow-store / location-store）、`output/`（outline-writer saveOutline）、本模块 `agents/`（createOutline + auto-character-agent 的 autoCreateCharacters / filterNewCharacters）、`foreshadow-intake.ts`（plantOutlineForeshadows 新版大纲伏笔挂接新版幕入库）与 `location-intake.ts`（新版大纲新增地点确定性入库，地点只增不改）——不直接触碰 `ai` / `providers/`；store 可注入（缺省默认 SQLite store，测试替换）
 - `polish-character.ts` → `providers/`（model——单轮 generateObject，无 ReAct Agent）、`ui/`（UiChannel 注入）、`state/`（novel-store / worldview-store / character-store）；store 可注入（缺省默认 SQLite store，测试替换）
-- `write-chapter.ts` → `ai`（generateText）、`providers/`（writing-model getWritingModel——写作模型，非 Agent 会话模型；deepseek model——校验模型缺省实例）、`ui/`（UiChannel 注入）、`state/`（novel-store / outline-store / worldview-store / character-store / document-store / style-reference-store / foreshadow-store）、`output/`（document-writer 正文落盘与登场章正文读取 + outline-writer OUTPUT_DIR）、本模块 `foreshadow-context.ts`（本章伏笔 prompt 块）与 `chapter-review.ts`（三段校验 + 判定 + 修订块）；model / reviewModel / onProgress / outputDir 与各 store 可注入（缺省 getWritingModel() + deepseek model + 不回调 + NOVEL_OUTPUT_DIR + 默认 SQLite store，测试替换）
-- `chapter-review.ts` → `ai`（generateObject）、`zod`、`@novel/shared`（review schema——reviewIssueSchema 复用为 ① 的输出 schema，② ③ 的输出 schema 模块内定义、kind 补全由代码完成）；LanguageModelV4 与 onProgress 注入，无 channel / store 依赖
+- `write-chapter.ts` → `ai`（generateText）、`providers/`（writing-model getWritingModel——写作模型，非 Agent 会话模型；deepseek model——校验模型缺省实例）、`ui/`（UiChannel 注入）、`state/`（novel-store / outline-store / worldview-store / character-store / document-store / style-reference-store / foreshadow-store / migration-store）、`output/`（document-writer 正文落盘与登场章/上一章正文读取 + outline-writer OUTPUT_DIR）、本模块 `foreshadow-context.ts`（本章伏笔 prompt 块）、`chapter-context.ts`（角色状态与迁移阶段 + 跨幕前后章）与 `chapter-review.ts`（三段校验 + 判定 + 修订块）；model / reviewModel / onProgress / outputDir 与各 store 可注入（缺省 getWritingModel() + deepseek model + 不回调 + NOVEL_OUTPUT_DIR + 默认 SQLite store，测试替换）
+- `chapter-review.ts` → `ai`（generateObject）、`zod`、`@novel/shared`（review schema——reviewIssueSchema 复用为 ① 的输出 schema，② ③ 的输出 schema 模块内定义、kind 补全由代码完成；① 的 characterLines 与写作者同源）；LanguageModelV4 与 onProgress 注入，无 channel / store 依赖
+- `chapter-context.ts` → `@novel/shared`（character-migration 的字段读写与 applyCharacterField、CHARACTER_FIELD_SPECS、outline-order 的 buildChapterOrder）、`state/`（character-store / migration-store / outline-store / document-store——类型导入）、`output/`（document-writer readDocumentArtifact 读上一章正文）；纯函数、零 LLM、不经 UiChannel，不入 index.ts 出口
 - `foreshadow-context.ts` → `state/`（outline-store / character-store / document-store / foreshadow-store——类型导入）、`output/`（document-writer readDocumentArtifact 读登场章正文）、本模块 `foreshadow-intake.ts`（buildChapterOrder 全局章序——回收组排序与既往回收章筛选）；纯函数、零 LLM、不经 UiChannel
 - `agents/*.ts` → `ai`（tool）、`zod`、`src/agents/`（runReactAgent）、`tools/`（ask-user 工厂，经注入的 channel 提问）、`ui/`（UiChannel 注入：确认门携带结构化视图）、`@novel/shared`（schemas）、`state/types`（仅 outline-agent 需要 NovelParams 类型）、`state/character-store`（outline-agent 与 chapter-agent 的 list_characters 角色库查询、auto-character-agent 的 save_character 入库依赖，可注入、缺省默认 SQLite store）
 - 下层不得反向依赖本模块；`createCharacter` 目前仅供模块内编排使用，未入 `index.ts` 出口

@@ -5,6 +5,7 @@ import * as path from "node:path";
 import {
   agentMessageSchema,
   characterEntrySchema,
+  characterMigrationEntrySchema,
   foreshadowEntrySchema,
   novelDeletedResultSchema,
   novelDetailSchema,
@@ -14,8 +15,11 @@ import {
   type AgentStartOptions,
   type Character,
   type CharacterEntry,
+  type CharacterMigrationEntry,
+  type CharacterMigrationPatch,
   type Foreshadow,
   type ForeshadowEntry,
+  type NewCharacterMigration,
   type NovelDetail,
   type NovelListItem,
   type StyleReferenceEntry,
@@ -383,7 +387,9 @@ ipcMain.handle("library:delete", async (_event, novelId: string) => {
   return result.data;
 });
 
-/** 角色管理（编辑 / 新增）：操作成功返回带 version 的角色条目 */
+/** 角色管理（新增）：操作成功返回带 version 的角色条目。
+ *  既有角色卡为固定基准，编辑一律经迁移（add/update/confirm/cancel-migration），
+ *  旧 update-character 通道已退役（CLI 侧显式拒绝） */
 function handleCharacterMutation(args: string[]): Promise<CharacterEntry> {
   return runLibraryQuery(args).then((raw) => {
     const result = characterEntrySchema.safeParse(raw);
@@ -400,10 +406,49 @@ ipcMain.handle(
     handleCharacterMutation(["add-character", novelId, JSON.stringify(character)]),
 );
 
+/** 角色迁移管理（新建 / 编辑 / 确认 / 取消）：操作成功返回迁移条目（旧值由服务端派生） */
+function handleMigrationMutation(args: string[]): Promise<CharacterMigrationEntry> {
+  return runLibraryQuery(args).then((raw) => {
+    const result = characterMigrationEntrySchema.safeParse(raw);
+    if (!result.success) {
+      throw new Error(`迁移结果不合查询 schema：${result.error.issues[0]?.message ?? "未知错误"}`);
+    }
+    return result.data;
+  });
+}
+
 ipcMain.handle(
-  "library:updateCharacter",
-  (_event, novelId: string, characterId: string, character: Character): Promise<CharacterEntry> =>
-    handleCharacterMutation(["update-character", novelId, characterId, JSON.stringify(character)]),
+  "library:addMigration",
+  (
+    _event,
+    novelId: string,
+    characterId: string,
+    input: NewCharacterMigration,
+  ): Promise<CharacterMigrationEntry> =>
+    handleMigrationMutation(["add-migration", novelId, characterId, JSON.stringify(input)]),
+);
+
+ipcMain.handle(
+  "library:updateMigration",
+  (
+    _event,
+    novelId: string,
+    migrationId: string,
+    patch: CharacterMigrationPatch,
+  ): Promise<CharacterMigrationEntry> =>
+    handleMigrationMutation(["update-migration", novelId, migrationId, JSON.stringify(patch)]),
+);
+
+ipcMain.handle(
+  "library:confirmMigration",
+  (_event, novelId: string, migrationId: string): Promise<CharacterMigrationEntry> =>
+    handleMigrationMutation(["confirm-migration", novelId, migrationId]),
+);
+
+ipcMain.handle(
+  "library:cancelMigration",
+  (_event, novelId: string, migrationId: string): Promise<CharacterMigrationEntry> =>
+    handleMigrationMutation(["cancel-migration", novelId, migrationId]),
 );
 
 /** 伏笔管理（编辑）：操作成功返回伏笔条目（含 actNodeId） */

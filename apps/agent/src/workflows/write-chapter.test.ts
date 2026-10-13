@@ -13,6 +13,7 @@ import { CharacterStore } from "../state/character-store";
 import { DocumentStore } from "../state/document-store";
 import { StyleReferenceStore } from "../state/style-reference-store";
 import { ForeshadowStore } from "../state/foreshadow-store";
+import { CharacterMigrationStore } from "../state/migration-store";
 import { FakeChannel } from "../ui/fake-channel";
 import { writeDocumentArtifact } from "../output/document-writer";
 import type { Character, Worldview } from "@novel/shared";
@@ -141,6 +142,7 @@ async function setupDb(options: { withWorldview?: boolean } = {}) {
   const characterStore = new CharacterStore(db);
   const documentStore = new DocumentStore(db);
   const foreshadowStore = new ForeshadowStore(db);
+  const migrationStore = new CharacterMigrationStore(db);
   novelStore.createNovel({ id: NOVEL_ID, name: "灵脉拾遗" });
   if (options.withWorldview !== false) {
     worldviewStore.saveWorldview(NOVEL_ID, worldviewFixture);
@@ -165,6 +167,7 @@ async function setupDb(options: { withWorldview?: boolean } = {}) {
     characterStore,
     documentStore,
     foreshadowStore,
+    migrationStore,
     styleReferenceStore: new StyleReferenceStore(db),
     outputDir,
     actNodeId: act!.id,
@@ -268,6 +271,102 @@ describe("writeChapter", () => {
     expect(
       legacyChannel.notifies.some((n) => n.includes("🎭 本章未绑定登场角色（旧数据），已回退注入全库角色参考")),
     ).toBeTrue();
+  });
+
+  test("角色迁移计划注入 prompt 且与校验 ① 同源；通知统计角色变化计划", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    const character = ctx.characterStore.listCharacters(NOVEL_ID)[0]!;
+    const draft = ctx.migrationStore.addMigration(NOVEL_ID, character.id, {
+      migrateField: "core.desire",
+      newValue: "守护同伴",
+      startChapterId: ctx.chapterNodeId,
+      endChapterId: ctx.secondChapterNodeId,
+      trigger: "经历背叛",
+      transitionGuidance: "由复仇转向守护",
+    });
+    ctx.migrationStore.confirmMigration(NOVEL_ID, draft.id);
+
+    const channel = new FakeChannel([]);
+    generateTextCalls = [];
+    generateObjectCalls = [];
+    generateTextResult = PROSE;
+
+    await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
+
+    const prompt = generateTextCalls[0]!.prompt;
+    expect(prompt).toContain("【登场角色状态（角色基准卡 + 已结束迁移后的状态）】");
+    expect(prompt).toContain("【本章角色变化计划（创作计划，不是已经发生的事实）】");
+    expect(prompt).toContain("进行中");
+    expect(prompt).toContain("旧值「夺回灵脉」→ 目标「守护同伴」");
+    expect(prompt).toContain("诱因：经历背叛");
+    // 写作要求附条件条（角色变化计划优先于伏笔/文风，编号从 6 起）
+    expect(prompt).toContain("6. 本章角色变化按【本章角色变化计划】推进");
+    // 校验 ① 收到同源角色行
+    const contentPrompt = generateObjectCalls.find((call) => call.prompt.includes("设定审校编辑"))!.prompt;
+    expect(contentPrompt).toContain("【本章角色状态与变化计划（正文应遵守）】");
+    expect(contentPrompt).toContain("旧值「夺回灵脉」→ 目标「守护同伴」");
+    expect(contentPrompt).toContain("4. character——角色变化是否符合");
+    expect(channel.notifies.some((line) => line.includes("本章角色变化计划：1 条"))).toBe(true);
+  });
+
+  test("无迁移时角色块只含基准卡与已结束状态（无计划块、无附加要求）", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    const channel = new FakeChannel([]);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+
+    await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
+
+    const prompt = generateTextCalls[0]!.prompt;
+    expect(prompt).toContain("【登场角色状态（角色基准卡 + 已结束迁移后的状态）】");
+    expect(prompt).not.toContain("【本章角色变化计划");
+    expect(prompt).not.toContain("本章角色变化按【本章角色变化计划】推进");
+    expect(channel.notifies.some((line) => line.includes("本章角色变化计划"))).toBe(false);
+  });
+
+  test("跨幕上一章衔接：前章正文可用时注入 prompt，超预算回退概述", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    // 追加第二幕与第四章（跨幕衔接）
+    const act1 = ctx.outlineStore
+      .listOutlineNodes(NOVEL_ID, { currentOnly: true })
+      .find((n) => n.node.type === "act")!;
+    const extraAct = ctx.outlineStore.addOutlineNode(NOVEL_ID, {
+      type: "act",
+      name: "第二幕",
+      summary: "幕二梗概",
+      keyPlotPoints: ["点二"],
+      sort: 2,
+      parentId: act1.node.parentId,
+    });
+    const [fourth] = ctx.outlineStore.saveChapters(NOVEL_ID, extraAct.id, [
+      { name: "第四章", summary: "第四章概述" },
+    ]);
+    const thirdChapter = ctx.outlineStore.getOutlineNode(ctx.thirdChapterNodeId)!;
+    const prose = "第三章的结尾：碎片映出旧日影像。";
+    const relative = "灵脉拾遗-eeeeeeee/第一部/第三章.md";
+    writeDocumentArtifact(relative, prose, ctx.outputDir);
+    ctx.documentStore.saveChapterDocument(NOVEL_ID, thirdChapter.id, relative, 16);
+
+    const channel = new FakeChannel([]);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+    await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx, chapterNodeId: fourth!.id });
+    let prompt = generateTextCalls[0]!.prompt;
+    expect(prompt).toContain("【上一章（衔接其结尾，不要重复叙述）】");
+    expect(prompt).toContain("第三章");
+    expect(prompt).toContain(prose);
+
+    // 超预算：整条降级为概述（不截断、不注入正文）
+    const big = "字".repeat(8001);
+    writeDocumentArtifact(relative, big, ctx.outputDir);
+    generateTextCalls = [];
+    await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx, chapterNodeId: fourth!.id });
+    prompt = generateTextCalls[0]!.prompt;
+    expect(prompt).not.toContain(big);
+    expect(prompt).toContain("第三章：碎片来历初现");
   });
 
   test("前置校验：小说不存在 / 章节不存在 / 非章节点 / 已有正文 / 世界观未确认均报可读错误", async () => {

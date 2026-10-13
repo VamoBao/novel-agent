@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,6 +15,7 @@ import { OutlineStore } from "./state/outline-store";
 import { WorldviewStore } from "./state/worldview-store";
 import { writeDocumentArtifact } from "./output/document-writer";
 import {
+  addMigrationEntry,
   addStyleEntry,
   buildNovelDetail,
   buildNovelList,
@@ -21,8 +23,11 @@ import {
   deleteStyleEntry,
   renameNovel,
   setNovelFavorite,
+  cancelMigrationEntry,
+  confirmMigrationEntry,
   setNovelPinned,
   updateForeshadowEntry,
+  updateMigrationEntry,
   updateStyleEntry,
 } from "./query";
 
@@ -474,6 +479,167 @@ describe("query CLI 参考文风（add-style / update-style / delete-style）", 
     expect(() =>
       updateStyleEntry(db, id, "no-such-style", JSON.stringify({ name: "x", content: "y", enabled: true })),
     ).toThrow("参考文风不存在");
+    db.close();
+  });
+});
+
+describe("query CLI 角色迁移（add / update / confirm / cancel + 详情契约）", () => {
+  /** 小说 + 部/幕 + 若干章 + 一名角色：迁移命令的最小可用库 */
+  async function migrationFixture() {
+    const { db } = await newFixture();
+    const novelId = "12121212-0000-7000-8000-000000000001";
+    new NovelStore(db).createNovel({ id: novelId });
+    const outlineStore = new OutlineStore(db);
+    outlineStore.saveOutlineTree(novelId, [
+      { name: "第一部", summary: "部梗概", acts: [{ name: "第一幕", summary: "幕梗概", keyPlotPoints: ["点一"] }] },
+    ]);
+    const act = outlineStore
+      .listOutlineNodes(novelId, { currentOnly: true })
+      .find((node) => node.node.type === "act")!;
+    const chapters = outlineStore.saveChapters(novelId, act.id, [
+      { name: "第一章", summary: "概述一" },
+      { name: "第二章", summary: "概述二" },
+      { name: "第三章", summary: "概述三" },
+      { name: "第四章", summary: "概述四" },
+    ]);
+    const character = new CharacterStore(db).addCharacter(novelId, {
+      basicInfo: { name: "林澜", gender: "女" },
+      core: { desire: "找到妹妹", fear: "失去同伴", narrativeRole: "主角" },
+      background: "殖民城市长大的孤儿领航员",
+      personality: "热情",
+      creationPurpose: "驱动主线冲突的核心视角",
+      endingDirection: "公开真相并拯救城市",
+    });
+    return { db, novelId, chapters, character };
+  }
+
+  test("add-migration 新建草案：旧值服务端派生，详情契约返回迁移", async () => {
+    const { db, novelId, chapters, character } = await migrationFixture();
+    const draft = addMigrationEntry(
+      db,
+      novelId,
+      character.id,
+      JSON.stringify({
+        migrateField: "personality",
+        newValue: "谨慎",
+        startChapterId: chapters[0]!.id,
+        trigger: "经历背叛",
+        transitionGuidance: "逐渐收敛外放",
+      }),
+    );
+    expect(draft).toMatchObject({
+      novelId,
+      characterId: character.id,
+      migrateField: "personality",
+      oldValue: "热情",
+      newValue: "谨慎",
+      sequence: 1,
+      revision: 1,
+      status: "draft",
+      outlineVersion: 1,
+      groupId: null,
+    });
+
+    const detail = buildNovelDetail(db, novelId);
+    expect(detail.migrations).toHaveLength(1);
+    expect(detail.migrations[0]!.id).toBe(draft.id);
+    db.close();
+  });
+
+  test("update / confirm / cancel 往返：patch 语义与状态流转", async () => {
+    const { db, novelId, chapters, character } = await migrationFixture();
+    const draft = addMigrationEntry(
+      db,
+      novelId,
+      character.id,
+      JSON.stringify({
+        migrateField: "personality",
+        newValue: "谨慎",
+        startChapterId: chapters[0]!.id,
+      }),
+    );
+    const patched = updateMigrationEntry(
+      db,
+      novelId,
+      draft.id,
+      JSON.stringify({ endChapterId: chapters[2]!.id, trigger: "经历背叛", transitionGuidance: "逐渐收敛" }),
+    );
+    expect(patched.endChapterId).toBe(chapters[2]!.id);
+    expect(patched.revision).toBe(2);
+
+    const confirmed = confirmMigrationEntry(db, novelId, draft.id);
+    expect(confirmed.status).toBe("confirmed");
+    expect(confirmed.oldValue).toBe("热情");
+    expect(confirmed.revision).toBe(3);
+
+    expect(() => confirmMigrationEntry(db, novelId, draft.id)).toThrow("已确认");
+    const cancelled = cancelMigrationEntry(db, novelId, draft.id);
+    expect(cancelled.status).toBe("cancelled");
+    expect(() => cancelMigrationEntry(db, novelId, draft.id)).toThrow("已取消");
+    db.close();
+  });
+
+  test("非法入参被拒：未知字段 / 必填目标值为空 / 非章节点起始章", async () => {
+    const { db, novelId, character } = await migrationFixture();
+    expect(() =>
+      addMigrationEntry(db, novelId, character.id, JSON.stringify({ migrateField: "nope", newValue: "x" })),
+    ).toThrow("迁移数据不合法");
+    expect(() =>
+      addMigrationEntry(
+        db,
+        novelId,
+        character.id,
+        JSON.stringify({ migrateField: "core.desire", newValue: "" }),
+      ),
+    ).toThrow("必填");
+    expect(() =>
+      addMigrationEntry(
+        db,
+        novelId,
+        character.id,
+        JSON.stringify({ migrateField: "personality", newValue: "谨慎", startChapterId: "no-such-chapter" }),
+      ),
+    ).toThrow("起始章不存在");
+    expect(() => updateMigrationEntry(db, novelId, "no-such-migration", JSON.stringify({}))).toThrow(
+      "迁移记录不存在",
+    );
+    db.close();
+  });
+
+  test("update-character 命令已退役：基准卡不可直接编辑", () => {
+    // 经真实 CLI 子进程调用（其余命令走导出函数，此处验证命令入口的显式拒绝语义）
+    const script = join(import.meta.dir, "query.ts");
+    try {
+      execFileSync("bun", ["run", script, "update-character", "novel", "char", "{}"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      throw new Error("应当以非零退出");
+    } catch (error) {
+      const stderr = (error as { stderr?: string }).stderr ?? "";
+      expect(stderr).toContain("角色基准卡不可直接编辑");
+    }
+  });
+
+  test("delete 级联清理迁移与修订快照", async () => {
+    const { db, novelId, chapters, character } = await migrationFixture();
+    const draft = addMigrationEntry(
+      db,
+      novelId,
+      character.id,
+      JSON.stringify({
+        migrateField: "personality",
+        newValue: "谨慎",
+        startChapterId: chapters[0]!.id,
+        trigger: "经历背叛",
+        transitionGuidance: "逐渐收敛",
+      }),
+    );
+    confirmMigrationEntry(db, novelId, draft.id);
+    deleteNovel(db, novelId);
+    const raw = db as unknown as { query: (sql: string) => { get: () => unknown } };
+    expect(raw.query("SELECT COUNT(*) AS c FROM character_migrations").get()).toEqual({ c: 0 });
+    expect(raw.query("SELECT COUNT(*) AS c FROM character_migration_versions").get()).toEqual({ c: 0 });
     db.close();
   });
 });

@@ -20,7 +20,7 @@ const validListItem = {
 };
 
 describe("小说详情的创作条件契约", () => {
-  const emptyDetail = { novel: validListItem, worldview: null, characters: [], outlineNodes: [], documents: [], foreshadows: [], locations: [], styleReferences: [] };
+  const emptyDetail = { novel: validListItem, worldview: null, characters: [], migrations: [], outlineNodes: [], documents: [], foreshadows: [], locations: [], styleReferences: [] };
 
   test("旧详情载荷缺少创作条件时补 null", () => {
     expect(novelDetailSchema.parse(emptyDetail).novel).toMatchObject({ genre: null, audience: null, coreConflict: null });
@@ -220,6 +220,7 @@ describe("novelDetailSchema", () => {
           updatedAt: "2026-10-13T00:00:00.000Z",
         },
       ],
+      migrations: [],
       outlineNodes: validOutlineNodes,
       documents: validDocuments,
       foreshadows: [],
@@ -240,6 +241,7 @@ describe("novelDetailSchema", () => {
       novel: { ...validListItem, name: null },
       worldview: null,
       characters: [],
+      migrations: [],
       outlineNodes: [],
       documents: [],
       foreshadows: [],
@@ -256,6 +258,7 @@ describe("novelDetailSchema", () => {
       novel: validListItem,
       worldview: null,
       characters: [],
+      migrations: [],
       outlineNodes: [],
       documents: [{ ...validDocuments[0], content: null }],
       foreshadows: [],
@@ -272,6 +275,7 @@ describe("novelDetailSchema", () => {
         novel: validListItem,
         worldview: null,
         characters: [],
+      migrations: [],
         outlineNodes: [{ ...validOutlineNodes[0], sort: 0 }],
         documents: [],
       }),
@@ -284,6 +288,7 @@ describe("novelDetailSchema", () => {
         novel: validListItem,
         worldview: null,
         characters: [],
+      migrations: [],
         outlineNodes: [],
         documents: [{ ...validDocuments[0], filePath: "" }],
       }),
@@ -293,6 +298,7 @@ describe("novelDetailSchema", () => {
         novel: validListItem,
         worldview: null,
         characters: [],
+      migrations: [],
         outlineNodes: [],
         documents: [{ ...validDocuments[0], wordCount: -1 }],
       }),
@@ -341,6 +347,7 @@ describe("foreshadowEntrySchema 与 novelDetail.foreshadows", () => {
       },
       worldview: null,
       characters: [],
+      migrations: [],
       outlineNodes: [],
       documents: [],
       foreshadows: [{ ...entry, recoveryStatus: "unrecovered" }],
@@ -394,6 +401,7 @@ describe("locationEntrySchema 与 novelDetail.locations", () => {
       },
       worldview: null,
       characters: [],
+      migrations: [],
       outlineNodes: [],
       documents: [],
       foreshadows: [],
@@ -432,6 +440,7 @@ describe("styleReferenceEntrySchema 与 novelDetail.styleReferences", () => {
       },
       worldview: null,
       characters: [],
+      migrations: [],
       outlineNodes: [],
       documents: [],
       foreshadows: [],

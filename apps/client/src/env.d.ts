@@ -5,8 +5,11 @@ import type {
   AgentStartOptions,
   Character,
   CharacterEntry,
+  CharacterMigrationEntry,
+  CharacterMigrationPatch,
   Foreshadow,
   ForeshadowEntry,
+  NewCharacterMigration,
   NovelDetail,
   NovelListItem,
   StyleReferenceEntry,
@@ -27,11 +30,18 @@ declare global {
       setNovelFavorite: (novelId: string, favorite: boolean) => Promise<NovelListItem>;
       deleteNovel: (novelId: string) => Promise<{ deleted: string }>;
       addCharacter: (novelId: string, character: Character) => Promise<CharacterEntry>;
-      updateCharacter: (
+      addMigration: (
         novelId: string,
         characterId: string,
-        character: Character,
-      ) => Promise<CharacterEntry>;
+        input: NewCharacterMigration,
+      ) => Promise<CharacterMigrationEntry>;
+      updateMigration: (
+        novelId: string,
+        migrationId: string,
+        patch: CharacterMigrationPatch,
+      ) => Promise<CharacterMigrationEntry>;
+      confirmMigration: (novelId: string, migrationId: string) => Promise<CharacterMigrationEntry>;
+      cancelMigration: (novelId: string, migrationId: string) => Promise<CharacterMigrationEntry>;
       updateForeshadow: (novelId: string, foreshadowId: string, foreshadow: Foreshadow) => Promise<ForeshadowEntry>;
       addStyle: (
         novelId: string,

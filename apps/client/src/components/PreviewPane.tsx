@@ -10,15 +10,17 @@ import type {
   View,
 } from "@novel/shared";
 import { CharacterEditForm } from "./CharacterEditForm";
+import { CharacterMigrationPanel } from "./CharacterMigrationPanel";
 import { ChapterRegenDialog } from "./ChapterRegenDialog";
-import { ForeshadowEditForm, recoveryLabel, type ChapterOption } from "./ForeshadowEditForm";
+import { ForeshadowEditForm, recoveryLabel } from "./ForeshadowEditForm";
 import { StyleEditForm } from "./StyleEditForm";
 import { ViewCard } from "./ViewCard";
 import { OutlineNodeCard } from "./OutlineNodeCard";
 import type { ChapterForeshadow, ChapterWriteProgress } from "./OutlineNodeCard";
 import type { Selection } from "./StructureTreePanel";
+import { chapterOptions } from "../chapter-options";
 import { globalChapterOrder } from "../chapter-order";
-import { staleCastCharacters } from "../character-staleness";
+import { staleCastMigrations } from "../character-staleness";
 
 interface PreviewPaneProps {
   /** null = 未选中小说 */
@@ -32,7 +34,7 @@ interface PreviewPaneProps {
   creatingCharacter?: boolean;
   onCreateCharacterSubmitted?: (entry: CharacterEntry) => void;
   onCreateCharacterCancelled?: () => void;
-  /** 角色编辑提交成功后刷新详情（角色 id 稳定，选中不失效） */
+  /** 角色迁移增删改确认成功后刷新详情（角色 id 稳定，选中不失效） */
   onCharacterSaved?: () => void;
   /** 伏笔编辑提交成功后刷新详情（伏笔 id 稳定，选中不失效） */
   onForeshadowSaved?: () => void;
@@ -92,52 +94,30 @@ function toWorldviewView(detail: NovelDetail): View | null {
   return detail.worldview ? { kind: "worldview", worldview: detail.worldview } : null;
 }
 
-/** 章节点选项（伏笔登场章绑定下拉用）：label 为「部名/幕名/章名」——
- *  按 parentId 上溯两级（章 → 幕 → 部），缺失级省略（历史数据 / 异常态兜底） */
-function chapterOptions(detail: NovelDetail): ChapterOption[] {
-  const nodeById = new Map(detail.outlineNodes.map((n) => [n.id, n]));
-  return detail.outlineNodes
-    .filter((n) => n.type === "chapter")
-    .map((n) => {
-      const act = n.parentId !== null ? nodeById.get(n.parentId) : undefined;
-      const part = act && act.parentId !== null ? nodeById.get(act.parentId) : undefined;
-      return { id: n.id, label: [part?.name, act?.name, n.name].filter(Boolean).join("/") };
-    });
-}
-
-/** 角色卡预览（带编辑入口）：编辑态切换为 CharacterEditForm；按 id 作 key，切换角色即退出编辑态 */
+/**
+ * 角色卡预览（固定基准，只读）：角色卡本体不再提供编辑入口——人物变化一律经
+ * 迁移清单表达（CharacterMigrationPanel）。按 id 作 key，切换角色即退出迁移表单态。
+ */
 function CharacterPreview({
   novelId,
   entry,
-  hasWorldview,
+  detail,
   onSaved,
 }: {
   novelId: string;
   entry: CharacterEntry;
-  hasWorldview: boolean;
+  detail: NovelDetail;
   onSaved: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  if (editing) {
-    return (
-      <CharacterEditForm
-        novelId={novelId}
-        character={entry}
-        hasWorldview={hasWorldview}
-        onSubmitted={() => {
-          setEditing(false);
-          onSaved();
-        }}
-        onCancel={() => setEditing(false)}
-      />
-    );
-  }
   return (
     <>
-      <div className="preview-actions">
-        <button onClick={() => setEditing(true)}>✏️ 编辑角色</button>
-      </div>
       <ViewCard view={{ kind: "character-card", character: entry }} />
+      <CharacterMigrationPanel
+        novelId={novelId}
+        character={entry}
+        detail={detail}
+        onChanged={onSaved}
+      />
     </>
   );
 }
@@ -418,7 +398,9 @@ export function PreviewPane({
           onPlanChapters={onPlanChapters ? () => onPlanChapters(node) : undefined}
           document={detail.documents.find((d) => d.chapterId === node.id)}
           castNames={node.type === "chapter" ? toChapterCastNames(node, detail) : undefined}
-          staleCast={node.type === "chapter" ? staleCastCharacters(node, detail) : undefined}
+          staleMigrations={
+            node.type === "chapter" ? staleCastMigrations(node, detail) : undefined
+          }
           foreshadows={
             node.type === "chapter" ? toChapterForeshadows(detail, node.id) : undefined
           }
@@ -446,7 +428,7 @@ export function PreviewPane({
         key={entry.id}
         novelId={detail.novel.id}
         entry={entry}
-        hasWorldview={detail.worldview !== null}
+        detail={detail}
         onSaved={() => onCharacterSaved?.()}
       />
     ) : (

@@ -2,19 +2,25 @@ import { unlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
   characterEntrySchema,
+  characterMigrationEntrySchema,
+  characterMigrationPatchSchema,
   characterSchema,
   foreshadowSchema,
+  newCharacterMigrationSchema,
   novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
   styleReferenceSchema,
   type Character,
   type CharacterEntry,
+  type CharacterMigrationEntry,
+  type CharacterMigrationPatch,
   type DocumentEntry,
   type Foreshadow,
   type ForeshadowEntry,
   type ForeshadowPatch,
   type LocationEntry,
+  type NewCharacterMigration,
   type NovelDeletedResult,
   type NovelDetail,
   type NovelListItem,
@@ -23,6 +29,7 @@ import {
   type StyleReferenceEntry,
 } from "@novel/shared";
 import { CharacterStore, type StoredCharacter } from "./state/character-store";
+import { CharacterMigrationStore, type StoredCharacterMigration } from "./state/migration-store";
 import { openDatabase } from "./state/db";
 import { NovelStore, type NovelRecord } from "./state/novel-store";
 import { OutlineStore } from "./state/outline-store";
@@ -53,8 +60,11 @@ import {
  *   / `favorite|unfavorite <novelId>` / `delete <novelId>`（级联删除关联数据并清理
  *   output 产物——大纲 JSON 与正文文件）
  *   / `add-character <novelId> <角色卡JSON>`（新增角色，version=1）
- *   / `update-character <novelId> <characterId> <角色卡JSON>`（版本化编辑角色，旧卡快照归档）
  *   / `update-foreshadow <novelId> <foreshadowId> <伏笔JSON>`（patch 语义编辑伏笔）
+ *   / `add-migration <novelId> <characterId> <迁移JSON>`（新建角色迁移草案，旧值服务端派生）
+ *   / `update-migration <novelId> <migrationId> <patchJSON>`（patch 编辑迁移）
+ *   / `confirm-migration <novelId> <migrationId>`（确认生效：必填校验 + 旧值重解析 + 区间校验）
+ *   / `cancel-migration <novelId> <migrationId>`（取消迁移；已确认且有后续依赖时拒绝）
  *   / `add-style <novelId> <文风JSON>`（新增参考文风，enabled 缺省启用）
  *   / `update-style <novelId> <styleId> <文风JSON>`（全量编辑参考文风：名字/内容/启用开关）
  *   / `delete-style <styleId>`（删除参考文风）
@@ -94,6 +104,10 @@ export function buildNovelDetail(
   const characters = new CharacterStore(db)
     .listCharacters(novelId)
     .map((stored) => toCharacterEntry(stored));
+  // 角色迁移：全量行（按角色入库序 + 序号升序），角色卡预览的迁移清单取用
+  const migrations: CharacterMigrationEntry[] = new CharacterMigrationStore(db)
+    .listMigrations(novelId)
+    .map(toMigrationEntry);
   const outlineNodes: OutlineNodeEntry[] = new OutlineStore(db)
     .listOutlineNodes(novelId, { currentOnly: true })
     .map((stored) => ({
@@ -137,6 +151,7 @@ export function buildNovelDetail(
     },
     worldview,
     characters,
+    migrations,
     outlineNodes,
     documents,
     foreshadows,
@@ -245,6 +260,80 @@ function toCharacterEntry(stored: StoredCharacter): CharacterEntry {
   });
 }
 
+function toMigrationEntry(stored: StoredCharacterMigration): CharacterMigrationEntry {
+  return characterMigrationEntrySchema.parse({
+    id: stored.id,
+    createdAt: stored.createdAt,
+    updatedAt: stored.updatedAt,
+    ...stored.migration,
+  });
+}
+
+/** 迁移 JSON → schema 校验（新增入参 / patch 入参共用；错误信息带首个 issue 定位） */
+function parseMigrationJson<T>(
+  json: string,
+  schema: { safeParse: (value: unknown) => { success: true; data: T } | { success: false; error: { issues: Array<{ path: PropertyKey[]; message: string }> } } },
+): T {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch (error) {
+    throw new Error(`迁移 JSON 解析失败：${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
+  }
+  const result = schema.safeParse(raw);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new Error(
+      `迁移数据不合法（${issue?.path.join(".") || "根"}）：${issue?.message ?? "未知问题"}`,
+    );
+  }
+  return result.data;
+}
+
+/** add-migration 载荷：新建迁移草案（旧值由服务端派生），返回迁移条目 */
+export function addMigrationEntry(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  characterId: string,
+  migrationJson: string,
+): CharacterMigrationEntry {
+  const input = parseMigrationJson<NewCharacterMigration>(migrationJson, newCharacterMigrationSchema);
+  return toMigrationEntry(
+    new CharacterMigrationStore(db).addMigration(novelId, characterId, input),
+  );
+}
+
+/** update-migration 载荷：patch 编辑迁移（undefined=不动、null=清空），返回更新后条目 */
+export function updateMigrationEntry(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  migrationId: string,
+  patchJson: string,
+): CharacterMigrationEntry {
+  const patch = parseMigrationJson<CharacterMigrationPatch>(patchJson, characterMigrationPatchSchema);
+  return toMigrationEntry(new CharacterMigrationStore(db).updateMigration(novelId, migrationId, patch));
+}
+
+/** confirm-migration 载荷：确认迁移生效（必填项校验 + 旧值重解析 + 区间校验），返回确认后条目 */
+export function confirmMigrationEntry(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  migrationId: string,
+): CharacterMigrationEntry {
+  return toMigrationEntry(new CharacterMigrationStore(db).confirmMigration(novelId, migrationId));
+}
+
+/** cancel-migration 载荷：取消迁移（已确认且有后续依赖时拒绝），返回取消后条目 */
+export function cancelMigrationEntry(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  migrationId: string,
+): CharacterMigrationEntry {
+  return toMigrationEntry(new CharacterMigrationStore(db).cancelMigration(novelId, migrationId));
+}
+
 /** add-character 载荷：入库新角色（version=1，无历史快照），返回角色条目 */
 export function addCharacterEntry(
   db: ReturnType<typeof openDatabase>,
@@ -256,17 +345,6 @@ export function addCharacterEntry(
   }
   const character = parseCharacterJson(characterJson);
   return toCharacterEntry(new CharacterStore(db).addCharacter(novelId, character));
-}
-
-/** update-character 载荷：版本化更新角色（旧卡快照归档、version+1），返回更新后条目 */
-export function updateCharacterEntry(
-  db: ReturnType<typeof openDatabase>,
-  novelId: string,
-  characterId: string,
-  characterJson: string,
-): CharacterEntry {
-  const character = parseCharacterJson(characterJson);
-  return toCharacterEntry(new CharacterStore(db).updateCharacter(novelId, characterId, character));
 }
 
 function parseForeshadowJson(json: string): Foreshadow {
@@ -414,12 +492,29 @@ function main(argv: string[]): number {
         process.stdout.write(`${JSON.stringify(addCharacterEntry(db, novelId, rest[0]))}\n`);
         return 0;
       case "update-character":
-        if (!novelId || rest.length !== 2 || !rest[0] || !rest[1]) break;
-        process.stdout.write(`${JSON.stringify(updateCharacterEntry(db, novelId, rest[0], rest[1]))}\n`);
-        return 0;
+        // 固定基准：既有角色卡不可直接编辑（人物变化经 character_migrations 迁移表达），
+        // 命令保留为显式拒绝——旧客户端调用会得到可读错误而非静默改写基准
+        process.stderr.write("角色基准卡不可直接编辑：请经角色迁移（add-migration / confirm-migration）表达变化\n");
+        return 1;
       case "update-foreshadow":
         if (!novelId || rest.length !== 2 || !rest[0] || !rest[1]) break;
         process.stdout.write(`${JSON.stringify(updateForeshadowEntry(db, novelId, rest[0], rest[1]))}\n`);
+        return 0;
+      case "add-migration":
+        if (!novelId || rest.length !== 2 || !rest[0] || !rest[1]) break;
+        process.stdout.write(`${JSON.stringify(addMigrationEntry(db, novelId, rest[0], rest[1]))}\n`);
+        return 0;
+      case "update-migration":
+        if (!novelId || rest.length !== 2 || !rest[0] || !rest[1]) break;
+        process.stdout.write(`${JSON.stringify(updateMigrationEntry(db, novelId, rest[0], rest[1]))}\n`);
+        return 0;
+      case "confirm-migration":
+        if (!novelId || rest.length !== 1 || !rest[0]) break;
+        process.stdout.write(`${JSON.stringify(confirmMigrationEntry(db, novelId, rest[0]))}\n`);
+        return 0;
+      case "cancel-migration":
+        if (!novelId || rest.length !== 1 || !rest[0]) break;
+        process.stdout.write(`${JSON.stringify(cancelMigrationEntry(db, novelId, rest[0]))}\n`);
         return 0;
       case "add-style":
         if (!novelId || rest.length !== 1 || !rest[0]) break;
@@ -441,7 +536,7 @@ function main(argv: string[]): number {
     db.close();
   }
   process.stderr.write(
-    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id> | add-character <novelId> <角色卡JSON> | update-character <novelId> <characterId> <角色卡JSON> | update-foreshadow <novelId> <foreshadowId> <伏笔JSON> | add-style <novelId> <文风JSON> | update-style <novelId> <styleId> <文风JSON> | delete-style <styleId>>\n",
+    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id> | add-character <novelId> <角色卡JSON> | update-foreshadow <novelId> <foreshadowId> <伏笔JSON> | add-migration <novelId> <characterId> <迁移JSON> | update-migration <novelId> <migrationId> <patchJSON> | confirm-migration <novelId> <migrationId> | cancel-migration <novelId> <migrationId> | add-style <novelId> <文风JSON> | update-style <novelId> <styleId> <文风JSON> | delete-style <styleId>>\n",
   );
   return 1;
 }

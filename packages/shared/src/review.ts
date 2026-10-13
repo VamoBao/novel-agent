@@ -10,8 +10,17 @@ import { z } from "zod";
  * - consistency 前后自洽：正文内部的描述矛盾（issue 列表）
  */
 
-/** 问题类别：worldview 违背世界观 / foreshadow 伏笔未体现或误点破 / summary 偏离章节概述 / consistency 前后矛盾 */
-export const reviewIssueKindSchema = z.enum(["worldview", "foreshadow", "summary", "consistency"]);
+/**
+ * 问题类别：worldview 违背世界观 / foreshadow 伏笔未体现或误点破 / summary 偏离章节概述 /
+ * character 角色变化未按迁移计划（过早改变、缺少过渡、未保留应保留特征）/ consistency 前后矛盾
+ */
+export const reviewIssueKindSchema = z.enum([
+  "worldview",
+  "foreshadow",
+  "summary",
+  "character",
+  "consistency",
+]);
 export type ReviewIssueKind = z.infer<typeof reviewIssueKindSchema>;
 
 /** 单条问题：描述（引用正文依据）+ 改进建议 */

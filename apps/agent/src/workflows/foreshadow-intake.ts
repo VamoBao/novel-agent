@@ -5,48 +5,16 @@ import {
   type ForeshadowStore,
   type StoredForeshadow,
 } from "../state/foreshadow-store";
-import type {
-  ChapterNewForeshadow,
-  ForeshadowBinding,
-  OutlineNewForeshadow,
+import {
+  buildChapterOrder,
+  type ChapterOrderNode,
+  type ChapterNewForeshadow,
+  type ForeshadowBinding,
+  type OutlineNewForeshadow,
 } from "@novel/shared";
 
-/** buildChapterOrder 的输入节点：outlines 表当前版本行的最小形态（树形 + sort） */
-export interface ChapterOrderNode {
-  id: string;
-  parentId: string | null;
-  type: string;
-  sort: number;
-}
-
-/**
- * 全书章节全局序（纯函数，可单测）：outlines.sort 仅同父级内唯一，跨幕比较
- * 「回收章是否晚于登场章」须按「部 sort → 幕 sort → 章 sort」深度优先展开——
- * 返回 章 ID → 全局序号（1 起）的映射。
- */
-export function buildChapterOrder(nodes: readonly ChapterOrderNode[]): Map<string, number> {
-  const children = new Map<string | null, ChapterOrderNode[]>();
-  for (const node of nodes) {
-    const list = children.get(node.parentId) ?? [];
-    list.push(node);
-    children.set(node.parentId, list);
-  }
-  for (const list of children.values()) list.sort((a, b) => a.sort - b.sort);
-  const order = new Map<string, number>();
-  let index = 0;
-  const walk = (parentId: string | null): void => {
-    for (const node of children.get(parentId) ?? []) {
-      if (node.type === "chapter") {
-        index += 1;
-        order.set(node.id, index);
-      } else {
-        walk(node.id);
-      }
-    }
-  };
-  walk(null);
-  return order;
-}
+/** 全书章节全局序（实现移至 @novel/shared，供 state / client 共用）；此处转出保持既有导入路径 */
+export { buildChapterOrder, type ChapterOrderNode };
 
 export interface PlantOutlineResult {
   created: number;

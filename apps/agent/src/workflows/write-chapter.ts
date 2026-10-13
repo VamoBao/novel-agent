@@ -11,7 +11,15 @@ import { getDefaultCharacterStore, type CharacterStore } from "../state/characte
 import { getDefaultDocumentStore, type DocumentStore } from "../state/document-store";
 import { getDefaultStyleReferenceStore, type StyleReferenceStore } from "../state/style-reference-store";
 import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
+import {
+  getDefaultCharacterMigrationStore,
+  type CharacterMigrationStore,
+} from "../state/migration-store";
 import { buildChapterForeshadowContext } from "./foreshadow-context";
+import {
+  buildCharacterStateContext,
+  buildNeighborChapterContext,
+} from "./chapter-context";
 import {
   MAX_REVIEW_ROUNDS,
   formatRevisionBlock,
@@ -59,6 +67,8 @@ export interface WriteChapterOptions {
   styleReferenceStore?: StyleReferenceStore;
   /** 伏笔库；缺省 getDefaultForeshadowStore()，测试注入替身 */
   foreshadowStore?: ForeshadowStore;
+  /** 角色迁移库（本章角色状态与迁移阶段解析）；缺省 getDefaultCharacterMigrationStore() */
+  migrationStore?: CharacterMigrationStore;
 }
 
 export interface WriteChapterResult {
@@ -67,22 +77,6 @@ export interface WriteChapterResult {
   chapterName: string;
   documentId: string;
   wordCount: number;
-}
-
-/** 角色 → 紧凑的角色摘要行（正文写作的登场人物参考，控制 prompt 体积） */
-function characterDigestLine(character: {
-  basicInfo: { name: string; appearance?: string };
-  core: { narrativeRole: string; desire: string; fear: string };
-  personality?: string;
-}): string {
-  const parts = [
-    `定位：${character.core.narrativeRole}`,
-    character.basicInfo.appearance ? `外貌：${character.basicInfo.appearance}` : null,
-    character.personality ? `性格：${character.personality}` : null,
-    `渴望：${character.core.desire}`,
-    `恐惧：${character.core.fear}`,
-  ].filter((part): part is string => part !== null);
-  return `${character.basicInfo.name}（${parts.join("；")}）`;
 }
 
 /** 报告 → 一行摘要（notify 文案用）：内容 N 处、文风 X 分（或无文风要求）、自洽 M 处 */
@@ -125,6 +119,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   const documentStore = options.documentStore ?? getDefaultDocumentStore();
   const styleReferenceStore = options.styleReferenceStore ?? getDefaultStyleReferenceStore();
   const foreshadowStore = options.foreshadowStore ?? getDefaultForeshadowStore();
+  const migrationStore = options.migrationStore ?? getDefaultCharacterMigrationStore();
   const outputDir = options.outputDir ?? OUTPUT_DIR;
 
   const novel = novelStore.getNovel(novelId);
@@ -162,32 +157,33 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
     throw new Error("该小说世界观未确认（库中无记录），无法生成正文");
   }
 
-  // 同幕前后章概述：衔接上文、给下文留空间（写作模型不臆造跨章情节）
-  const siblings = outlineStore
-    .listOutlineNodes(novelId, { currentOnly: true })
-    .filter(
-      (n) => n.node.parentId === act.id && n.node.type === "chapter" && n.id !== chapter.id,
-    );
-  const previous = siblings.find((n) => n.node.sort === chapter.node.sort - 1);
-  const next = siblings.find((n) => n.node.sort === chapter.node.sort + 1);
+  // 前后章衔接：按**全书章序**解析（覆盖跨幕衔接）——上一章正文可用且不超预算时纳入，
+  // 否则回退概述；下一章只取概述（不抢写其情节）
+  const neighbors = buildNeighborChapterContext({
+    novelId,
+    chapterNodeId,
+    outlineStore,
+    documentStore,
+    outputDir,
+  });
 
   // 参考文风（可选增强，不阻塞生成）：只注入启用的样本，全部停用或未添加时零注入零通知
   const enabledStyles = styleReferenceStore
     .listStyleReferences(novelId)
     .filter((stored) => stored.styleReference.enabled);
 
-  // 登场角色注入（章节规划确认时绑定到章节点 character_ids）：按绑定过滤本章阵容，
-  // 收窄 prompt 的【登场角色参考】；未绑定（null，旧数据）或绑定的角色均已不在库中时
-  // 回退全库注入并 notify（行为与旧版一致，兜底不静默）
-  const libraryCharacters = characterStore.listCharacters(novelId);
-  const castByBoundIds =
-    chapter.node.characterIds === null
-      ? []
-      : chapter.node.characterIds
-          .map((id) => libraryCharacters.find((stored) => stored.id === id))
-          .filter((stored): stored is (typeof libraryCharacters)[number] => stored !== undefined);
-  const promptCast = castByBoundIds.length > 0 ? castByBoundIds : libraryCharacters;
-  if (castByBoundIds.length === 0 && libraryCharacters.length > 0) {
+  // 登场角色状态与迁移阶段（章节规划确认时绑定到章节点 character_ids）：基准卡 +
+  // 已结束迁移组成该章角色参考；进行中 / 结束章的变化作为独立计划块传入（不让目标新值
+  // 提前覆盖既有特征）。未绑定（null，旧数据）或绑定角色均已不在库时回退全库注入并 notify
+  const characterContext = buildCharacterStateContext({
+    novelId,
+    chapterNodeId,
+    characterStore,
+    migrationStore,
+    outlineStore,
+    castIds: chapter.node.characterIds,
+  });
+  if (characterContext.fallbackToLibrary) {
     channel.notify("🎭 本章未绑定登场角色（旧数据），已回退注入全库角色参考");
   }
 
@@ -207,6 +203,11 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
 
   // 条件附加要求（伏笔/文风）编号顺延，末条固定「只输出正文文本」——无附加条时与既有形态一致
   const extraRequirements: string[] = [];
+  if (characterContext.planCount > 0) {
+    extraRequirements.push(
+      "本章角色变化按【本章角色变化计划】推进：进行中的变化呈现渐变过程、标「本章完成」的在本章内完成转变，不得提前呈现目标状态的全部特征，也不得让角色凭空声称此前未发生的事；",
+    );
+  }
   if (hasForeshadows) {
     extraRequirements.push(
       "本章如有登场伏笔，按注意度控制显隐程度、自然带出不刻意；如有回收伏笔，呼应登场章的具体细节、不复述登场原文；",
@@ -221,6 +222,11 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   channel.notify(
     `${isRegen ? "🔄 重新生成中（将覆盖现有正文）" : "✍️ 正文生成中"}（《${novel.name ?? "未命名小说"}》· ${chapter.node.name}，写作模型）…`,
   );
+  if (characterContext.planCount > 0) {
+    channel.notify(
+      `🎭 本章角色变化计划：${characterContext.planCount} 条（进行中 / 本章完成，共 ${characterContext.characterCount} 名登场角色）`,
+    );
+  }
   if (hasForeshadows) {
     channel.notify(
       `🔮 本章伏笔：登场 ${foreshadowContext.appearCount} 条、回收 ${foreshadowContext.recoverCount} 条` +
@@ -253,8 +259,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       "【世界观】",
       JSON.stringify(storedWorldview.worldview),
       "",
-      "【登场角色参考】",
-      promptCast.map((stored) => characterDigestLine(stored.character)).join("\n") || "（暂无入库角色）",
+      ...(characterContext.lines.length > 0 ? characterContext.lines : ["【登场角色参考】", "（暂无入库角色）"]),
       "",
       "【所属部】",
       `${part.node.name}：${part.node.summary ?? "（缺部梗概）"}`,
@@ -266,11 +271,14 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       "【本章】",
       `${chapter.node.name}：${chapter.node.summary}`,
       "",
-      previous
-        ? `【上一章（衔接其结尾，不要重复叙述）】\n${previous.node.name}：${previous.node.summary}`
+      neighbors.previous
+        ? `【上一章（衔接其结尾，不要重复叙述）】\n${neighbors.previous.name}：${neighbors.previous.summary ?? "（无概述）"}` +
+          (neighbors.previousProse
+            ? `\n上一章正文（衔接其收束，不要照抄）：\n${neighbors.previousProse}`
+            : "")
         : null,
-      next
-        ? `【下一章（为其留出衔接空间，不要抢写其情节）】\n${next.node.name}：${next.node.summary}`
+      neighbors.next
+        ? `【下一章（为其留出衔接空间，不要抢写其情节）】\n${neighbors.next.name}：${neighbors.next.summary ?? "（无概述）"}`
         : null,
       // 本章伏笔插在下一章块之后、参考文风之前：核心叙事上下文区，长样本文风仍留尾部
       ...(hasForeshadows ? ["", ...foreshadowContext.lines] : []),
@@ -353,6 +361,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
         summary: chapter.node.summary ?? "",
         worldview: storedWorldview.worldview,
         foreshadowLines: foreshadowContext.lines,
+        characterLines: characterContext.lines,
         styleSamples: enabledStyles.map((stored) => ({
           name: stored.styleReference.name,
           content: stored.styleReference.content,

@@ -5,8 +5,11 @@ import type {
   AgentStartOptions,
   Character,
   CharacterEntry,
+  CharacterMigrationEntry,
+  CharacterMigrationPatch,
   Foreshadow,
   ForeshadowEntry,
+  NewCharacterMigration,
   NovelDetail,
   NovelListItem,
   StyleReferenceEntry,
@@ -46,11 +49,26 @@ contextBridge.exposeInMainWorld("agent", {
     ipcRenderer.invoke("library:setFavorite", novelId, favorite),
   deleteNovel: (novelId: string): Promise<{ deleted: string }> =>
     ipcRenderer.invoke("library:delete", novelId),
-  /** 角色管理（编辑 / 新增）：返回带 version 的角色条目（编辑旧卡快照归档、version+1；新增 version=1） */
+  /** 角色管理（新增）：返回带 version 的角色条目（version=1 即固定基准） */
   addCharacter: (novelId: string, character: Character): Promise<CharacterEntry> =>
     ipcRenderer.invoke("library:addCharacter", novelId, character),
-  updateCharacter: (novelId: string, characterId: string, character: Character): Promise<CharacterEntry> =>
-    ipcRenderer.invoke("library:updateCharacter", novelId, characterId, character),
+  /** 角色迁移管理（固定基准之上的人物变化计划）：新建 / 编辑 / 确认 / 取消 */
+  addMigration: (
+    novelId: string,
+    characterId: string,
+    input: NewCharacterMigration,
+  ): Promise<CharacterMigrationEntry> =>
+    ipcRenderer.invoke("library:addMigration", novelId, characterId, input),
+  updateMigration: (
+    novelId: string,
+    migrationId: string,
+    patch: CharacterMigrationPatch,
+  ): Promise<CharacterMigrationEntry> =>
+    ipcRenderer.invoke("library:updateMigration", novelId, migrationId, patch),
+  confirmMigration: (novelId: string, migrationId: string): Promise<CharacterMigrationEntry> =>
+    ipcRenderer.invoke("library:confirmMigration", novelId, migrationId),
+  cancelMigration: (novelId: string, migrationId: string): Promise<CharacterMigrationEntry> =>
+    ipcRenderer.invoke("library:cancelMigration", novelId, migrationId),
   updateForeshadow: (novelId: string, foreshadowId: string, foreshadow: Foreshadow): Promise<ForeshadowEntry> =>
     ipcRenderer.invoke("library:updateForeshadow", novelId, foreshadowId, foreshadow),
   /** 参考文风管理（新增 / 编辑 / 删除）：返回文风条目（删除返回被删 ID） */

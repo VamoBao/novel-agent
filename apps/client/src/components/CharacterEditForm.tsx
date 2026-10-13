@@ -106,34 +106,31 @@ function fromCharacter(character: Character): FormState {
 
 interface CharacterEditFormProps {
   novelId: string;
-  /** 编辑模式传角色条目（初始值 + 按主键更新）；缺省 = 新建模式（空表单，入库 version=1） */
-  character?: CharacterEntry;
   /** 世界观是否已确认（润色的依据；未确认时 AI 润色禁用） */
   hasWorldview: boolean;
-  /** 提交成功（编辑返回更新后条目 / 新建返回新条目） */
+  /** 提交成功（返回新建的角色条目） */
   onSubmitted: (entry: CharacterEntry) => void;
   /** 取消：退出表单，不做任何修改 */
   onCancel: () => void;
 }
 
 /**
- * 角色编辑 / 新建表单（两模式共用）：字段对齐 characterSchema，7 个必填字段
- * 空值时禁止提交并提示。三个动作——
+ * 新增角色表单：字段对齐 characterSchema，7 个必填字段空值时禁止提交并提示。三个动作——
  * - 🪄 AI 润色：以表单当前值 + 世界观经 LLM 全字段润色后回填表单（polish-result
  *   协议消息；可重复润色；不自动入库，可订阅期间取消编辑即中止 agent 会话）；
- * - 提交：zod 校验通过后经 query CLI 直写库（编辑版本化 version+1，新建 version=1）；
+ * - 提交：zod 校验通过后经 query CLI 入库（version=1，即固定基准）；
  * - 取消：退出表单零副作用。
+ *
+ * 角色首次入库后基准卡只读——后续变化一律经迁移表达（CharacterMigrationPanel），
+ * 故本表单无编辑模式（旧 update-character 路径已退役）。
  */
 export function CharacterEditForm({
   novelId,
-  character,
   hasWorldview,
   onSubmitted,
   onCancel,
 }: CharacterEditFormProps) {
-  const [form, setForm] = useState<FormState>(() =>
-    character ? fromCharacter(character) : EMPTY_FORM,
-  );
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [polishing, setPolishing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -185,7 +182,6 @@ export function CharacterEditForm({
     void window.agent.start({
       mode: "polish-character",
       novelId,
-      characterId: character?.id,
       formJson: JSON.stringify(toCharacter(form)),
     });
   };
@@ -199,10 +195,8 @@ export function CharacterEditForm({
     }
     setSubmitting(true);
     setError(null);
-    const request = character
-      ? window.agent.updateCharacter(novelId, character.id, parsed.data)
-      : window.agent.addCharacter(novelId, parsed.data);
-    request
+    window.agent
+      .addCharacter(novelId, parsed.data)
       .then((entry) => {
         onSubmitted(entry);
       })
@@ -216,7 +210,7 @@ export function CharacterEditForm({
 
   return (
     <section className="character-form">
-      <h3>{character ? `✏️ 编辑角色（第 ${character.version} 版）` : "✨ 新增角色"}</h3>
+      <h3>✨ 新增角色</h3>
       <div className="form-fields">
         {(
           [
