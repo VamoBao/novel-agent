@@ -121,6 +121,23 @@ export const characterMigrationPatchSchema = z.object({
 });
 export type CharacterMigrationPatch = z.infer<typeof characterMigrationPatchSchema>;
 
+/** 表单提交作为一次事务：新建或编辑，可同时确认；已确认记录的编辑保持生效。 */
+export const saveCharacterMigrationSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("create"), input: newCharacterMigrationSchema, confirm: z.boolean() }),
+  z.object({ action: z.literal("update"), migrationId: z.string().min(1), patch: characterMigrationPatchSchema, confirm: z.boolean() }),
+]);
+export type SaveCharacterMigration = z.infer<typeof saveCharacterMigrationSchema>;
+
+/** 被修订前的迁移状态与发生修订的时间，用于陈旧范围判定。 */
+export const characterMigrationVersionEntrySchema = z.object({
+  id: z.string().min(1),
+  migrationId: z.string().min(1),
+  revision: z.number().int().min(1),
+  migration: characterMigrationSchema,
+  createdAt: z.string(),
+});
+export type CharacterMigrationVersionEntry = z.infer<typeof characterMigrationVersionEntrySchema>;
+
 /** 迁移条目：迁移记录 + 库表主键与时间戳（查询契约与客户端清单用） */
 export const characterMigrationEntrySchema = characterMigrationSchema.extend({
   id: z.string().min(1).describe("character_migrations 表主键（UUIDv7）"),

@@ -73,3 +73,10 @@
 - `ARCHITECTURE.md`：模块架构蓝图、文件职责与依赖边界
 - `PROGRESS.md`：进度与已知 Bug（含「进行中」任务清单、「已完成」总结与「历史归档」滚动摘要；已完成仅保留最近 5 条；时间格式统一为 `YYYY-MM-DD`）
 - `DECISIONS.md`：重大决策记录（决策背景、备选方案、权衡依据与结论）
+
+
+### 角色迁移修复与测试补充（2026-10-14）
+
+角色迁移表单统一经 shared `saveCharacterMigrationSchema` → preload/main `library:saveMigration` → query `save-migration` → `CharacterMigrationStore.saveMigration` 提交，新建/编辑与确认共用 immediate 事务，失败零写入。已确认编辑须保持起始章、诱因和过渡描述完整；插入/重排/换版时在提交前检查来源与目标的同字段链，不允许破坏下游旧值依据。角色迁移详情同时返回 `migrationVersions`，陈旧提示综合当前和修订前已确认范围，覆盖取消与后移。复制为新草案不更新源行，已确认编辑显示「保存修改」；每条正文迁移计划明确角色归属。
+
+客户端新增 `CharacterMigrationPanel.interaction.test.tsx`，以仅开发依赖 happy-dom 运行真实 React 表单并接临时 SQLite；定向检查 `bun run test:character-migrations`，完整测试流程见 [docs/character-migration-testing.md](docs/character-migration-testing.md)。

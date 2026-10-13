@@ -287,6 +287,19 @@ describe("writeChapter", () => {
     });
     ctx.migrationStore.confirmMigration(NOVEL_ID, draft.id);
 
+    const secondCharacter = ctx.characterStore.addCharacter(NOVEL_ID, {
+      ...characterFixture, basicInfo: { name: "柳三" },
+    });
+    const secondMigration = ctx.migrationStore.addMigration(NOVEL_ID, secondCharacter.id, {
+      migrateField: "core.desire", newValue: "独自复仇",
+      startChapterId: ctx.chapterNodeId, endChapterId: ctx.secondChapterNodeId,
+      trigger: "失去信任", transitionGuidance: "放弃合作",
+    });
+    ctx.migrationStore.confirmMigration(NOVEL_ID, secondMigration.id);
+    ctx.outlineStore.setChapterCharacters(NOVEL_ID, [
+      { chapterId: ctx.chapterNodeId, characterIds: [character.id, secondCharacter.id] },
+    ]);
+
     const channel = new FakeChannel([]);
     generateTextCalls = [];
     generateObjectCalls = [];
@@ -307,7 +320,12 @@ describe("writeChapter", () => {
     expect(contentPrompt).toContain("【本章角色状态与变化计划（正文应遵守）】");
     expect(contentPrompt).toContain("旧值「夺回灵脉」→ 目标「守护同伴」");
     expect(contentPrompt).toContain("4. character——角色变化是否符合");
-    expect(channel.notifies.some((line) => line.includes("本章角色变化计划：1 条"))).toBe(true);
+    const plans = prompt.split("\n").filter((line) => line.includes("→ 目标"));
+    expect(plans).toHaveLength(2);
+    expect(plans.find((line) => line.includes("林恒"))).toContain("守护同伴");
+    expect(plans.find((line) => line.includes("柳三"))).toContain("独自复仇");
+    for (const plan of plans) expect(contentPrompt).toContain(plan);
+    expect(channel.notifies.some((line) => line.includes("本章角色变化计划：2 条"))).toBe(true);
   });
 
   test("无迁移时角色块只含基准卡与已结束状态（无计划块、无附加要求）", async () => {

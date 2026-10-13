@@ -66,6 +66,7 @@ const detail: NovelDetail = {
   worldview: null,
   characters: [character],
   migrations: [],
+  migrationVersions: [],
   outlineNodes: [part, act, chapter],
   documents: [],
   foreshadows: [],

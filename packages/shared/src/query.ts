@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { characterSchema } from "./character";
-import { characterMigrationEntrySchema } from "./character-migration";
+import { characterMigrationEntrySchema, characterMigrationVersionEntrySchema } from "./character-migration";
 import { foreshadowSchema } from "./foreshadow";
 import { locationSchema } from "./location";
 import { outlineNodeTypeSchema } from "./outline-node";
@@ -115,6 +115,8 @@ export const novelDetailSchema = z.object({
     .describe(
       "全部角色迁移（按角色入库序 + 序号升序，未创建为空数组；角色卡预览的迁移清单与正文生成的章节角色状态解析取用）",
     ),
+  migrationVersions: z.array(characterMigrationVersionEntrySchema).default([])
+    .describe("迁移修订前状态及修订时间；用于取消或移动迁移后判断旧正文受影响范围"),
   outlineNodes: z
     .array(outlineNodeEntrySchema)
     .describe("大纲节点（读 outlines 表当前版本，按父级分组 + sort 排序）；未生成为空数组"),

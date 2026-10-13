@@ -1,7 +1,7 @@
-import { CHARACTER_FIELD_SPECS, type NovelDetail, type OutlineNodeEntry } from "@novel/shared";
+import { CHARACTER_FIELD_SPECS, type CharacterMigration, type NovelDetail, type OutlineNodeEntry } from "@novel/shared";
 import { globalChapterOrder } from "./chapter-order";
 
-/** 影响本章的已确认迁移（章卡陈旧提示用）：该迁移在本章起生效，且确认时间晚于本章正文生成 */
+/** 当前或修改前的确认方案影响本章，且该修改晚于正文生成。 */
 export interface StaleCastMigration {
   /** 登场角色名 */
   name: string;
@@ -15,10 +15,10 @@ export interface StaleCastMigration {
  * 本章登场角色里「迁移计划已更新、正文可能落后」的那些。
  *
  * 固定基准之后人物变化经 character_migrations 表达，因此陈旧判定**按迁移的影响范围**而非
- * 角色卡更新时间：只在本章的登场角色存在**已确认迁移**、该迁移的生效区间**覆盖本章**
- * （起始章序 ≤ 本章章序），且其确认时间（updatedAt）晚于本章正文生成时间（document.updatedAt）
- * 时才提示。这样后续章节才生效的迁移不会让早期章节全部显示过时，绑定在归档旧版大纲上的
- * 迁移（本章序不可解析）也不混入新版。
+ * 角色卡更新时间：迁移最近修改时间晚于正文生成时，检查当前已确认范围和本章正文生成
+ * 之后被修改的已确认快照范围（起始章序 ≤ 本章章序）。取消、后移或换版也保留旧范围
+ * 的待复查提示；未确认草案不提示，正文在修改后重新生成则清除提示。归档版本章
+ * 不可解析，不混入当前版本。
  *
  * 只提示待复查，不做任何自动重写——已生成正文是冻结产物。
  * 未生成正文（无 document）或未绑定登场角色（旧数据）返回空：无正文即无落后问题。
@@ -41,12 +41,19 @@ export function staleCastMigrations(
     const name = nameById.get(id);
     if (name === undefined) continue;
     for (const migration of detail.migrations) {
-      if (migration.characterId !== id || migration.status !== "confirmed") continue;
-      const startOrder =
-        migration.startChapterId === null ? undefined : orderByChapter.get(migration.startChapterId);
-      // 本章序不可解析（绑定归档旧版大纲）或起始章晚于本章：本章不受该迁移影响
-      if (startOrder === undefined || startOrder > chapterOrder) continue;
-      if (migration.updatedAt > document.updatedAt) {
+      if (migration.characterId !== id || migration.updatedAt <= document.updatedAt) continue;
+      const states: CharacterMigration[] = migration.status === "confirmed" ? [migration] : [];
+      // 快照的 createdAt 是「这次修改发生的时刻」，不是旧方案的确认时刻。
+      // 取消、后移或改绑版本时，旧范围内的正文同样失去了原有写作依据。
+      states.push(...detail.migrationVersions
+        .filter((version) => version.migrationId === migration.id &&
+          version.createdAt > document.updatedAt && version.migration.status === "confirmed")
+        .map((version) => version.migration));
+      const affected = states.some((state) => {
+        const startOrder = state.startChapterId === null ? undefined : orderByChapter.get(state.startChapterId);
+        return startOrder !== undefined && startOrder <= chapterOrder;
+      });
+      if (affected) {
         stale.push({
           name,
           fieldLabel: CHARACTER_FIELD_SPECS[migration.migrateField].label,

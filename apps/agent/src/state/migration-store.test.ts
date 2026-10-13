@@ -300,6 +300,117 @@ describe("CharacterMigrationStore 确认与旧值链", () => {
 });
 
 describe("CharacterMigrationStore 重叠与依赖守卫", () => {
+  test.each([
+    { startChapterId: null, endChapterId: null },
+    { trigger: null },
+    { transitionGuidance: "   " },
+  ])("已确认迁移清空确认条件时整行与修订历史不变：%j", async (patch) => {
+    const { store, character, chapters, db } = await setup();
+    try {
+      const draft = store.addMigration(NOVEL_ID, character.id, {
+        migrateField: "personality", newValue: "谨慎",
+        startChapterId: chapters[1]!.id, endChapterId: chapters[2]!.id,
+        trigger: "背叛", transitionGuidance: "逐渐收敛",
+      });
+      const before = store.confirmMigration(NOVEL_ID, draft.id);
+      expect(() => store.updateMigration(NOVEL_ID, draft.id, patch)).toThrow();
+      expect(store.getMigration(draft.id)).toEqual(before);
+      expect(store.listMigrationVersions(draft.id)).toHaveLength(1);
+    } finally { db.close(); }
+  });
+
+  test("补入较早迁移不能改坏已确认下游的旧值，失败保持草案与快照不变", async () => {
+    const { store, character, chapters, db } = await setup();
+    try {
+      const later = store.addMigration(NOVEL_ID, character.id, {
+        migrateField: "personality", newValue: "冷漠",
+        startChapterId: chapters[6]!.id, endChapterId: chapters[7]!.id,
+        trigger: "失望", transitionGuidance: "失去信任",
+      });
+      const confirmed = store.confirmMigration(NOVEL_ID, later.id);
+      const earlier = store.addMigration(NOVEL_ID, character.id, {
+        migrateField: "personality", newValue: "谨慎",
+        startChapterId: chapters[1]!.id, endChapterId: chapters[2]!.id,
+        trigger: "背叛", transitionGuidance: "收敛",
+      });
+      expect(() => store.confirmMigration(NOVEL_ID, earlier.id)).toThrow("迁移链");
+      expect(store.getMigration(earlier.id)).toEqual(earlier);
+      expect(store.getMigration(later.id)).toEqual(confirmed);
+      expect(store.listMigrationVersions(earlier.id)).toHaveLength(0);
+    } finally { db.close(); }
+  });
+
+  test.each([false, true])("移动前置迁移跨越下游不能绕过链守卫（同时改目标：%s）", async (changeValue) => {
+    const { store, character, chapters, db } = await setup({ chapterCount: 10 });
+    try {
+      const first = store.addMigration(NOVEL_ID, character.id, {
+        migrateField: "personality", newValue: "谨慎",
+        startChapterId: chapters[1]!.id, endChapterId: chapters[2]!.id,
+        trigger: "背叛", transitionGuidance: "收敛",
+      });
+      const before = store.confirmMigration(NOVEL_ID, first.id);
+      const later = store.addMigration(NOVEL_ID, character.id, {
+        migrateField: "personality", newValue: "冷漠",
+        startChapterId: chapters[6]!.id, endChapterId: chapters[7]!.id,
+        trigger: "失望", transitionGuidance: "失去信任",
+      });
+      store.confirmMigration(NOVEL_ID, later.id);
+      expect(() => store.updateMigration(NOVEL_ID, first.id, {
+        startChapterId: chapters[8]!.id, endChapterId: chapters[9]!.id,
+        ...(changeValue ? { newValue: "勇敢" } : {}),
+      })).toThrow();
+      expect(store.getMigration(first.id)).toEqual(before);
+      expect(store.getMigration(later.id)?.migration.oldValue).toBe("谨慎");
+      expect(store.listMigrationVersions(first.id)).toHaveLength(1);
+    } finally { db.close(); }
+  });
+
+  test("不改变前后顺序的区间修改与不同字段并行仍允许", async () => {
+    const { store, character, chapters, db } = await setup();
+    try {
+      const first = store.addMigration(NOVEL_ID, character.id, {
+        migrateField: "personality", newValue: "谨慎",
+        startChapterId: chapters[1]!.id, endChapterId: chapters[2]!.id,
+        trigger: "背叛", transitionGuidance: "收敛",
+      });
+      store.confirmMigration(NOVEL_ID, first.id);
+      const later = store.addMigration(NOVEL_ID, character.id, {
+        migrateField: "personality", newValue: "冷漠",
+        startChapterId: chapters[6]!.id, trigger: "失望", transitionGuidance: "失去信任",
+      });
+      store.confirmMigration(NOVEL_ID, later.id);
+      const updated = store.updateMigration(NOVEL_ID, first.id, { endChapterId: chapters[3]!.id });
+      expect(updated.migration.endChapterId).toBe(chapters[3]!.id);
+      expect(store.getMigration(later.id)?.migration.oldValue).toBe("谨慎");
+    } finally { db.close(); }
+  });
+
+  test("把前置迁移移到新版大纲不得移除旧版下游的依据", async () => {
+    const { store, character, chapters, outlineStore, db } = await setup();
+    try {
+      const first = store.addMigration(NOVEL_ID, character.id, {
+        migrateField: "personality", newValue: "谨慎",
+        startChapterId: chapters[0]!.id, endChapterId: chapters[1]!.id,
+        trigger: "背叛", transitionGuidance: "收敛",
+      });
+      const before = store.confirmMigration(NOVEL_ID, first.id);
+      const later = store.addMigration(NOVEL_ID, character.id, {
+        migrateField: "personality", newValue: "冷漠",
+        startChapterId: chapters[4]!.id, trigger: "失望", transitionGuidance: "失去信任",
+      });
+      store.confirmMigration(NOVEL_ID, later.id);
+      outlineStore.saveOutlineTreeNewVersion(NOVEL_ID, [
+        { name: "新版部", summary: "梗概", acts: [{ name: "新版幕", summary: "梗概", keyPlotPoints: ["点"] }] },
+      ]);
+      const newAct = outlineStore.listOutlineNodes(NOVEL_ID, { currentOnly: true }).find((node) => node.node.type === "act")!;
+      const [newChapter] = outlineStore.saveChapters(NOVEL_ID, newAct.id, [{ name: "新版章", summary: "概述" }]);
+      expect(() => store.updateMigration(NOVEL_ID, first.id, { startChapterId: newChapter!.id, endChapterId: newChapter!.id })).toThrow("迁移链");
+      expect(store.getMigration(first.id)).toEqual(before);
+      expect(store.getMigration(later.id)?.migration.oldValue).toBe("谨慎");
+      expect(store.listMigrationVersions(first.id)).toHaveLength(1);
+    } finally { db.close(); }
+  });
+
   test("同字段生效区间重叠被拒；不同字段并行允许", async () => {
     const { store, character, chapters } = await setup();
     const first = store.addMigration(NOVEL_ID, character.id, {

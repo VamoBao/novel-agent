@@ -109,6 +109,7 @@ function makeDetail(
     worldview: null,
     characters: [makeCharacter("c-1", "林恒"), makeCharacter("c-2", "萧无咎")],
     migrations: [],
+    migrationVersions: [],
     outlineNodes: [part, act, makeChapter("chapter-1", 1, ["c-1"]), makeChapter("chapter-2", 2, ["c-1", "c-2"]), makeChapter("chapter-3", 3, ["c-1"])],
     documents: [],
     foreshadows: [],
@@ -119,6 +120,39 @@ function makeDetail(
 }
 
 describe("staleCastMigrations（按迁移影响范围判定）", () => {
+  test("确认后生成正文，再取消迁移：仍提示曾受影响的章", () => {
+    const confirmed = makeMigration({ updatedAt: "2026-10-01T00:00:00.000Z" });
+    const detail = makeDetail({
+      migrations: [makeMigration({ status: "cancelled", revision: 3 })],
+      migrationVersions: [{ id: "v-2", migrationId: "m-1", revision: 2, migration: confirmed, createdAt: "2026-10-05T00:00:00.000Z" }],
+      documents: [makeDocument("chapter-2", "2026-10-02T00:00:00.000Z")],
+    });
+    expect(staleCastMigrations(makeChapter("chapter-2", 2, ["c-1"]), detail)).toEqual([
+      { name: "林恒", fieldLabel: "性格", sequence: 1 },
+    ]);
+  });
+
+  test("起始章后移：原区间的已写章也需要复查，同迁移只提示一次", () => {
+    const detail = makeDetail({
+      migrations: [makeMigration({ startChapterId: "chapter-3", endChapterId: "chapter-3", revision: 3 })],
+      migrationVersions: [{ id: "v-2", migrationId: "m-1", revision: 2, migration: makeMigration(), createdAt: "2026-10-05T00:00:00.000Z" }],
+      documents: [makeDocument("chapter-2", "2026-10-02T00:00:00.000Z"), makeDocument("chapter-3", "2026-10-02T00:00:00.000Z")],
+    });
+    const expected = [{ name: "林恒", fieldLabel: "性格", sequence: 1 }];
+    expect(staleCastMigrations(makeChapter("chapter-2", 2, ["c-1"]), detail)).toEqual(expected);
+    expect(staleCastMigrations(makeChapter("chapter-3", 3, ["c-1"]), detail)).toEqual(expected);
+    expect(staleCastMigrations(makeChapter("chapter-1", 1, ["c-1"]), detail)).toEqual([]);
+  });
+
+  test("取消之后重新生成正文：历史确认快照不造成永久陈旧", () => {
+    const detail = makeDetail({
+      migrations: [makeMigration({ status: "cancelled", revision: 3 })],
+      migrationVersions: [{ id: "v-2", migrationId: "m-1", revision: 2, migration: makeMigration(), createdAt: "2026-10-05T00:00:00.000Z" }],
+      documents: [makeDocument("chapter-2", "2026-10-06T00:00:00.000Z")],
+    });
+    expect(staleCastMigrations(makeChapter("chapter-2", 2, ["c-1"]), detail)).toEqual([]);
+  });
+
   test("迁移在本章起生效且确认晚于正文：本章列入，之前的章不受影响", () => {
     const detail = makeDetail({
       migrations: [makeMigration()],

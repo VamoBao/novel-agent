@@ -8,11 +8,13 @@ import {
   newCharacterMigrationSchema,
   normalizeMigrationValue,
   readCharacterField,
+  saveCharacterMigrationSchema,
   type Character,
   type CharacterFieldPath,
   type CharacterMigration,
   type CharacterMigrationPatch,
   type NewCharacterMigration,
+  type SaveCharacterMigration,
 } from "@novel/shared";
 import { DEFAULT_DB_PATH, getDefaultDatabase, openDatabase } from "./db";
 import { CharacterStore } from "./character-store";
@@ -131,7 +133,7 @@ interface ResolvedRange {
  * - 同角色同字段的**生效区间不能重叠**（不同字段并行）；前置开放区间未结束时不能确认
  *   同字段后续变化（由重叠校验覆盖）
  * - 后续已确认迁移依赖本记录时，改变目标新值或取消本记录被拒绝（避免静默改写其变化依据）；
- *   修改诱因与过渡描述不受影响
+ *   插入 / 移动 / 换版在提交前检查完整字段链，修改诱因与过渡描述不受影响
  * - 每次编辑或状态变更前把旧行整卡 JSON 归档 character_migration_versions 并递增 revision；
  *   sequence 在角色内原子分配且不复用
  * - 基准卡不可经本层覆盖（旧 update-character 路径已退役，见 CharacterStore）
@@ -190,6 +192,24 @@ export class CharacterMigrationStore {
       migration: characterMigrationSchema.parse(JSON.parse(row.migration)),
       createdAt: row.created_at,
     }));
+  }
+
+  /** 表单保存与确认共用一个事务，任何校验失败都撤销主行、快照及序号分配。 */
+  saveMigration(novelId: string, characterId: string, request: SaveCharacterMigration): StoredCharacterMigration {
+    const validated = saveCharacterMigrationSchema.parse(request);
+    return this.db.transaction(() => {
+      this.requireCharacter(novelId, characterId);
+      if (validated.action === "update") {
+        const current = this.requireMigration(novelId, validated.migrationId);
+        if (current.migration.characterId !== characterId) throw new Error("迁移记录不属于该角色");
+      }
+      const saved = validated.action === "create"
+        ? this.addMigration(novelId, characterId, validated.input)
+        : this.updateMigration(novelId, validated.migrationId, validated.patch);
+      return validated.confirm && saved.migration.status === "draft"
+        ? this.confirmMigration(novelId, saved.id)
+        : saved;
+    }).immediate();
   }
 
   /**
@@ -296,9 +316,11 @@ export class CharacterMigrationStore {
       );
 
       if (m.status === "confirmed") {
+        this.assertConfirmationFields(startChapterId, trigger, transitionGuidance);
         // 后续已确认迁移依赖本记录时，改变目标新值被拒绝（其变化依据由本记录派生）
         if (newValue !== m.newValue) {
-          this.assertNoDependents(novelId, id, m.characterId, m.migrateField, range);
+          const originalRange = this.resolveRange(novelId, m.startChapterId, m.endChapterId, m.outlineVersion);
+          this.assertNoDependents(novelId, id, m.characterId, m.migrateField, originalRange);
         }
         this.assertNoOverlap(novelId, id, m.characterId, m.migrateField, range);
       }
@@ -319,6 +341,12 @@ export class CharacterMigrationStore {
           new Date().toISOString(),
           id,
         );
+      if (m.status === "confirmed") {
+        this.assertChainConsistency(novelId, m.characterId, m.migrateField, m.outlineVersion);
+        if (range.outlineVersion !== m.outlineVersion) {
+          this.assertChainConsistency(novelId, m.characterId, m.migrateField, range.outlineVersion);
+        }
+      }
       return this.getMigrationOrThrow(id);
     });
     return apply();
@@ -334,9 +362,7 @@ export class CharacterMigrationStore {
       const m = current.migration;
       if (m.status === "confirmed") throw new Error("迁移已确认，无需重复确认");
       if (m.status === "cancelled") throw new Error("已取消的迁移不能确认");
-      if (m.startChapterId === null) throw new Error("确认生效前必须绑定起始章");
-      if (m.trigger === null) throw new Error("确认生效前必须填写诱因（变化目的）");
-      if (m.transitionGuidance === null) throw new Error("确认生效前必须填写过渡描述");
+      this.assertConfirmationFields(m.startChapterId, m.trigger, m.transitionGuidance);
       this.assertFieldValue(m.migrateField, m.newValue);
 
       const range = this.resolveRange(novelId, m.startChapterId, m.endChapterId, m.outlineVersion);
@@ -370,6 +396,7 @@ export class CharacterMigrationStore {
           new Date().toISOString(),
           id,
         );
+      this.assertChainConsistency(novelId, m.characterId, m.migrateField, range.outlineVersion);
       return this.getMigrationOrThrow(id);
     });
     return confirm();
@@ -438,6 +465,42 @@ export class CharacterMigrationStore {
   private assertFieldValue(field: CharacterFieldPath, value: string | null): void {
     const error = migrationValueError(field, value);
     if (error) throw new Error(error);
+  }
+
+  private assertConfirmationFields(
+    startChapterId: string | null,
+    trigger: string | null,
+    transitionGuidance: string | null,
+  ): void {
+    if (startChapterId === null) throw new Error("确认生效前必须绑定起始章");
+    if (trigger === null) throw new Error("确认生效前必须填写诱因（变化目的）");
+    if (transitionGuidance === null) throw new Error("确认生效前必须填写过渡描述");
+  }
+
+  /** 写入后、提交前校验整个同字段链；插入/重排/换版不能静默改变已确认下游的依据。 */
+  private assertChainConsistency(
+    novelId: string,
+    characterId: string,
+    field: CharacterFieldPath,
+    outlineVersion: number | null,
+  ): void {
+    if (outlineVersion === null) return;
+    const positions = this.chapterPositions(novelId);
+    const chain = this.sameChain(novelId, characterId, field, outlineVersion)
+      .filter((stored) => stored.migration.status === "confirmed")
+      .map((stored) => {
+        const position = positions.get(stored.migration.startChapterId ?? "");
+        if (!position) throw new Error(`迁移链的已确认迁移（序号 ${stored.migration.sequence}）缺少有效起始章`);
+        return { stored, order: position.order };
+      })
+      .sort((a, b) => a.order - b.order);
+    let expected = readCharacterField(this.requireCharacter(novelId, characterId).character, field);
+    for (const { stored: { migration } } of chain) {
+      if (migration.oldValue !== expected) {
+        throw new Error(`迁移链发生变化：已确认迁移（序号 ${migration.sequence}）的旧值依据不一致，请先处理后续迁移`);
+      }
+      expected = migration.newValue;
+    }
   }
 
   private nextSequence(characterId: string): number {

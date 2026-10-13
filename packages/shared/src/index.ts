@@ -9,6 +9,8 @@ export {
   newCharacterMigrationSchema,
   characterMigrationPatchSchema,
   characterMigrationEntrySchema,
+  characterMigrationVersionEntrySchema,
+  saveCharacterMigrationSchema,
   normalizeMigrationValue,
   migrationValueError,
   readCharacterField,
@@ -19,6 +21,8 @@ export {
   type NewCharacterMigration,
   type CharacterMigrationPatch,
   type CharacterMigrationEntry,
+  type CharacterMigrationVersionEntry,
+  type SaveCharacterMigration,
 } from "./character-migration";
 export { locationSchema, newLocationSchema, type Location, type NewLocation } from "./location";
 export {

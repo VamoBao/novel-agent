@@ -26,6 +26,7 @@ import {
   cancelMigrationEntry,
   confirmMigrationEntry,
   setNovelPinned,
+  saveMigrationEntry,
   updateForeshadowEntry,
   updateMigrationEntry,
   updateStyleEntry,
@@ -513,6 +514,99 @@ describe("query CLI 角色迁移（add / update / confirm / cancel + 详情契�
     return { db, novelId, chapters, character };
   }
 
+  test("原子新建并确认：失败零行零快照，重试不会重复草案或消耗序号", async () => {
+    const { db, novelId, chapters, character } = await migrationFixture();
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        expect(() => saveMigrationEntry(db, novelId, character.id, JSON.stringify({
+          action: "create", input: { migrateField: "personality", newValue: "谨慎" }, confirm: true,
+        }))).toThrow("起始章");
+        expect(buildNovelDetail(db, novelId).migrations).toHaveLength(0);
+        expect(buildNovelDetail(db, novelId).migrationVersions).toHaveLength(0);
+      }
+      const confirmed = saveMigrationEntry(db, novelId, character.id, JSON.stringify({
+        action: "create", input: {
+          migrateField: "personality", newValue: "谨慎", startChapterId: chapters[0]!.id,
+          trigger: "背叛", transitionGuidance: "收敛",
+        }, confirm: true,
+      }));
+      expect(confirmed).toMatchObject({ status: "confirmed", sequence: 1, revision: 2, oldValue: "热情" });
+      expect(buildNovelDetail(db, novelId).migrations).toHaveLength(1);
+    } finally { db.close(); }
+  });
+
+  test("原子编辑并确认的重叠校验失败：草案整行与既有历史都回滚", async () => {
+    const { db, novelId, chapters, character } = await migrationFixture();
+    try {
+      saveMigrationEntry(db, novelId, character.id, JSON.stringify({
+        action: "create", input: {
+          migrateField: "personality", newValue: "谨慎", startChapterId: chapters[0]!.id,
+          endChapterId: chapters[1]!.id, trigger: "背叛", transitionGuidance: "收敛",
+        }, confirm: true,
+      }));
+      const draft = addMigrationEntry(db, novelId, character.id, JSON.stringify({ migrateField: "personality", newValue: "冷漠" }));
+      const before = buildNovelDetail(db, novelId);
+      expect(() => saveMigrationEntry(db, novelId, character.id, JSON.stringify({
+        action: "update", migrationId: draft.id, patch: {
+          newValue: "多疑", startChapterId: chapters[1]!.id,
+          trigger: "失望", transitionGuidance: "失去信任",
+        }, confirm: true,
+      }))).toThrow("重叠");
+      const after = buildNovelDetail(db, novelId);
+      expect(after.migrations).toEqual(before.migrations);
+      expect(after.migrationVersions).toEqual(before.migrationVersions);
+    } finally { db.close(); }
+  });
+
+  test("原子编辑已确认记录保持确认状态，取消后详情携带确认快照", async () => {
+    const { db, novelId, chapters, character } = await migrationFixture();
+    try {
+      const confirmed = saveMigrationEntry(db, novelId, character.id, JSON.stringify({
+        action: "create", input: {
+          migrateField: "personality", newValue: "谨慎", startChapterId: chapters[0]!.id,
+          trigger: "背叛", transitionGuidance: "收敛",
+        }, confirm: true,
+      }));
+      const edited = saveMigrationEntry(db, novelId, character.id, JSON.stringify({
+        action: "update", migrationId: confirmed.id, patch: { trigger: "背叛与孤立" }, confirm: true,
+      }));
+      expect(edited).toMatchObject({ status: "confirmed", revision: 3, trigger: "背叛与孤立" });
+      cancelMigrationEntry(db, novelId, confirmed.id);
+      const detail = buildNovelDetail(db, novelId);
+      expect(detail.migrationVersions).toHaveLength(3);
+      expect(detail.migrationVersions[2]).toMatchObject({ migrationId: confirmed.id, revision: 3, migration: { status: "confirmed", trigger: "背叛与孤立" } });
+    } finally { db.close(); }
+  });
+
+  test("原子提交不得更新另一个角色的迁移，载荷不合法也零写入", async () => {
+    const { db, novelId, character } = await migrationFixture();
+    try {
+      const other = new CharacterStore(db).addCharacter(novelId, { ...character.character, basicInfo: { name: "其他角色" } });
+      const draft = addMigrationEntry(db, novelId, character.id, JSON.stringify({ migrateField: "personality", newValue: "谨慎" }));
+      expect(() => saveMigrationEntry(db, novelId, other.id, JSON.stringify({ action: "update", migrationId: draft.id, patch: { newValue: "冷漠" }, confirm: false }))).toThrow("不属于该角色");
+      expect(() => saveMigrationEntry(db, novelId, character.id, JSON.stringify({ action: "update", patch: {}, confirm: true }))).toThrow("不合法");
+      expect(buildNovelDetail(db, novelId).migrations).toEqual([draft]);
+      expect(buildNovelDetail(db, novelId).migrationVersions).toHaveLength(0);
+    } finally { db.close(); }
+  });
+
+  test("save-migration 真实 CLI 往返：合法提交入库，重叠失败不残留新草案", async () => {
+    const { db, novelId, character, chapters } = await migrationFixture();
+    const dbPath = db.filename;
+    db.close();
+    const run = (request: unknown) => execFileSync("bun", [join(import.meta.dir, "query.ts"), "save-migration", novelId, character.id, JSON.stringify(request)], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NOVEL_DB_PATH: dbPath },
+    });
+    const request = { action: "create", input: { migrateField: "personality", newValue: "谨慎", startChapterId: chapters[0]!.id, trigger: "背叛", transitionGuidance: "收敛" }, confirm: true };
+    expect(JSON.parse(run(request))).toMatchObject({ status: "confirmed", oldValue: "热情" });
+    expect(() => run(request)).toThrow();
+    const reopened = openDatabase(dbPath);
+    try {
+      expect(buildNovelDetail(reopened, novelId).migrations).toHaveLength(1);
+      expect(buildNovelDetail(reopened, novelId).migrationVersions).toHaveLength(1);
+    } finally { reopened.close(); }
+  });
+
   test("add-migration 新建草案：旧值服务端派生，详情契约返回迁移", async () => {
     const { db, novelId, chapters, character } = await migrationFixture();
     const draft = addMigrationEntry(
@@ -606,13 +700,16 @@ describe("query CLI 角色迁移（add / update / confirm / cancel + 详情契�
     db.close();
   });
 
-  test("update-character 命令已退役：基准卡不可直接编辑", () => {
+  test("update-character 命令已退役：基准卡不可直接编辑", async () => {
     // 经真实 CLI 子进程调用（其余命令走导出函数，此处验证命令入口的显式拒绝语义）
     const script = join(import.meta.dir, "query.ts");
+    const { db, dir } = await newFixture();
+    db.close();
     try {
       execFileSync("bun", ["run", script, "update-character", "novel", "char", "{}"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, NOVEL_DB_PATH: join(dir, "test.db") },
       });
       throw new Error("应当以非零退出");
     } catch (error) {

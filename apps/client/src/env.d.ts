@@ -10,6 +10,7 @@ import type {
   Foreshadow,
   ForeshadowEntry,
   NewCharacterMigration,
+  SaveCharacterMigration,
   NovelDetail,
   NovelListItem,
   StyleReferenceEntry,
@@ -35,6 +36,7 @@ declare global {
         characterId: string,
         input: NewCharacterMigration,
       ) => Promise<CharacterMigrationEntry>;
+      saveMigration: (novelId: string, characterId: string, request: SaveCharacterMigration) => Promise<CharacterMigrationEntry>;
       updateMigration: (
         novelId: string,
         migrationId: string,

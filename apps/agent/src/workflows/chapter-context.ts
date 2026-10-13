@@ -226,6 +226,7 @@ export function buildCharacterStateContext(
           effective = applyCharacterField(effective, field, current.migration.oldValue);
           plans.push(
             describePlan(
+              stored.character.basicInfo.name,
               current.migration,
               migrationPhaseAt(current.start, current.end, position.order),
               current.start,
@@ -271,6 +272,7 @@ export function buildCharacterStateContext(
 
 /** 单条迁移计划块（含阶段、区间、诱因与过渡描述；创作指导字段附声明） */
 function describePlan(
+  characterName: string,
   migration: CharacterMigration,
   phase: MigrationPhase,
   startOrder: number,
@@ -285,7 +287,7 @@ function describePlan(
         ? `第 ${startOrder} 章起至第 ${endOrder} 章（本章完成）`
         : `第 ${startOrder} 章起至第 ${endOrder} 章`;
   const phaseLabel = phase === "ending" ? "本章完成变化" : "进行中";
-  const head = `- ${spec.label}（${phaseLabel}，${range}）：旧值「${migration.oldValue ?? "（未设定）"}」→ 目标「${migration.newValue ?? "（未设定）"}」`;
+  const head = `- ${characterName} · ${spec.label}（${phaseLabel}，${range}）：旧值「${migration.oldValue ?? "（未设定）"}」→ 目标「${migration.newValue ?? "（未设定）"}」`;
   const body = [
     migration.trigger ? `  诱因：${migration.trigger}` : null,
     migration.transitionGuidance ? `  过渡描述：${migration.transitionGuidance}` : null,

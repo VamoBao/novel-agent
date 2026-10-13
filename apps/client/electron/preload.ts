@@ -10,6 +10,7 @@ import type {
   Foreshadow,
   ForeshadowEntry,
   NewCharacterMigration,
+  SaveCharacterMigration,
   NovelDetail,
   NovelListItem,
   StyleReferenceEntry,
@@ -53,6 +54,8 @@ contextBridge.exposeInMainWorld("agent", {
   addCharacter: (novelId: string, character: Character): Promise<CharacterEntry> =>
     ipcRenderer.invoke("library:addCharacter", novelId, character),
   /** 角色迁移管理（固定基准之上的人物变化计划）：新建 / 编辑 / 确认 / 取消 */
+  saveMigration: (novelId: string, characterId: string, request: SaveCharacterMigration): Promise<CharacterMigrationEntry> =>
+    ipcRenderer.invoke("library:saveMigration", novelId, characterId, request),
   addMigration: (
     novelId: string,
     characterId: string,

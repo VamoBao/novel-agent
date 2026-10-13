@@ -269,3 +269,8 @@ apps/agent/src/workflows/
 ## 小说创作条件的持久化边界
 
 createNovel 在类型选择、受众多选与补充、核心冲突归一化展示完成时，分别调用 NovelStore.updateNovel 保存 genre / audience / coreConflict；后续中止不撤回已采集结果。regenerateOutline 从小说行读取各非 null 条件传入 OutlineContext；旧小说缺失项省略，沿用大纲 Agent 缺省策略。共享字段 schema、JSON 编解码、迁移与详情契约见根 ARCHITECTURE.md。
+
+
+## 角色迁移回归边界（2026-10-14）
+
+`chapter-context.describePlan` 每条计划带角色基准姓名，保证同章多角色、同字段且相同旧值时仍可识别归属。`write-chapter` 与内容审校继续消费同一份行列表；集成测试检查两名角色的目标同时出现在写作与审校请求中。迁移链拒绝与原子表单提交由 state/query 负责，陈旧范围由客户端消费修订快照负责，不进入正文生成状态。测试矩阵与真实模型人工验收见根目录 `docs/character-migration-testing.md`，定向入口为 `bun run test:character-migrations`。

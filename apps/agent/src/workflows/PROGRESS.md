@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-14 [fix] 角色迁移审查修复（完整范围见根 PROGRESS）：每条进行中/结束章计划标明角色归属；写作与内容审校同源请求集成测试扩展为两角色、同字段、相同旧值、不同目标；纯函数回归覆盖计划归属。库层原子确认/链一致性与客户端真实表单/陈旧范围回归见根记录。AC：定向 177 / 全量 477 通过，typecheck / lint 通过，独立复审无必须修复问题；测试流程见 docs/character-migration-testing.md。
+
 - 2026-10-13 [feat] 固定角色基准与角色迁移（跨模块需求，任务包 `temp/2026-10-13-character-migrations-task-package.md`，完整决策与 AC 见根 PROGRESS / DECISIONS）：**本模块**——新建 `chapter-context.ts` 纯函数模块（`buildCharacterStateContext` 角色状态与迁移阶段：四阶段相对目标章计算、基准卡+已结束迁移组成参考、进行中/结束章变化进独立计划块、创作指导字段声明、只取同全书大纲版本已确认迁移；`buildNeighborChapterContext` 全书章序跨幕前后章 + 上一章正文 8000 字符预算回退；`migrationPhaseAt` 纯函数）；write-chapter 以角色块替换原全库角色摘要行、前后章改按全书章序（可跨幕）、写作要求增角色变化计划条件条（编号顺延于伏笔/文风之前）、校验 ① 传入同源 characterLines；chapter-review ① 增 character 维度（过早改变 / 缺少过渡 / 未保留应保留特征）；foreshadow-intake 的 buildChapterOrder 上收至 @novel/shared 后转出（导入路径不变）。净增 chapter-context 12 条单测，write-chapter 集成 +3、chapter-review +1
 
 - 2026-10-13 [feat] 角色编辑陈旧可见性（跨模块需求，方案 2 经用户选定，完整决策与 AC 见根 PROGRESS / DECISIONS）：**本模块**——CharacterStore 补 updatedAt 全链路（add 即 created_at、update 刷新且与快照 created_at 同刻）；迁移 17→18 补 characters.updated_at 并按末次编辑快照时间回填（另修正 16→17 段写 SCHEMA_VERSION 导致链式直升短路后续段的隐患）；write-chapter / plan-act-chapters 等消费链路零改动（陈旧判定在客户端按时间戳比对，不进生成上下文）。净增 character-store 2 条单测 + 迁移 1 条
@@ -16,9 +18,9 @@
 
 - 2026-10-12 [feat] 小说创作条件入库与复用：createNovel 在类型/受众/核心冲突各阶段完成后立即更新 novels；regenerateOutline 读取 genre / audience / coreConflict，历史 null 项省略；outline-agent 注释同步。新建 6 项与重生成 5 项集成测试通过（覆盖中止后重开及原条件复用），完整跨模块验证与决策见根 PROGRESS.md / DECISIONS.md。
 
-- 2026-10-12 [feat] 正文校验阶段结束即时回传单项结果；主任务清单、验证结果与全量测试环境限制见仓库根目录 `PROGRESS.md`。
-
 ## 历史归档
+
+- 2026-10-12 [feat] 正文校验阶段结束即时回传单项结果；主任务清单、验证结果与全量测试环境限制见仓库根目录 `PROGRESS.md`。（完整实现与验收见对应提交。）
 
 - 2026-10-12 [feat] 章节正文重新生成——覆盖替换 + 弹框确认（跨模块需求，设计规格 `docs/superpowers/specs/2026-10-12-chapter-regen-design.md` + 实现计划 `docs/superpowers/plans/2026-10-12-chapter-regen.md`，4 任务逐一实现后清单归一；两项决策经用户确认：旧正文覆盖替换 / 弹框确认，决策见根 DECISIONS）：**本模块仅 write-chapter.ts 改动**——前置校验移除「已有正文」拒绝（getDocumentByChapter 有行即 isRegen 分流：notify「🔄 重新生成中（将覆盖现有正文）」、落库走 replaceChapterDocument 覆盖替换、事务提交后清理旧正文文件——路径相同跳过防误删、幂等容忍缺失；任一环节失败回滚删新文件旧正文零影响）；生成与校验流程与首次生成完全一致（同一会话、协议与 headless 零改动）。document-store replaceChapterDocument 与客户端重生成入口/弹框见根 PROGRESS 当日条目。AC：typecheck 3 工程 / lint / 361 用例全过（本模块净增 3 条重生成集成用例——覆盖替换成功 / 库故障回滚 / 校验抛错保旧；前置校验用例「已有正文拒绝」随行为翻转移除，既有用例全数保留）；真实端到端待用户复验
 - 2026-10-12 [feat] 章节正文生成校验-修订闭环（跨模块需求，设计规格 `docs/superpowers/specs/2026-10-12-chapter-review-loop-design.md` + 实现计划 `docs/superpowers/plans/2026-10-12-chapter-review-loop.md`，6 任务逐一实现后清单归一；三项决策经用户确认：3 轮上限仍未达标保底保存最后一版并警告 / 校验模型用 Agent 会话模型 deepseek / 修订式重写，决策见根 DECISIONS）：**本模块净增 chapter-review.ts 校验 subAgent（reviewChapter 三段独立单轮 generateObject——①内容约束（世界观/章节概述/本章伏笔同源 lines）②文风相似度（≥90 合格、无启用样本 skipped 段事件零发送）③前后自洽（仅正文、kind 代码补全）+ isReportPassing + formatRevisionBlock；reviewModel 与 onProgress 注入、异常直接抛错）与 write-chapter.ts 循环化改造（生成段包进 3 轮循环、修订轮 prompt 追加【上一版正文】+【整改报告】块、3 轮保底保存警告、Options 增 reviewModel/onProgress 注入）**；shared review schema 与 write-progress 协议、headless 接线与 Key 检查收窄（write-chapter 自此始终要求 DEEPSEEK_API_KEY）、客户端进度区块见根 PROGRESS 当日条目。AC：typecheck 3 工程 / lint / 355 用例全过（本模块净增 13：chapter-review 8 + write-chapter 集成 5，既有 334 全数保留——初稿 prompt 逐字节回归、伏笔/文风注入用例全保留）；真实 LLM / 写作模型端到端待用户复验
@@ -52,3 +54,8 @@
 - 历史版本浏览 / 切换 UI：重生成归档的旧版行仅存于库（listOutlineNodes currentOnly 不见），客户端无查看/回切界面
 - NovelState 整体 SQLite 化：state 仍为内存态（`memoryNovelStateStore`），`store` 已参数化可直接替换实现
 - 未来写作工作流：按章节概述生成正文并经 `document_id` 关联（documents 表落地后补外键）
+
+
+## 流程复盘记录
+
+- 2026-10-14 初版角色迁移上下文只验单角色，未验证多角色同字段计划的归属。现扩展纯函数与写作/审校请求集成测试，明确两名角色使用相同旧值、不同目标；矩阵与测试隔离规范见根目录 docs/character-migration-testing.md。

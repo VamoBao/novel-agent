@@ -1187,4 +1187,37 @@ describe("openDatabase 迁移（SCHEMA_VERSION 19）", () => {
       raw.close();
     }
   });
+
+  test("v18 历史表缺失但有编辑角色：拒绝升级且 DDL 和角色整行回滚", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-db-missing-history-"));
+    tempDirs.push(dir);
+    const path = join(dir, "v18.db");
+    createV18Db(path);
+    const legacy = new Database(path);
+    legacy.exec("DROP TABLE character_versions;");
+    const before = legacy.query("SELECT * FROM characters ORDER BY id").all();
+    legacy.close();
+    expect(() => openDatabase(path)).toThrow("char-edited");
+    const raw = new Database(path);
+    try {
+      expect(raw.query("PRAGMA user_version").get()).toEqual({ user_version: 18 });
+      expect(raw.query("SELECT * FROM characters ORDER BY id").all()).toEqual(before);
+      expect(raw.query("SELECT name FROM sqlite_master WHERE name = 'character_migrations'").get()).toBeNull();
+    } finally { raw.close(); }
+  });
+
+  test("v18 历史表缺失且所有角色均首版：允许升级并保持基准", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-db-no-edited-history-"));
+    tempDirs.push(dir);
+    const path = join(dir, "v18.db");
+    createV18Db(path);
+    const legacy = new Database(path);
+    legacy.exec("DROP TABLE character_versions; DELETE FROM characters WHERE version > 1;");
+    legacy.close();
+    const db = openDatabase(path);
+    try {
+      expect(db.query("SELECT name, version FROM characters").all()).toEqual([{ name: "未改角色", version: 1 }]);
+      expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 19 });
+    } finally { db.close(); }
+  });
 });

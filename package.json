@@ -12,6 +12,7 @@
     "dev:client": "bun run --cwd apps/client dev",
     "headless": "bun run apps/agent/src/headless.ts",
     "test": "bun test apps/agent packages/shared apps/client",
+    "test:character-migrations": "bun test packages/shared/src/character-migration.test.ts packages/shared/src/query.test.ts apps/agent/src/state/db.test.ts apps/agent/src/state/migration-store.test.ts apps/agent/src/query.test.ts apps/agent/src/workflows/chapter-context.test.ts apps/agent/src/workflows/write-chapter.test.ts apps/agent/src/workflows/chapter-review.test.ts apps/client/src/character-staleness.test.ts apps/client/src/components/CharacterMigrationPanel.test.tsx apps/client/src/components/CharacterMigrationPanel.interaction.test.tsx",
     "lint": "eslint .",
     "typecheck": "tsc -p apps/agent/tsconfig.json && tsc -p packages/shared/tsconfig.json && tsc -p apps/client/tsconfig.json"
   },

@@ -69,8 +69,16 @@ function migrateCharactersToMigrations(db: Database): void {
       .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
       .get(name) !== null;
   // 非完整形态的旧库（异常版本兜底重建路径 / 早期最小化夹具）没有角色表：无数据可导入。
-  // character_versions 缺失时不可能存在 version>1 的角色（两表同段落地），同样直接跳过
-  if (!tableExists("characters") || !tableExists("character_versions")) return;
+  if (!tableExists("characters")) return;
+  if (!tableExists("character_versions")) {
+    const edited = db.query("SELECT id FROM characters WHERE version > 1 LIMIT 1").get() as
+      | { id: string }
+      | null;
+    if (edited) {
+      throw new Error(`角色 ${edited.id} 缺少第一版快照：character_versions 历史表不存在`);
+    }
+    return;
+  }
 
   interface LegacyCharacterRow {
     id: string;

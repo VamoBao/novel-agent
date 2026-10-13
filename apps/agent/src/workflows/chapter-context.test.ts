@@ -152,6 +152,28 @@ describe("migrationPhaseAt（纯函数四阶段与开放区间）", () => {
 });
 
 describe("buildCharacterStateContext 阶段解析", () => {
+  test("同章两个角色同字段迁移的计划各自标明角色，目标不会混在匿名清单", async () => {
+    const f = await fixture();
+    const second = f.characterStore.addCharacter(NOVEL_ID, makeCharacter("柳三"));
+    plantConfirmed(f, { migrateField: "personality", newValue: "谨慎", startIndex: 1, endIndex: 4 });
+    const draft = f.migrationStore.addMigration(NOVEL_ID, second.id, {
+      migrateField: "personality", newValue: "冷漠",
+      startChapterId: f.chapters[1]!.id, endChapterId: f.chapters[4]!.id,
+      trigger: "受到打击", transitionGuidance: "逐渐变化",
+    });
+    f.migrationStore.confirmMigration(NOVEL_ID, draft.id);
+    const context = buildCharacterStateContext({
+      novelId: NOVEL_ID, chapterNodeId: f.chapters[2]!.id,
+      characterStore: f.characterStore, migrationStore: f.migrationStore,
+      outlineStore: f.outlineStore, castIds: [f.character.id, second.id],
+    });
+    const planLines = context.lines.join("\n").split("\n").filter((line) => line.includes("→ 目标"));
+    expect(planLines).toHaveLength(2);
+    expect(planLines.find((line) => line.includes("陈默"))).toContain("谨慎");
+    expect(planLines.find((line) => line.includes("柳三"))).toContain("冷漠");
+    f.db.close();
+  });
+
   test("基准『热情』→ 第 2 章起、第 5 章结束、目标『谨慎』：各章参考与计划块正确", async () => {
     const f = await fixture();
     plantConfirmed(f, { migrateField: "personality", newValue: "谨慎", startIndex: 1, endIndex: 4 });

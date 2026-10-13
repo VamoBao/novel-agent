@@ -20,6 +20,7 @@ import {
   type Foreshadow,
   type ForeshadowEntry,
   type NewCharacterMigration,
+  type SaveCharacterMigration,
   type NovelDetail,
   type NovelListItem,
   type StyleReferenceEntry,
@@ -416,6 +417,12 @@ function handleMigrationMutation(args: string[]): Promise<CharacterMigrationEntr
     return result.data;
   });
 }
+
+ipcMain.handle(
+  "library:saveMigration",
+  (_event, novelId: string, characterId: string, request: SaveCharacterMigration): Promise<CharacterMigrationEntry> =>
+    handleMigrationMutation(["save-migration", novelId, characterId, JSON.stringify(request)]),
+);
 
 ipcMain.handle(
   "library:addMigration",

@@ -5,7 +5,6 @@ import {
   type CharacterEntry,
   type CharacterFieldPath,
   type CharacterMigrationEntry,
-  type CharacterMigrationPatch,
   type CharacterMigrationStatus,
   type NovelDetail,
 } from "@novel/shared";
@@ -49,7 +48,7 @@ function fromMigration(entry: CharacterMigrationEntry): MigrationFormState {
   };
 }
 
-/** 空表单（复制为新草案：只带字段与目标值，章节与诱因留待作者重新填写） */
+/** 复制方案保留字段、目标与创作指导，清空章节供作者重新安排。 */
 function copyAsDraft(entry: CharacterMigrationEntry): MigrationFormState {
   return {
     ...EMPTY_FORM,
@@ -76,8 +75,8 @@ interface MigrationFormProps {
 
 /**
  * 迁移编辑 / 新建表单：字段（新建时可改，编辑态只读）、目标值、起止章、诱因与过渡描述；
- * 旧值只读（服务端派生）。两个提交动作——「保存草案」只落库，「确认生效」先落库再确认
- * （必填项与区间校验在服务端，错误原样回显）。
+ * 旧值只读（服务端派生）。草案可保存或原子保存并确认；已确认记录仅保存修改。
+ * 必填项、区间与全链校验由服务端复核，失败零写入并原样回显错误。
  */
 function MigrationForm({
   novelId,
@@ -116,8 +115,8 @@ function MigrationForm({
     return null;
   };
 
-  /** 落库（新建走 addMigration、编辑走 updateMigration），返回迁移条目 */
-  const persist = async (): Promise<CharacterMigrationEntry> => {
+  /** 保存与确认是一笔提交；校验失败不会留下草案或部分编辑。 */
+  const persist = async (confirm: boolean): Promise<CharacterMigrationEntry> => {
     const values = {
       newValue: form.newValue.trim().length > 0 ? form.newValue.trim() : null,
       startChapterId: form.startChapterId || null,
@@ -127,12 +126,12 @@ function MigrationForm({
         form.transitionGuidance.trim().length > 0 ? form.transitionGuidance.trim() : null,
     };
     if (entry) {
-      const patch: CharacterMigrationPatch = values;
-      return window.agent.updateMigration(novelId, entry.id, patch);
+      return window.agent.saveMigration(novelId, characterId, {
+        action: "update", migrationId: entry.id, patch: values, confirm,
+      });
     }
-    return window.agent.addMigration(novelId, characterId, {
-      migrateField: form.migrateField,
-      ...values,
+    return window.agent.saveMigration(novelId, characterId, {
+      action: "create", input: { migrateField: form.migrateField, ...values }, confirm,
     });
   };
 
@@ -144,13 +143,8 @@ function MigrationForm({
     }
     setBusy(true);
     setError(null);
-    persist()
-      .then(async (saved) => {
-        if (action === "confirm") {
-          await window.agent.confirmMigration(novelId, saved.id);
-        }
-        onDone();
-      })
+    persist(action === "confirm")
+      .then(() => onDone())
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false));
   };
@@ -250,12 +244,14 @@ function MigrationForm({
       </p>
       {error ? <p className="form-error">{error}</p> : null}
       <div className="form-actions">
-        <button disabled={busy} onClick={() => run("save")}>
-          {busy ? "提交中…" : "💾 保存草案"}
+        <button className={entry?.status === "confirmed" ? "primary" : undefined} disabled={busy} onClick={() => run("save")}>
+          {busy ? "提交中…" : entry?.status === "confirmed" ? "💾 保存修改" : "💾 保存草案"}
         </button>
-        <button className="primary" disabled={busy} onClick={() => run("confirm")}>
-          ✅ 确认生效
-        </button>
+        {entry?.status !== "confirmed" ? (
+          <button className="primary" disabled={busy} onClick={() => run("confirm")}>
+            ✅ 确认生效
+          </button>
+        ) : null}
         <button disabled={busy} onClick={onCancel}>
           取消
         </button>
@@ -284,9 +280,9 @@ export function CharacterMigrationPanel({
   detail,
   onChanged,
 }: CharacterMigrationPanelProps) {
-  /** null = 清单态；"new" = 新建；条目 = 编辑该条；{entry, initial} = 复制为新草案 */
+  /** 复制属于新建态，源记录仅提供初始值，绝不作为更新目标。 */
   const [editing, setEditing] = useState<
-    null | "new" | { entry: CharacterMigrationEntry; initial?: MigrationFormState }
+    null | { mode: "new"; initial?: MigrationFormState } | { mode: "edit"; entry: CharacterMigrationEntry }
   >(null);
   const [rowError, setRowError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -310,14 +306,14 @@ export function CharacterMigrationPanel({
   };
 
   if (editing !== null) {
-    const entry = editing === "new" ? undefined : editing.entry;
+    const entry = editing.mode === "edit" ? editing.entry : undefined;
     return (
       <MigrationForm
         novelId={novelId}
         characterId={character.id}
         detail={detail}
         entry={entry}
-        initial={editing !== "new" ? editing.initial : undefined}
+        initial={editing.mode === "new" ? editing.initial : undefined}
         oldValueHint={
           entry
             ? (entry.oldValue ?? "（未定起始章，确认时由服务端派生）")
@@ -336,7 +332,7 @@ export function CharacterMigrationPanel({
     <section className="viewcard migration-panel">
       <div className="migration-head">
         <p className="card-label">🧬 角色迁移（{migrations.length}）</p>
-        <button className="tree-group-btn" title="新增迁移" onClick={() => setEditing("new")}>
+        <button className="tree-group-btn" title="新增迁移" onClick={() => setEditing({ mode: "new" })}>
           ＋
         </button>
       </div>
@@ -369,7 +365,7 @@ export function CharacterMigrationPanel({
                   <>
                     <button
                       disabled={busyId === migration.id}
-                      onClick={() => setEditing({ entry: migration })}
+                      onClick={() => setEditing({ mode: "edit", entry: migration })}
                     >
                       ✏️ 编辑
                     </button>
@@ -387,7 +383,7 @@ export function CharacterMigrationPanel({
                 {migration.status === "confirmed" ? (
                   <button
                     disabled={busyId === migration.id}
-                    onClick={() => setEditing({ entry: migration })}
+                    onClick={() => setEditing({ mode: "edit", entry: migration })}
                   >
                     ✏️ 编辑
                   </button>
@@ -407,7 +403,7 @@ export function CharacterMigrationPanel({
                     disabled={busyId === migration.id}
                     title="以该方案新建一条草案（章节与状态重新填写）"
                     onClick={() =>
-                      setEditing({ entry: migration, initial: copyAsDraft(migration) })
+                      setEditing({ mode: "new", initial: copyAsDraft(migration) })
                     }
                   >
                     ⧉ 复制为新草案

@@ -7,6 +7,7 @@ import {
   characterSchema,
   foreshadowSchema,
   newCharacterMigrationSchema,
+  saveCharacterMigrationSchema,
   novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
@@ -21,6 +22,7 @@ import {
   type ForeshadowPatch,
   type LocationEntry,
   type NewCharacterMigration,
+  type SaveCharacterMigration,
   type NovelDeletedResult,
   type NovelDetail,
   type NovelListItem,
@@ -62,6 +64,7 @@ import {
  *   / `add-character <novelId> <角色卡JSON>`（新增角色，version=1）
  *   / `update-foreshadow <novelId> <foreshadowId> <伏笔JSON>`（patch 语义编辑伏笔）
  *   / `add-migration <novelId> <characterId> <迁移JSON>`（新建角色迁移草案，旧值服务端派生）
+ *   / `save-migration <novelId> <characterId> <提交JSON>`（原子保存新建/编辑与可选确认）
  *   / `update-migration <novelId> <migrationId> <patchJSON>`（patch 编辑迁移）
  *   / `confirm-migration <novelId> <migrationId>`（确认生效：必填校验 + 旧值重解析 + 区间校验）
  *   / `cancel-migration <novelId> <migrationId>`（取消迁移；已确认且有后续依赖时拒绝）
@@ -108,6 +111,9 @@ export function buildNovelDetail(
   const migrations: CharacterMigrationEntry[] = new CharacterMigrationStore(db)
     .listMigrations(novelId)
     .map(toMigrationEntry);
+  const migrationVersions = migrations.flatMap((migration) =>
+    new CharacterMigrationStore(db).listMigrationVersions(migration.id),
+  );
   const outlineNodes: OutlineNodeEntry[] = new OutlineStore(db)
     .listOutlineNodes(novelId, { currentOnly: true })
     .map((stored) => ({
@@ -152,6 +158,7 @@ export function buildNovelDetail(
     worldview,
     characters,
     migrations,
+    migrationVersions,
     outlineNodes,
     documents,
     foreshadows,
@@ -267,6 +274,17 @@ function toMigrationEntry(stored: StoredCharacterMigration): CharacterMigrationE
     updatedAt: stored.updatedAt,
     ...stored.migration,
   });
+}
+
+/** 表单提交：保存与确认在同一事务内完成，失败零写入。 */
+export function saveMigrationEntry(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  characterId: string,
+  requestJson: string,
+): CharacterMigrationEntry {
+  const request = parseMigrationJson<SaveCharacterMigration>(requestJson, saveCharacterMigrationSchema);
+  return toMigrationEntry(new CharacterMigrationStore(db).saveMigration(novelId, characterId, request));
 }
 
 /** 迁移 JSON → schema 校验（新增入参 / patch 入参共用；错误信息带首个 issue 定位） */
@@ -504,6 +522,10 @@ function main(argv: string[]): number {
         if (!novelId || rest.length !== 2 || !rest[0] || !rest[1]) break;
         process.stdout.write(`${JSON.stringify(addMigrationEntry(db, novelId, rest[0], rest[1]))}\n`);
         return 0;
+      case "save-migration":
+        if (!novelId || rest.length !== 2 || !rest[0] || !rest[1]) break;
+        process.stdout.write(`${JSON.stringify(saveMigrationEntry(db, novelId, rest[0], rest[1]))}\n`);
+        return 0;
       case "update-migration":
         if (!novelId || rest.length !== 2 || !rest[0] || !rest[1]) break;
         process.stdout.write(`${JSON.stringify(updateMigrationEntry(db, novelId, rest[0], rest[1]))}\n`);
@@ -536,7 +558,7 @@ function main(argv: string[]): number {
     db.close();
   }
   process.stderr.write(
-    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id> | add-character <novelId> <角色卡JSON> | update-foreshadow <novelId> <foreshadowId> <伏笔JSON> | add-migration <novelId> <characterId> <迁移JSON> | update-migration <novelId> <migrationId> <patchJSON> | confirm-migration <novelId> <migrationId> | cancel-migration <novelId> <migrationId> | add-style <novelId> <文风JSON> | update-style <novelId> <styleId> <文风JSON> | delete-style <styleId>>\n",
+    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id> | add-character <novelId> <角色卡JSON> | update-foreshadow <novelId> <foreshadowId> <伏笔JSON> | save-migration <novelId> <characterId> <提交JSON> | add-migration <novelId> <characterId> <迁移JSON> | update-migration <novelId> <migrationId> <patchJSON> | confirm-migration <novelId> <migrationId> | cancel-migration <novelId> <migrationId> | add-style <novelId> <文风JSON> | update-style <novelId> <styleId> <文风JSON> | delete-style <styleId>>\n",
   );
   return 1;
 }
