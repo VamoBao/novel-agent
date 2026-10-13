@@ -817,6 +817,15 @@ button.danger {
   font-size: 13px;
 }
 
+/* 章卡登场角色陈旧提示：角色卡在正文生成后被编辑（复用 warning 语义变量，暗色自适应） */
+.viewcard .cast-stale {
+  background: var(--bg-warning-subtle);
+  border: 1px solid var(--border-warning);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 8px 0;
+}
+
 /* 幕预览「规划本幕章节」入口：两张卡片下方右对齐
    （旧数据幕禁用态沿用全局 button:disabled 样式） */
 .act-actions {

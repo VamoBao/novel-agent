@@ -210,7 +210,7 @@ function createV9Db(path: string): void {
   legacy.close();
 }
 
-describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
+describe("openDatabase 迁移（SCHEMA_VERSION 18）", () => {
   const tempDirs: string[] = [];
 
   afterAll(async () => {
@@ -248,7 +248,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
     const recovered = openDatabase(path);
     try {
       expect(tableColumns(recovered, "novels")).toContain("core_conflict");
-      expect(recovered.query("PRAGMA user_version").get()).toEqual({ user_version: 17 });
+      expect(recovered.query("PRAGMA user_version").get()).toEqual({ user_version: 18 });
     } finally { recovered.close(); }
   });
 
@@ -297,7 +297,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
       const db = openDatabase(path);
       try {
         expect(tableColumns(db, "novels")).toContain("core_conflict");
-        expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 17 });
+        expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 18 });
       } finally { db.close(); }
     } finally { race.mockRestore(); }
   });
@@ -322,7 +322,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
     const db = openDatabase(path);
     try {
       expect(tableColumns(db, "novels")).toContain("genre");
-      expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 17 });
+      expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 18 });
       expect(db.query("SELECT name, author, description, pinned, favorite, genre, audience, core_conflict FROM novels WHERE id = ?").get(NOVEL_ID)).toEqual({ name: "旧小说", author: "作者", description: "简介", pinned: 1, favorite: 1, genre: null, audience: null, core_conflict: null });
       expect(db.query("SELECT geography, taboos FROM worldviews WHERE novel_id = ?").get(NOVEL_ID)).toEqual({ geography: "九州", taboos: '["不可复活"]' });
       db.prepare("UPDATE novels SET genre = '仙侠', audience = '[]' WHERE id = ?").run(NOVEL_ID);
@@ -337,7 +337,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
     }
   });
 
-  test("v16 库迁移：outlines 补 character_ids 列、旧章行留 NULL、版本升 17、重开不重复迁移", async () => {
+  test("v16 库迁移：outlines 补 character_ids 列、旧章行留 NULL、版本升 18、重开不重复迁移", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-db-mig17-"));
     tempDirs.push(dir);
     const path = join(dir, "v16.db");
@@ -373,7 +373,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
     const db = openDatabase(path);
     try {
       expect(tableColumns(db, "outlines")).toContain("character_ids");
-      expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(17);
+      expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(18);
       // 迁移只补列不回填：旧章行未绑定（NULL 即「未绑定」语义，正文生成回退全库注入）
       const row = db
         .query("SELECT name, character_ids FROM outlines WHERE id = 'chap-16'")
@@ -385,7 +385,88 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
     }
     const reopened = openDatabase(path);
     try {
-      expect((reopened.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(17);
+      expect((reopened.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(18);
+    } finally {
+      reopened.close();
+    }
+  });
+
+  test("v17 库迁移：characters 补 updated_at 并按末次编辑快照时间回填、版本升 18、重开不重复迁移", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-db-mig18-"));
+    tempDirs.push(dir);
+    const path = join(dir, "v17.db");
+    const legacy = new Database(path, { create: true });
+    legacy.exec(`
+      CREATE TABLE novels (id TEXT PRIMARY KEY, name TEXT, author TEXT, description TEXT,
+        pinned INTEGER NOT NULL DEFAULT 0, favorite INTEGER NOT NULL DEFAULT 0,
+        genre TEXT, audience TEXT, core_conflict TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE characters (
+        id TEXT PRIMARY KEY,
+        novel_id TEXT NOT NULL REFERENCES novels(id),
+        name TEXT NOT NULL,
+        gender TEXT,
+        appearance TEXT,
+        desire TEXT NOT NULL,
+        fear TEXT NOT NULL,
+        narrative_role TEXT NOT NULL,
+        background TEXT NOT NULL,
+        personality TEXT,
+        character_goal TEXT,
+        creation_purpose TEXT NOT NULL,
+        trajectory TEXT,
+        ending_direction TEXT NOT NULL,
+        relationships TEXT,
+        version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE character_versions (
+        id TEXT PRIMARY KEY,
+        character_id TEXT NOT NULL REFERENCES characters(id),
+        novel_id TEXT NOT NULL REFERENCES novels(id),
+        version INTEGER NOT NULL CHECK (version >= 1),
+        character TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      PRAGMA user_version = 17;
+    `);
+    legacy.prepare("INSERT INTO novels VALUES (?, '旧小说', NULL, NULL, 0, 0, NULL, NULL, NULL, ?, ?)").run(NOVEL_ID, NOW, NOW);
+    // 从未编辑的角色（version=1，无快照）
+    legacy
+      .prepare(
+        `INSERT INTO characters VALUES ('char-new', ?, '新角色', NULL, NULL, '渴望', '恐惧', '配角', '背景', NULL, NULL, '目的', NULL, '结局', NULL, 1, '2026-01-01T00:00:00.000Z')`,
+      )
+      .run(NOVEL_ID);
+    // 编辑过的角色（version=2，末次编辑快照时间 2026-03-01）
+    legacy
+      .prepare(
+        `INSERT INTO characters VALUES ('char-edited', ?, '旧角色', NULL, NULL, '渴望', '恐惧', '主角', '背景', NULL, NULL, '目的', NULL, '结局', NULL, 2, '2026-01-01T00:00:00.000Z')`,
+      )
+      .run(NOVEL_ID);
+    legacy
+      .prepare(
+        "INSERT INTO character_versions VALUES ('ver-1', 'char-edited', ?, 1, '{}', '2026-03-01T00:00:00.000Z')",
+      )
+      .run(NOVEL_ID);
+    legacy.close();
+
+    const db = openDatabase(path);
+    try {
+      expect(tableColumns(db, "characters")).toContain("updated_at");
+      expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(18);
+      // 回填语义 = 末次变更时刻：编辑过的取最新快照时间，从未编辑的取 created_at
+      expect(db.query("SELECT updated_at FROM characters WHERE id = 'char-edited'").get()).toEqual({
+        updated_at: "2026-03-01T00:00:00.000Z",
+      });
+      expect(db.query("SELECT updated_at FROM characters WHERE id = 'char-new'").get()).toEqual({
+        updated_at: "2026-01-01T00:00:00.000Z",
+      });
+    } finally {
+      db.close();
+    }
+    const reopened = openDatabase(path);
+    try {
+      expect((reopened.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(18);
     } finally {
       reopened.close();
     }
@@ -428,7 +509,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(17);
+    ).toBe(18);
     db.close();
   });
 
@@ -476,7 +557,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(17);
+    ).toBe(18);
     db.close();
   });
 
@@ -530,7 +611,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(17);
+    ).toBe(18);
     db.close();
   });
 
@@ -574,7 +655,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(17);
+    ).toBe(18);
     db.close();
   });
 
@@ -628,7 +709,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(17);
+    ).toBe(18);
     db.close();
   });
 
@@ -651,7 +732,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
     raw.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(17);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(18);
     const columns = (db.query("PRAGMA table_info(foreshadows)").all() as { name: string }[]).map((c) => c.name);
     expect(columns).toContain("act_node_id");
     const row = db.query("SELECT surface_action, hidden_truth, attention_level, act_node_id FROM foreshadows WHERE id = 'f-1';").get() as Record<string, unknown>;
@@ -707,7 +788,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
     legacy.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(17);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(18);
     expect(tableColumns(db, "locations")).toEqual([
       "id",
       "novel_id",
@@ -778,7 +859,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
     legacy.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(17);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(18);
     const columns = (db.query("PRAGMA table_info(foreshadows)").all() as { name: string }[]).map((c) => c.name);
     expect(columns).toContain("recover_act_node_id");
     const row = db.query("SELECT surface_action, act_node_id, recover_act_node_id FROM foreshadows WHERE id = 'f-1';").get() as Record<string, unknown>;
@@ -814,7 +895,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
     legacy.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(17);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(18);
     // 纯新增表由 CREATE TABLE IF NOT EXISTS 幂等落地，含启用开关 CHECK 与 novel_id 索引
     expect(tableColumns(db, "style_references")).toEqual([
       "id",
@@ -875,7 +956,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
     ).toBe(1);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(17);
+    ).toBe(18);
     db.close();
   });
 
@@ -894,7 +975,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 17）", () => {
     expect(tableColumns(db, "style_references")).toContain("enabled");
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(17);
+    ).toBe(18);
     db.close();
   });
 });

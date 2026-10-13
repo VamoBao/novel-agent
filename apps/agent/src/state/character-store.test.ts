@@ -176,7 +176,40 @@ describe("CharacterStore 版本化编辑", () => {
     expect(listed).toHaveLength(1);
     expect(listed[0]?.version).toBe(3);
     expect(listed[0]?.createdAt).toBe(added.createdAt);
+    // updated_at 随编辑刷新（新建即 created_at，编辑后晚于创建时间——客户端据此判断
+    // 已生成正文是否早于角色设定更新）
+    expect(listed[0]!.updatedAt >= added.createdAt).toBe(true);
+    expect(updated.updatedAt >= added.updatedAt).toBe(true);
     store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("updatedAt：新建即创建时间、编辑刷新且不早于快照时间、重开库后仍在", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-char-updated-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "dddddddd-2000-7000-8000-000000000009";
+    const store = setup(dbPath, novelId);
+    const added = store.addCharacter(novelId, makeCharacter("林恒"));
+    expect(added.updatedAt).toBe(added.createdAt);
+    expect(store.getCharacter(added.id)?.updatedAt).toBe(added.createdAt);
+
+    // 同毫秒内连续编辑时时间戳可能相同，故只断言「不早于」而非严格递增
+    const edited = store.updateCharacter(novelId, added.id, makeCharacter("林恒"));
+    expect(edited.updatedAt >= added.updatedAt).toBe(true);
+    expect(edited.updatedAt).toBe(store.getCharacter(added.id)!.updatedAt);
+
+    // 快照时间与主行 updated_at 同刻（该版本被替换的时刻）
+    const raw = new Database(dbPath, { readonly: true });
+    const snap = raw
+      .query("SELECT created_at FROM character_versions WHERE character_id = ?;")
+      .get(added.id) as { created_at: string };
+    expect(snap.created_at).toBe(edited.updatedAt);
+    raw.close();
+
+    store.close();
+    const reopened = CharacterStore.open(dbPath);
+    expect(reopened.getCharacter(added.id)?.updatedAt).toBe(edited.updatedAt);
+    reopened.close();
     await rm(dir, { recursive: true, force: true });
   });
 

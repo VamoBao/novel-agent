@@ -1,3 +1,12 @@
+## 2026-10-13 角色编辑的陈旧可见性：characters.updated_at + 章卡提示（角色编辑滚动生效、已生成正文冻结）
+
+- **背景**：`updateCharacter` 是主行原地更新（id 稳定、version+1、旧卡快照入 character_versions），换来外部引用永不失效；代价是引用侧只存 id，无法表达「我看到的是哪一版」。用户指出由此产生的盲区：章节等引用方无法知道角色是否已被更新过——最尖锐的是改名（正文里是旧名、章卡登场人物区块显示新名，静默不一致且无任何提示）。相关事实：characters 表原本只有 created_at（无 updated_at）、character_versions 是只写的、documents.updated_at 存在但正文不含角色信息。
+- **决策：按「角色编辑对未写章节滚动生效、已生成正文为冻结产物」的既有哲学处理，只补「陈旧可见性」不补自动重写（用户选定方案 2）**：characters 增列 `updated_at`（编辑提交刷新，新建即 created_at），客户端章卡比对「绑定登场角色的 updated_at > 本章正文 updated_at」即给「⚠️ 登场角色卡已更新（名字 现 vN）——建议重新生成」提示，是否重生成由用户决定。未生成正文的章无提示（生成时读当前卡，天然最新）；未绑定登场角色的 17 版前旧章无提示（无绑定信息）。否决「零迁移用快照时间推导」（依赖「编辑过才有快照」的隐式前提）；否决「生成时打版本戳记 {角色ID: 版本} 到 documents」（精确溯源但需迁移 + write-chapter 写入 + 客户端展示，仅在将来做版本级一致性审计/批量重生成时才值得）；否决「characters 改多版本行 + is_current_version 切换」（会破坏 id 稳定这一初衷）。
+- **迁移**：SCHEMA_VERSION 17→18，`ALTER TABLE characters ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''` + 回填 `COALESCE(最新编辑快照时间, created_at)`——存量数据语义精确等于「末次变更时刻」（快照时间即该版本被替换的时刻，与主行 updated_at 同刻）；character_versions 表缺失时退化为 created_at。
+- **实现期修正**：本次发现 16→17 段写的是 `SCHEMA_VERSION`（随版本号抬升会变成 18），导致「表缺失只写版本标记」的分支在链式直升时把后续 17→18 段短路（v17 库迁移后 characters 无 updated_at）。已改为每段显式写各自目标版本号、锁内复查用 `>= 本段目标`——与 15→16 段的既有修正同一原则。
+- **结论**：db.ts 17→18 迁移（含回填）；CharacterStore 全链路补 updatedAt（StoredCharacter/行映射/SQL/add/update）；shared `characterEntrySchema` 增 `updatedAt`（必填）+ query CLI 组装；客户端新增 `character-staleness.ts` 纯函数（`staleCastCharacters`——ISO 字典序比较）与 OutlineNodeCard 正文卡顶部提示（复用 warning 语义变量，零硬编码色值）+ PreviewPane 接线。AC：typecheck 3 工程 / lint / 402 用例全过（净增 9：迁移 1 + character-store 2 + shared 契约 1 + 客户端陈旧判定 4 + 章卡 SSR 2，另有多处用例随契约扩展）；GUI 观感与真实编辑→章卡提示链路待人工验收。
+
+
 ## 2026-10-13 章节登场人物 ID 绑定：逐章清单单一事实源、outlines.character_ids 列、正文按绑定注入
 
 - **背景**：正文生成的【登场角色参考】注入**全库角色**——角色库随创作推进膨胀（大纲、每幕规划持续自动入库），每章正文生成都要为无关角色付出 token；且「哪些角色在哪章登场」没有结构化数据（顶层 newCharacters 的 role 文本「第2章登场·…」仅供人读，系统从不解析）。用户提出：在大纲表新增角色 ID 绑定列（仅章节点有效），章节规划时逐章梳理登场角色，确认入库后建卡 → 名字→ID 回填绑定，正文生成按绑定收窄上下文。

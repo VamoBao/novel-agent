@@ -18,6 +18,7 @@ import { OutlineNodeCard } from "./OutlineNodeCard";
 import type { ChapterForeshadow, ChapterWriteProgress } from "./OutlineNodeCard";
 import type { Selection } from "./StructureTreePanel";
 import { globalChapterOrder } from "../chapter-order";
+import { staleCastCharacters } from "../character-staleness";
 
 interface PreviewPaneProps {
   /** null = 未选中小说 */
@@ -417,6 +418,7 @@ export function PreviewPane({
           onPlanChapters={onPlanChapters ? () => onPlanChapters(node) : undefined}
           document={detail.documents.find((d) => d.chapterId === node.id)}
           castNames={node.type === "chapter" ? toChapterCastNames(node, detail) : undefined}
+          staleCast={node.type === "chapter" ? staleCastCharacters(node, detail) : undefined}
           foreshadows={
             node.type === "chapter" ? toChapterForeshadows(detail, node.id) : undefined
           }

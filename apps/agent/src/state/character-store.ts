@@ -3,11 +3,13 @@ import { characterSchema, type Character } from "@novel/shared";
 import { DEFAULT_DB_PATH, getDefaultDatabase, openDatabase } from "./db";
 import { generateUuidV7 } from "./id";
 
-/** 数据库中的角色记录：角色卡 + 库表元信息（id 为 UUIDv7；version 为当前版本号） */
+/** 数据库中的角色记录：角色卡 + 库表元信息（id 为 UUIDv7；version 为当前版本号；
+ *  updatedAt 为最近更新时间——编辑提交刷新，客户端据此判断已生成正文是否早于角色设定更新） */
 export interface StoredCharacter {
   id: string;
   novelId: string;
   createdAt: string;
+  updatedAt: string;
   version: number;
   character: Character;
 }
@@ -31,20 +33,21 @@ interface CharacterRow {
   relationships: string | null;
   version: number;
   created_at: string;
+  updated_at: string;
 }
 
 const CARD_COLUMNS = `
   id, novel_id, name, gender, appearance, desire, fear, narrative_role,
   background, personality, character_goal, creation_purpose,
-  trajectory, ending_direction, relationships, version, created_at
+  trajectory, ending_direction, relationships, version, created_at, updated_at
 `;
 
 const INSERT_SQL = `
   INSERT INTO characters (
     id, novel_id, name, gender, appearance, desire, fear, narrative_role,
     background, personality, character_goal, creation_purpose,
-    trajectory, ending_direction, relationships, version, created_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?);
+    trajectory, ending_direction, relationships, version, created_at, updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?);
 `;
 
 const SELECT_SQL = `
@@ -59,7 +62,7 @@ const UPDATE_SQL = `
   UPDATE characters SET name = ?, gender = ?, appearance = ?, desire = ?, fear = ?,
     narrative_role = ?, background = ?, personality = ?, character_goal = ?,
     creation_purpose = ?, trajectory = ?, ending_direction = ?, relationships = ?,
-    version = ?
+    version = ?, updated_at = ?
   WHERE id = ?;
 `;
 
@@ -94,7 +97,8 @@ function rowToCharacter(row: CharacterRow): Character {
 /**
  * 角色持久化：按创作 ID 绑定存储角色卡。
  * 创作流收集的内核/背景/创作目的/结局方向为固定属性；浏览期编辑经
- * updateCharacter 版本化更新（旧卡快照归档 character_versions，主行 version 递增）。
+ * updateCharacter 版本化更新（旧卡快照归档 character_versions，主行 version 递增、
+ * updated_at 刷新——主行原地更新而非新增行，id 稳定使外部引用不失效）。
  */
 export class CharacterStore {
   /** 共享数据库连接构造（与其他 store 同库不同表） */
@@ -108,7 +112,7 @@ export class CharacterStore {
   addCharacter(novelId: string, character: Character): StoredCharacter {
     const validated = characterSchema.parse(character);
     const id = generateUuidV7();
-    const createdAt = new Date().toISOString();
+    const now = new Date().toISOString();
     this.db
       .prepare(INSERT_SQL)
       .run(
@@ -127,12 +131,14 @@ export class CharacterStore {
         validated.trajectory ?? null,
         validated.endingDirection,
         validated.relationships ?? null,
-        createdAt,
+        now,
+        now,
       );
     return {
       id,
       novelId,
-      createdAt,
+      createdAt: now,
+      updatedAt: now,
       version: 1,
       character: validated,
     };
@@ -142,16 +148,24 @@ export class CharacterStore {
   getCharacter(characterId: string): StoredCharacter | null {
     const row = this.db.prepare(SELECT_BY_ID_SQL).get(characterId) as CharacterRow | null;
     return row
-      ? { id: row.id, novelId: row.novel_id, createdAt: row.created_at, version: row.version, character: rowToCharacter(row) }
+      ? {
+          id: row.id,
+          novelId: row.novel_id,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          version: row.version,
+          character: rowToCharacter(row),
+        }
       : null;
   }
 
   /**
    * 编辑更新角色（事务原子）——版本化编辑流：
    * 旧卡整卡 JSON 快照归档入 character_versions（version = 编辑前版本号），主行
-   * 全量更新并递增 version；id / novel_id / created_at 不变，外部引用（如伏笔的
-   * 服务角色 IDs）与客户端选中态不因编辑换代失效。角色不存在或异小说报可读错误，
-   * 入参先过 schema 校验，任一步失败整体回滚（不留快照、不改主行）。
+   * 全量更新并递增 version、刷新 updated_at；id / novel_id / created_at 不变，
+   * 外部引用（如伏笔与章节的登场角色 IDs）与客户端选中态不因编辑换代失效。
+   * 角色不存在或异小说报可读错误，入参先过 schema 校验，任一步失败整体回滚
+   * （不留快照、不改主行）。
    */
   updateCharacter(novelId: string, characterId: string, character: Character): StoredCharacter {
     const validated = characterSchema.parse(character);
@@ -163,13 +177,15 @@ export class CharacterStore {
       if (current.novelId !== novelId) {
         throw new Error(`角色不属于该小说，无法更新：${characterId}`);
       }
+      // 快照时间与主行 updated_at 同刻：快照时间即「该版本被替换的时刻」
+      const now = new Date().toISOString();
       this.db.prepare(SNAPSHOT_INSERT_SQL).run(
         generateUuidV7(),
         characterId,
         current.novelId,
         current.version,
         JSON.stringify(current.character),
-        new Date().toISOString(),
+        now,
       );
       this.db.prepare(UPDATE_SQL).run(
         validated.basicInfo.name,
@@ -186,12 +202,14 @@ export class CharacterStore {
         validated.endingDirection,
         validated.relationships ?? null,
         current.version + 1,
+        now,
         characterId,
       );
       return {
         id: characterId,
         novelId: current.novelId,
         createdAt: current.createdAt,
+        updatedAt: now,
         version: current.version + 1,
         character: validated,
       };
@@ -206,6 +224,7 @@ export class CharacterStore {
       id: row.id,
       novelId: row.novel_id,
       createdAt: row.created_at,
+      updatedAt: row.updated_at,
       version: row.version,
       character: rowToCharacter(row),
     }));

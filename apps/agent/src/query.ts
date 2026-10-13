@@ -93,7 +93,7 @@ export function buildNovelDetail(
   const worldview = new WorldviewStore(db).getWorldview(novelId)?.worldview ?? null;
   const characters = new CharacterStore(db)
     .listCharacters(novelId)
-    .map((stored) => ({ id: stored.id, version: stored.version, ...stored.character }));
+    .map((stored) => toCharacterEntry(stored));
   const outlineNodes: OutlineNodeEntry[] = new OutlineStore(db)
     .listOutlineNodes(novelId, { currentOnly: true })
     .map((stored) => ({
@@ -237,7 +237,12 @@ function parseCharacterJson(json: string): Character {
 }
 
 function toCharacterEntry(stored: StoredCharacter): CharacterEntry {
-  return characterEntrySchema.parse({ id: stored.id, version: stored.version, ...stored.character });
+  return characterEntrySchema.parse({
+    id: stored.id,
+    version: stored.version,
+    updatedAt: stored.updatedAt,
+    ...stored.character,
+  });
 }
 
 /** add-character 载荷：入库新角色（version=1，无历史快照），返回角色条目 */

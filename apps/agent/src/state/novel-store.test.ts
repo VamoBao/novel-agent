@@ -226,10 +226,10 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     db
       .prepare(
         `INSERT INTO characters (id, novel_id, name, desire, fear, narrative_role, background,
-         creation_purpose, ending_direction, created_at)
-         VALUES ('ch-1', ?, '甲', '愿', '惧', '主角', '背景', '目的', '结局', ?);`,
+         creation_purpose, ending_direction, created_at, updated_at)
+         VALUES ('ch-1', ?, '甲', '愿', '惧', '主角', '背景', '目的', '结局', ?, ?);`,
       )
-      .run(id, "2026-01-01T00:00:00Z");
+      .run(id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
     db
       .prepare(
         `INSERT INTO outlines (id, novel_id, parent_id, type, name, sort, version,
@@ -349,9 +349,18 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
       .get() as { name: string; version: number };
     expect(legacyChar.name).toBe("旧角色");
     expect(legacyChar.version).toBe(1);
+    // 17→18 段：characters 补 updated_at，旧行回填为 created_at（从未编辑的语义）
+    expect(
+      (db.query("PRAGMA table_info(characters)").all() as Array<{ name: string }>).map((c) => c.name),
+    ).toContain("updated_at");
+    expect(
+      db
+        .query("SELECT updated_at FROM characters WHERE id = 'eeeeeeee-0000-7000-8000-000000000009'")
+        .get(),
+    ).toEqual({ updated_at: "2026-01-01T00:00:00Z" });
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(17);
+    ).toBe(18);
     db.close();
     await rm(dir, { recursive: true, force: true });
   });

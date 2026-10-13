@@ -117,14 +117,16 @@ describe("novelDeletedResultSchema", () => {
 });
 
 describe("characterEntrySchema", () => {
-  test("角色卡平铺 id 与 version 后通过校验", () => {
+  test("角色卡平铺 id / version / updatedAt 后通过校验", () => {
     const entry = characterEntrySchema.parse({
       ...validCharacter,
       id: "0199c0de-0000-7000-8000-000000000002",
       version: 1,
+      updatedAt: "2026-10-13T00:00:00.000Z",
     });
     expect(entry.basicInfo.name).toBe("林澜");
     expect(entry.version).toBe(1);
+    expect(entry.updatedAt).toBe("2026-10-13T00:00:00.000Z");
   });
 
   test("缺少 id 的裸角色卡被拒绝", () => {
@@ -136,6 +138,7 @@ describe("characterEntrySchema", () => {
       characterEntrySchema.parse({
         ...validCharacter,
         id: "0199c0de-0000-7000-8000-000000000002",
+        updatedAt: "2026-10-13T00:00:00.000Z",
       }),
     ).toThrow();
     expect(() =>
@@ -143,6 +146,17 @@ describe("characterEntrySchema", () => {
         ...validCharacter,
         id: "0199c0de-0000-7000-8000-000000000002",
         version: 0,
+        updatedAt: "2026-10-13T00:00:00.000Z",
+      }),
+    ).toThrow();
+  });
+
+  test("缺少 updatedAt 被拒绝（章卡陈旧提示依赖该字段）", () => {
+    expect(() =>
+      characterEntrySchema.parse({
+        ...validCharacter,
+        id: "0199c0de-0000-7000-8000-000000000002",
+        version: 1,
       }),
     ).toThrow();
   });
@@ -199,7 +213,12 @@ describe("novelDetailSchema", () => {
         taboos: ["不能出现现代科技物品"],
       },
       characters: [
-        { ...validCharacter, id: "0199c0de-0000-7000-8000-000000000002", version: 3 },
+        {
+          ...validCharacter,
+          id: "0199c0de-0000-7000-8000-000000000002",
+          version: 3,
+          updatedAt: "2026-10-13T00:00:00.000Z",
+        },
       ],
       outlineNodes: validOutlineNodes,
       documents: validDocuments,

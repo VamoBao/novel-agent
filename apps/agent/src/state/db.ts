@@ -7,7 +7,7 @@ export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 
 /**
  * 打开（必要时创建）数据库并完成建表。
@@ -15,7 +15,8 @@ const SCHEMA_VERSION = 17;
  * - novels：小说信息（pinned / favorite 为书库管理标记；name 在大纲确认后回填；
  *   genre / audience JSON / core_conflict JSON 为分阶段采集的创作条件，历史 NULL），
  *   其余业务表经 novel_id 外键关联
- * - characters：角色卡，1:N（novel_id 索引），version 为当前版本号（编辑提交递增）
+ * - characters：角色卡，1:N（novel_id 索引），version 为当前版本号（编辑提交递增），
+ *   updated_at 为最近更新时间（编辑提交刷新——章卡据此判断已生成正文是否早于角色设定更新）
  * - character_versions：角色历史版本快照（编辑时旧卡整卡 JSON 归档），character_id 外键关联，
  *   主行 id / novel_id 稳定不变，外部引用（如伏笔的服务角色 IDs）不因编辑换代失效
  * - worldviews：世界观，1:1（novel_id 唯一），taboos 数组存 JSON 文本
@@ -222,18 +223,44 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       // 章节规划确认后的编排层回填）。旧行留 NULL 不回填——NULL 即「未绑定」语义
       // （正文生成回退全库角色注入）。补列与版本一起提交；取得写锁后复查版本，
       // 防止另一进程已经迁移；表缺失（非完整形态库）或列已存在时只写版本标记，
-      // 由下方 CREATE TABLE IF NOT EXISTS 直建目标形态
+      // 由下方 CREATE TABLE IF NOT EXISTS 直建目标形态。段内显式写 17（非 SCHEMA_VERSION），
+      // 让后续 17→18 段在链式直升时继续执行
       db.transaction(() => {
         const lockedVersion = db.query("PRAGMA user_version").get() as { user_version: number };
-        if (lockedVersion.user_version === SCHEMA_VERSION) return;
+        if (lockedVersion.user_version >= 17) return;
         const outlineCols = db.query("PRAGMA table_info(outlines)").all() as Array<{ name: string }>;
         if (outlineCols.length > 0 && !outlineCols.some((col) => col.name === "character_ids")) {
           db.exec("ALTER TABLE outlines ADD COLUMN character_ids TEXT;");
         }
+        db.exec("PRAGMA user_version = 17;");
+      }).immediate();
+      // 17→18：characters 增列 updated_at（角色卡最近更新时间——客户端章卡据此判断已生成正文
+      // 是否早于角色设定更新）。补列与版本同事务提交、锁内复查版本防并发；回填取「最新编辑
+      // 快照时间，从未编辑（无快照）则取 created_at」，存量数据语义即「末次变更时刻」。
+      // 表缺失（非完整形态库）或列已存在时只写版本标记，由下方 CREATE TABLE IF NOT EXISTS 直建
+      db.transaction(() => {
+        const lockedVersion = db.query("PRAGMA user_version").get() as { user_version: number };
+        if (lockedVersion.user_version === SCHEMA_VERSION) return;
+        const characterCols = db.query("PRAGMA table_info(characters)").all() as Array<{ name: string }>;
+        if (characterCols.length > 0 && !characterCols.some((col) => col.name === "updated_at")) {
+          db.exec("ALTER TABLE characters ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';");
+          const hasVersions =
+            db
+              .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'character_versions'")
+              .get() !== null;
+          db.exec(
+            hasVersions
+              ? `UPDATE characters SET updated_at = COALESCE(
+                   (SELECT MAX(v.created_at) FROM character_versions v WHERE v.character_id = characters.id),
+                   created_at
+                 );`
+              : "UPDATE characters SET updated_at = created_at;",
+          );
+        }
         db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
       }).immediate();
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>17 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>18 的库被旧代码打开）：重建兜底
       db.exec("DROP TABLE IF EXISTS documents;");
       db.exec("DROP TABLE IF EXISTS outlines;");
       db.exec("DROP TABLE IF EXISTS locations;");
@@ -278,7 +305,8 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       ending_direction TEXT NOT NULL,
       relationships TEXT,
       version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
   `);
   db.exec(

@@ -24,10 +24,14 @@ export const novelListItemSchema = z.object({
 });
 export type NovelListItem = z.infer<typeof novelListItemSchema>;
 
-/** 角色条目：角色卡 + 库表主键（客户端结构树节点 key 用）+ 版本号（编辑提交易主行递增，历史快照在 character_versions 表） */
+/** 角色条目：角色卡 + 库表主键（客户端结构树节点 key 用）+ 版本号（编辑提交易主行递增，历史快照在 character_versions 表）
+ *  + 最近更新时间（编辑提交刷新——章卡据此判断已生成正文是否早于角色设定更新） */
 export const characterEntrySchema = characterSchema.extend({
   id: z.string().min(1).describe("characters 表主键（UUIDv7）"),
   version: z.number().int().min(1).describe("角色当前版本号，从 1 起；编辑提交后递增"),
+  updatedAt: z
+    .string()
+    .describe("最近更新时间（ISO 8601）：新建即创建时间，编辑提交刷新；用于比对正文生成时间"),
 });
 export type CharacterEntry = z.infer<typeof characterEntrySchema>;
 

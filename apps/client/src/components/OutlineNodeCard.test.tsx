@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { OutlineNodeEntry, ReviewReport } from "@novel/shared";
+import type { DocumentEntry, OutlineNodeEntry, ReviewReport } from "@novel/shared";
 import { OutlineNodeCard, type ChapterWriteProgress } from "./OutlineNodeCard";
 
 const chapter: OutlineNodeEntry = {
@@ -56,6 +56,37 @@ describe("OutlineNodeCard 正文生成进度", () => {
     ] });
     expect(html).toContain("文风校验（已跳过）");
     expect(html).not.toContain("✓ 文风校验");
+  });
+});
+
+describe("OutlineNodeCard 角色陈旧提示", () => {
+  const document: DocumentEntry = {
+    id: "doc-1",
+    chapterId: "chapter-1",
+    filePath: "灵脉拾遗-eeeeeeee/第一部/第一章.md",
+    wordCount: 38,
+    updatedAt: "2026-10-01T00:00:00.000Z",
+    content: "正文内容。",
+  };
+
+  test("登场角色卡在正文之后被更新：正文卡给出陈旧提示（含当前版本与重生成建议）", () => {
+    const html = renderToStaticMarkup(
+      <OutlineNodeCard
+        node={chapter}
+        document={document}
+        staleCast={[{ name: "林恒", version: 3 }]}
+      />,
+    );
+    expect(html).toContain("登场角色卡已更新");
+    expect(html).toContain("林恒 现 v3");
+    expect(html).toContain("🔄 重新生成");
+  });
+
+  test("无陈旧角色（空数组）不渲染提示", () => {
+    const html = renderToStaticMarkup(
+      <OutlineNodeCard node={chapter} document={document} staleCast={[]} />,
+    );
+    expect(html).not.toContain("登场角色卡已更新");
   });
 });
 
