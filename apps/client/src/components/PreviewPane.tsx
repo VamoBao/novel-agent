@@ -78,6 +78,14 @@ function toChapterForeshadows(detail: NovelDetail, chapterId: string): ChapterFo
   return items;
 }
 
+/** 章节点 → 登场人物名（characterIds 经详情 characters 解析名字，未匹配兜底原 ID——
+ *  对齐伏笔表单既有策略；未绑定（旧数据）返回 null 不渲染区块） */
+function toChapterCastNames(node: OutlineNodeEntry, detail: NovelDetail): string[] | null {
+  if (node.characterIds === null) return null;
+  const nameById = new Map(detail.characters.map((c) => [c.id, c.basicInfo.name]));
+  return node.characterIds.map((id) => nameById.get(id) ?? id);
+}
+
 /** worldview 选中项 → 只读视图（角色预览带编辑入口自成一节；大纲节点不经此处） */
 function toWorldviewView(detail: NovelDetail): View | null {
   return detail.worldview ? { kind: "worldview", worldview: detail.worldview } : null;
@@ -408,6 +416,7 @@ export function PreviewPane({
           )}
           onPlanChapters={onPlanChapters ? () => onPlanChapters(node) : undefined}
           document={detail.documents.find((d) => d.chapterId === node.id)}
+          castNames={node.type === "chapter" ? toChapterCastNames(node, detail) : undefined}
           foreshadows={
             node.type === "chapter" ? toChapterForeshadows(detail, node.id) : undefined
           }

@@ -179,7 +179,10 @@ function formatChapterPlan(
     `  关键情节点：`,
     ...view.keyPlotPoints.map((p, i) => `    ${i + 1}) ${p}`),
     `  拟分 ${view.plan.chapters.length} 章：`,
-    ...view.plan.chapters.map((c, i) => `    第${i + 1}章 ${c.name}：${c.summary}`),
+    ...view.plan.chapters.map(
+      (c, i) =>
+        `    第${i + 1}章 ${c.name}：${c.summary}（登场：${c.characters.map((x) => x.name).join("、")}）`,
+    ),
   ];
   if (newCharacters && newCharacters.length > 0) {
     lines.push(`  ✨ 本次规划新增角色（确认后自动入库）：`);

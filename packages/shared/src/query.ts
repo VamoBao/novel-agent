@@ -44,6 +44,11 @@ export const outlineNodeEntrySchema = z.object({
     .min(1)
     .nullable()
     .describe("关键情节点，仅幕节点携带；历史数据为 null"),
+  characterIds: z
+    .array(z.string().min(1))
+    .min(1)
+    .nullable()
+    .describe("登场角色 ID 绑定，仅章节点携带（客户端经详情 characters 解析名字）；未绑定的旧数据为 null"),
 });
 export type OutlineNodeEntry = z.infer<typeof outlineNodeEntrySchema>;
 

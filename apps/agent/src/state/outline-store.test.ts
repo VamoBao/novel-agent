@@ -501,6 +501,97 @@ describe("OutlineStore", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  test("setChapterCharacters 批量回填登场角色绑定：往返一致、重开仍在、patch 可清空", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-charids-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "bbbbbbbb-cccc-7ddd-8eee-0000000000a1";
+    const store = setup(dbPath, novelId);
+    const nodes = store.saveOutlineTree(novelId, [treePart("第一部·风起", ["第一幕"])]);
+    const firstAct = nodes.find((n) => n.node.type === "act");
+    if (!firstAct) throw new Error("测试前置失败：树中无幕节点");
+    const [c1, c2] = store.saveChapters(novelId, firstAct.id, [
+      { name: "第一章·雨夜", summary: "概述" },
+      { name: "第二章·来客", summary: "概述" },
+    ]);
+    if (!c1 || !c2) throw new Error("测试前置失败：章节点未建齐");
+    // 建章时未绑定（characterIds 为 null——绑定由规划确认后的编排层回填）
+    expect(c1.node.characterIds).toBeNull();
+
+    const bound = store.setChapterCharacters(novelId, [
+      { chapterId: c1.id, characterIds: ["char-1", "char-2"] },
+      { chapterId: c2.id, characterIds: ["char-2"] },
+    ]);
+    expect(bound.map((n) => n.node.characterIds)).toEqual([["char-1", "char-2"], ["char-2"]]);
+    expect(store.getOutlineNode(c1.id)?.node.characterIds).toEqual(["char-1", "char-2"]);
+    store.close();
+
+    const reopened = OutlineStore.open(dbPath);
+    expect(reopened.getOutlineNode(c2.id)?.node.characterIds).toEqual(["char-2"]);
+    // patch 显式清空（null 语义），其余字段不动
+    reopened.updateOutlineNode(c2.id, { characterIds: null });
+    expect(reopened.getOutlineNode(c2.id)?.node.characterIds).toBeNull();
+    reopened.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("setChapterCharacters 校验：空列表 / 不存在 / 非章节点拒绝，中途失败整体回滚", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-charids-fk-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "bbbbbbbb-cccc-7ddd-8eee-0000000000a2";
+    const store = setup(dbPath, novelId);
+    const nodes = store.saveOutlineTree(novelId, [treePart("第一部", ["第一幕"])]);
+    const firstAct = nodes.find((n) => n.node.type === "act");
+    if (!firstAct) throw new Error("测试前置失败：树中无幕节点");
+    const [c1] = store.saveChapters(novelId, firstAct.id, [{ name: "第一章", summary: "概述" }]);
+    if (!c1) throw new Error("测试前置失败：章节点未建齐");
+
+    expect(() => store.setChapterCharacters(novelId, [])).toThrow("空");
+    expect(() =>
+      store.setChapterCharacters(novelId, [
+        { chapterId: "eeeeeeee-0000-7000-8000-0000000000aa", characterIds: ["char-1"] },
+      ]),
+    ).toThrow("不存在");
+    // 部节点（非章）拒绝——幕/幕上级同理由 schema refine 兜底
+    const part = nodes.find((n) => n.node.type === "part");
+    if (!part) throw new Error("测试前置失败：树中无部节点");
+    expect(() =>
+      store.setChapterCharacters(novelId, [{ chapterId: part.id, characterIds: ["char-1"] }]),
+    ).toThrow("章节点");
+    // 空数组绑定被 schema 拒绝（未绑定语义用 null，不用空数组）
+    expect(() =>
+      store.setChapterCharacters(novelId, [{ chapterId: c1.id, characterIds: [] }]),
+    ).toThrow();
+    // 事务回滚：第二条（空串 ID）在事务内被 zod 拒绝，第一条已写入的绑定必须回滚
+    expect(() =>
+      store.setChapterCharacters(novelId, [
+        { chapterId: c1.id, characterIds: ["char-1"] },
+        { chapterId: c1.id, characterIds: [""] },
+      ]),
+    ).toThrow();
+    expect(store.getOutlineNode(c1.id)?.node.characterIds).toBeNull();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("character_ids 列损坏（非合法 JSON）抛可读错误，NULL 行正常读取", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-charids-corrupt-"));
+    const dbPath = join(dir, "test.db");
+    const novelId = "bbbbbbbb-cccc-7ddd-8eee-0000000000a3";
+    const store = setup(dbPath, novelId);
+    const chapter = store.addOutlineNode(novelId, { type: "chapter", name: "第一章", sort: 1 });
+    expect(store.getOutlineNode(chapter.id)?.node.characterIds).toBeNull();
+    store.close();
+
+    const raw = openDatabase(dbPath);
+    raw.prepare("UPDATE outlines SET character_ids = '{oops' WHERE id = ?").run(chapter.id);
+    raw.close();
+
+    const reopened = OutlineStore.open(dbPath);
+    expect(() => reopened.getOutlineNode(chapter.id)).toThrow("登场角色绑定列损坏");
+    reopened.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
   test("saveOutlineTreeNewVersion 版本切换：旧树与旧章降级归档，新树 version=2 当前", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-outline-db-tree-swap-"));
     const dbPath = join(dir, "test.db");

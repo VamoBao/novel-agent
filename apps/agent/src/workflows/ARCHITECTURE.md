@@ -72,6 +72,12 @@ apps/agent/src/workflows/
 ├── location-intake.ts       # 确定性地点入库模块（无 LLM）：filterNewLocations 兜底 diff（trim 全等剔除
 │                             #   库内已有名 / 清单内去重 / 空名剔除）+ plantNewLocations 逐条 addLocation
 │                             #   （name + description）并 notify——三编排确认后、角色自动入库之前调用
+├── chapter-cast-intake.ts    # 确定性登场角色绑定回填模块（无 LLM）：bindChapterCasts 把规划逐章登场
+│                             #   清单（plan.chapters 与 saveChapters 返回节点按序 index 对齐）经
+│                             #   resolveCharacterIds 名字→ID 解析后，setChapterCharacters 单事务回填
+│                             #   章节点 character_ids——置于新增角色自动建卡之后（绑定前名单全部角色
+│                             #   已入库、ID 必然存在）；未匹配名逐章剔除并 notify 警告（防御层），
+│                             #   解析后为空的章不传条目、保持 null 未绑定语义
 ├── foreshadow-intake.ts      # 确定性伏笔入库模块（无 LLM）：resolveCharacterIds 角色名→ID + buildChapterOrder
 │                             #   全书章全局序（部sort→幕sort→章sort——回收/登场顺序校验依据）+ 伏笔三路径
 │                             #   入库与绑定（resolveCharacterIds 角色名→ID（trim 全等 /
@@ -90,14 +96,18 @@ apps/agent/src/workflows/
     │                         #   产物 OutlineSubmission = outline + newCharacters + newForeshadows；
     │                         #   入参 OutlineContext 松绑（genre/audience/coreConflict 可选，重生成仅喂库内数据）
     │                         #   另导出 outlineSchemaFor（恰好 M 部共 N 幕 refine 强校验）
-    ├── chapter-agent.ts      # planChapters：单幕拆章——按幕梗概与情节点推荐章节数量与概述，
-    │                         #   过用户确认门（save_chapters；chapterPlanSchema 强约束 1~12 章）；
-    │                         #   list_characters 角色库查询工具 + prompt 已有角色行与本幕未绑伏笔行（概述尽量
-    │                         #   点名出场角色、体现伏笔表面行为），save_chapters 经 saveChaptersInputSchema
-    │                         #   结构化入参附顶层 newCharacters 清单（清单内名字不得重复）、newForeshadows
-    │                         #   新伏笔清单（登场章名，表面行为不得重复）与 foreshadowBindings 绑定指令
-    │                         #   （序号不得重复）随规划进确认门连带确认；
-    │                         #   产物 ChapterPlanSubmission = { plan, newCharacters, newForeshadows, foreshadowBindings }
+    ├── chapter-agent.ts      # planChapters：单幕拆章——按幕梗概与情节点推荐章节数量、概述与
+    │                         #   逐章登场角色清单（chapters[].characters——库内与新角色全列、
+    │                         #   全员必填 role：库内=在本章中的作用 / 新角色=设定级一句话定位），
+    │                         #   过用户确认门（save_chapters；chapterPlanSchema 强约束 1~12 章、
+    │                         #   每章登场至少 1 人、章内名字不重复）；list_characters 角色库查询工具 +
+    │                         #   prompt 已有角色行与本幕未绑伏笔行（概述尽量点名出场角色、体现伏笔表面
+    │                         #   行为），save_chapters 经 saveChaptersInputSchema 结构化入参（顶层
+    │                         #   newCharacters 清单已取消——确认视图的新增角色由 execute 内
+    │                         #   collectChapterCharacters + filterNewCharacters 对角色库现查派生，单一事实源）
+    │                         #   附 newForeshadows 新伏笔清单（登场章名，表面行为不得重复）与
+    │                         #   foreshadowBindings 绑定指令（序号不得重复）随规划进确认门连带确认；
+    │                         #   产物 ChapterPlanSubmission = { plan, newForeshadows, foreshadowBindings }
     │                         #   （第三参注入 novelId / characterStore / unboundForeshadows）
     ├── auto-character-agent.ts # 新增角色自动创建 autoCreateCharacters（无确认门，仅 notify 通报）：
     │                         #   依据世界观与大纲为清单逐个填充角色卡并调 save_character 终态工具入库，
@@ -105,16 +115,18 @@ apps/agent/src/workflows/
     │                         #   增可选 extraContext 附加上下文块（章节规划全文等填卡一手素材，纯增量、
     │                         #   既有调用方零改动）；
     │                         #   另导出 filterNewCharacters 编排层兜底 diff 纯函数（trim 全等剔除库内
-    │                         #   已有名 / 清单内同名去重保留首个 / 空名剔除）；独立导出供写作期工作流复用
+    │                         #   已有名 / 清单内同名去重保留首个 / 空名剔除）与 collectChapterCharacters
+    │                         #   （章节规划逐章登场清单→幕级并集，跨章同名保首个 role——确认视图派生
+    │                         #   与编排层建卡共用）；独立导出供写作期工作流复用
     ├── character-agent.test.ts  # 字段协议纯函数单测（规格完整性 / 缺失列表 / 组装校验）
     ├── outline-agent.test.ts    # 结构校验单测（outlineSchemaFor 恰好 M 部共 N 幕：通过 / 拒绝含提示 /
     │                         #   底座每部至少一幕；saveOutlineInputSchemaFor：清单合规通过 / 项内字段
     │                         #   空串拒绝 / 清单内名字重复拒绝 / 部幕强校验仍生效；newForeshadows
     │                         #   必填数组、空数组合法 / 清单内表面行为重复拒绝）
-    ├── chapter-agent.test.ts    # saveChaptersInputSchema 单测（规划 + 新增角色清单均合规通过、空清单合法 /
-    │                         #   newCharacters 缺失或项内字段空串拒绝 / 清单内名字重复拒绝 /
-    │                         #   章节数量约束 1~12 不回归；newForeshadows / foreshadowBindings 必填数组、
-    │                         #   空数组合法 / 伏笔表面行为与绑定序号重复拒绝）
+    ├── chapter-agent.test.ts    # saveChaptersInputSchema 单测（规划含逐章登场清单合规通过 / 清单缺省、
+    │                         #   空清单、空名空定位、同章重名拒绝 / 章节数量约束 1~12 不回归；
+    │                         #   newForeshadows / foreshadowBindings 必填数组、空数组合法 /
+    │                         #   伏笔表面行为与绑定序号重复拒绝）
     ├── auto-character-agent.test.ts # 角色自动创建单测（filterNewCharacters 剔除库内已有名与去重 /
     │                         #   空清单透传；autoCreateCharacters 全清单入库含守卫拒绝后修正 /
     │                         #   maxSteps 耗尽抛可读错误且已入库卡保留；extraContext 进 prompt、
@@ -157,7 +169,7 @@ apps/agent/src/workflows/
 ## 依赖边界
 
 - `create-novel.ts` → `ai`（generateObject）、`providers/`（model）、`ui/`（UiChannel：全部提问 / 确认 / 展示的唯一出口）、`@novel/shared`（schemas）、`state/`（types / id / memory-store / novel-store / character-store / worldview-store / outline-store / foreshadow-store / location-store）、`output/`（outline-writer）、本模块 `agents/`（createOutline + auto-character-agent 的 autoCreateCharacters / filterNewCharacters）、`foreshadow-intake.ts`（plantOutlineForeshadows 大纲伏笔挂幕入库）与 `location-intake.ts`（filterNewLocations + plantNewLocations 新增地点确定性入库，置于角色自动入库之前）
-- `plan-act-chapters.ts` → `ui/`（UiChannel 注入）、`state/`（novel-store / outline-store / worldview-store / character-store / foreshadow-store——`listUnboundByAct` 回传本幕未绑伏笔——location-store——list_locations 工具与地点入库）、`output/`（outline-writer readOutlineTheme）、`@novel/shared`（Outline 类型——自动创建的伪 Outline 上下文）、本模块 `agents/`（planChapters + auto-character-agent 的 autoCreateCharacters / filterNewCharacters）、`foreshadow-intake.ts`（plantChapterForeshadows 新伏笔入库与既有未绑伏笔绑定登场章）与 `location-intake.ts`（章节规划新增地点确定性入库）——不直接触碰 `ai` / `providers/`（模型调用都在章节 Agent 内）；store 可注入（缺省默认 SQLite store，测试替换）
+- `plan-act-chapters.ts` → `ui/`（UiChannel 注入）、`state/`（novel-store / outline-store / worldview-store / character-store / foreshadow-store——`listUnboundByAct` 回传本幕未绑伏笔——location-store——list_locations 工具与地点入库）、`output/`（outline-writer readOutlineTheme）、`@novel/shared`（Outline 类型——自动创建的伪 Outline 上下文）、本模块 `agents/`（planChapters + auto-character-agent 的 autoCreateCharacters / filterNewCharacters / collectChapterCharacters）、`chapter-cast-intake.ts`（bindChapterCasts 各章登场名单名字→ID 回填绑定）、`foreshadow-intake.ts`（plantChapterForeshadows 新伏笔入库与既有未绑伏笔绑定登场章）与 `location-intake.ts`（章节规划新增地点确定性入库）——不直接触碰 `ai` / `providers/`（模型调用都在章节 Agent 内）；store 可注入（缺省默认 SQLite store，测试替换）
 - `regen-outline.ts` → `ui/`（UiChannel 注入）、`state/`（novel-store / worldview-store / character-store / outline-store / foreshadow-store / location-store）、`output/`（outline-writer saveOutline）、本模块 `agents/`（createOutline + auto-character-agent 的 autoCreateCharacters / filterNewCharacters）、`foreshadow-intake.ts`（plantOutlineForeshadows 新版大纲伏笔挂接新版幕入库）与 `location-intake.ts`（新版大纲新增地点确定性入库，地点只增不改）——不直接触碰 `ai` / `providers/`；store 可注入（缺省默认 SQLite store，测试替换）
 - `polish-character.ts` → `providers/`（model——单轮 generateObject，无 ReAct Agent）、`ui/`（UiChannel 注入）、`state/`（novel-store / worldview-store / character-store）；store 可注入（缺省默认 SQLite store，测试替换）
 - `write-chapter.ts` → `ai`（generateText）、`providers/`（writing-model getWritingModel——写作模型，非 Agent 会话模型；deepseek model——校验模型缺省实例）、`ui/`（UiChannel 注入）、`state/`（novel-store / outline-store / worldview-store / character-store / document-store / style-reference-store / foreshadow-store）、`output/`（document-writer 正文落盘与登场章正文读取 + outline-writer OUTPUT_DIR）、本模块 `foreshadow-context.ts`（本章伏笔 prompt 块）与 `chapter-review.ts`（三段校验 + 判定 + 修订块）；model / reviewModel / onProgress / outputDir 与各 store 可注入（缺省 getWritingModel() + deepseek model + 不回调 + NOVEL_OUTPUT_DIR + 默认 SQLite store，测试替换）
@@ -190,15 +202,15 @@ apps/agent/src/workflows/
 
 1. **前置校验**（可读错误，协议入口转 fatal error）：`novelStore.getNovel` → 幕节点存在 / 同小说 / 类型 act → 幕 summary 与 keyPlotPoints 非空（旧数据缺内容拒绝）→ `getOutlineNode(parentId)` 得所属部 → `listOutlineNodes(currentOnly)` 无 chapter 子节点（同一幕重复规划被唯一索引拒绝，修订流为既有待办）→ `worldviewStore.getWorldview` 有记录（世界观已确认——自动创建新角色需要世界观依据，前置拒绝避免「确认入库后才发现无法自动创建」的中间态，对齐 regen-outline / write-chapter 校验惯例）
 2. **上下文组装（全取自库）**：novels.name / description（书名 / logline）+ 部名 / 部梗概 + 幕名 / 幕梗概 / 情节点 + 角色库已有角色行（名 + 叙事定位，随 `planChapters` 第三参注入——与 list_characters 工具同源）+ 本幕「未绑登场章」的伏笔清单行（`foreshadow-store.listUnboundByAct`，随第三参 `unboundForeshadows` 注入、prompt 以「序号. 表面行为——隐藏真相」带出，无则不带）；theme 经 `readOutlineTheme` 从 `output/<id>.json` 尽力读取，缺失省略
-3. **复用 `planChapters`**（save_chapters 确认门循环：`saveChaptersInputSchema` 结构化入参附顶层 newCharacters 清单（名字不得重复）、newForeshadows 新伏笔清单（登场章名，表面行为不得重复）与 foreshadowBindings 绑定指令（回传清单序号 + 登场章名，序号不得重复），确认视图连带展示「✨ 本次规划新增角色（确认后自动入库）」「✨ 本次规划新增伏笔（确认后自动入库）」「🔗 伏笔绑定（确认后生效）」，拒绝规划即连带作废清单；系统提示约束概述尽量点名出场角色、体现伏笔表面行为）→ `saveChapters` 幕下批量建章 → notify 入库统计；阶段通知 `chapter`
-4. **新增地点确定性入库与新增角色自动入库**（确认入库后）：**地点先行**——`filterNewLocations` 兜底 diff（剔除库内已有名 / 去重 / 空名剔除，空清单跳过）→ `plantNewLocations`（`location-intake.ts`）逐条 addLocation（name + description）并 notify（置于角色自动入库之前——同大纲流程语义）；随后 `filterNewCharacters` 兜底 diff（剔除库内已有名 / 清单内去重 / 空名剔除），空清单跳过（零 LLM 调用）；非空 notify「✨ 本幕规划引入了 N 个新角色，正在自动填充角色卡并入库…」→ 组「部/幕」两级伪 Outline（结构匹配 Outline，章不进——规划产物与章节点结构不变）+ `extraContext`=本次规划的章节列表全文，经 `autoCreateCharacters` 以世界观逐卡入库 → 汇总 notify「✨ 本次章节规划新增 N 个角色已自动入库：<名单>」；随后**伏笔处理**（置于角色自动入库之后——新伏笔的服务角色名可能引用本轮自动入库的新角色）：`plantChapterForeshadows`（`foreshadow-intake.ts`）确定性执行——newForeshadows 新伏笔带登场章（章名→本次规划章节点）与幕归属（act_node_id 挂本幕）入库；foreshadowBindings 把回传清单中的未绑伏笔按 1-based 序号 patch `appear_chapter_id` 到登场章（对称校验：已有回收章时登场须更早——`buildChapterOrder` 全书章全局序）；foreshadowRecoverBindings 把「本幕待回收」清单（`listUnrecoveredByAct`：回收幕=本幕且回收章未绑，随章节 Agent 第三参注入、prompt 带登场章信息回传）伏笔 patch `recover_chapter_ids` 到回收章（同伏笔多条合并=多步回收；登场未绑 / 回收不晚于登场跳过警告）；章名 / 服务角色名未解析、序号越界逐条跳过并 notify 警告（不阻塞其余条目），notify「✨ 本次规划伏笔入库 N 处、绑定 M 处、回收绑定 K 处（X 处未匹配跳过）」；run_finished 携带小说 ID 供客户端刷新详情（新角色随详情可见）
+3. **复用 `planChapters`**（save_chapters 确认门循环：`saveChaptersInputSchema` 结构化入参 = 规划本体含逐章登场清单（每章至少 1 人、章内名字不重复）+ newForeshadows 新伏笔清单（登场章名，表面行为不得重复）与 foreshadowBindings 绑定指令（回传清单序号 + 登场章名，序号不得重复），确认视图连带展示逐章登场名单与「✨ 本次规划新增角色（确认后自动入库）」——新增角色由 execute 内对角色库派生「✨ 本次规划新增伏笔（确认后自动入库）」「🔗 伏笔绑定（确认后生效）」，拒绝规划即连带作废清单；系统提示约束概述尽量点名出场角色、体现伏笔表面行为）→ `saveChapters` 幕下批量建章 → notify 入库统计；阶段通知 `chapter`
+4. **新增地点确定性入库与新增角色自动入库**（确认入库后）：**地点先行**——`filterNewLocations` 兜底 diff（剔除库内已有名 / 去重 / 空名剔除，空清单跳过）→ `plantNewLocations`（`location-intake.ts`）逐条 addLocation（name + description）并 notify（置于角色自动入库之前——同大纲流程语义）；随后登场角色处理：`collectChapterCharacters`（逐章登场清单→幕级并集，跨章同名保首个 role）+ `filterNewCharacters` 对角色库兜底 diff 派生「本次规划新增角色」（空派生跳过、零 LLM 调用）；非空 notify「✨ 本幕规划引入了 N 个新角色，正在自动填充角色卡并入库…」→ 组「部/幕」两级伪 Outline（结构匹配 Outline，章不进——规划产物与章节点结构不变）+ `extraContext`=本次规划的章节列表全文（每章行带登场名单），经 `autoCreateCharacters` 以世界观逐卡入库 → 汇总 notify「✨ 本次章节规划新增 N 个角色已自动入库：<名单>」；随后**各章登场角色绑定回填**（置于建卡之后、伏笔之前——名单含本轮新入库角色）：`bindChapterCasts`（`chapter-cast-intake.ts`）把逐章登场名单名字→ID（resolveCharacterIds）解析后经 setChapterCharacters 单事务回填章节点 character_ids，notify「🎭 正在绑定各章登场角色（N 章）…」+「✨ 各章登场角色已绑定：N 章共 M 人次」；随后**伏笔处理**（置于角色自动入库之后——新伏笔的服务角色名可能引用本轮自动入库的新角色）：`plantChapterForeshadows`（`foreshadow-intake.ts`）确定性执行——newForeshadows 新伏笔带登场章（章名→本次规划章节点）与幕归属（act_node_id 挂本幕）入库；foreshadowBindings 把回传清单中的未绑伏笔按 1-based 序号 patch `appear_chapter_id` 到登场章（对称校验：已有回收章时登场须更早——`buildChapterOrder` 全书章全局序）；foreshadowRecoverBindings 把「本幕待回收」清单（`listUnrecoveredByAct`：回收幕=本幕且回收章未绑，随章节 Agent 第三参注入、prompt 带登场章信息回传）伏笔 patch `recover_chapter_ids` 到回收章（同伏笔多条合并=多步回收；登场未绑 / 回收不晚于登场跳过警告）；章名 / 服务角色名未解析、序号越界逐条跳过并 notify 警告（不阻塞其余条目），notify「✨ 本次规划伏笔入库 N 处、绑定 M 处、回收绑定 K 处（X 处未匹配跳过）」；run_finished 携带小说 ID 供客户端刷新详情（新角色随详情可见）
 
 ## 章节正文生成数据流（writeChapter）
 
 客户端章节点卡「✍️ 生成本章正文」/「🔄 重新生成」入口（headless `write-chapter <novelId> <chapterNodeId>` 模式）触发的独立会话，不走 ReAct Agent——无确认门（确认在客户端：重生成经 ChapterRegenDialog 弹框确认覆盖；流程两者完全一致——生成 → 三段校验-修订循环 → 落盘入库）：
 
 1. **前置校验**（可读错误，协议入口转 fatal error）：小说存在 → 章节点存在 / 同小说 / 类型 chapter → summary 非空（旧数据缺概述拒绝）→ 所属幕与部节点存在 → worldviews 有记录（世界观已确认）；已有正文不再拒绝——getDocumentByChapter 有行即 isRegen（notify「🔄 重新生成中（将覆盖现有正文）」）
-2. **上下文组装（全取自库）**：书名 / logline + 世界观 JSON + 角色摘要行（名/定位/外貌/性格/渴望/恐惧）+ 部名与部梗概 + 幕名与幕梗概及关键情节点 + 本章名与概述 + 同幕前后章名与概述（衔接上文、给下文留空间）+ **本章绑定伏笔**（可选增强——`buildChapterForeshadowContext`：登场注入卡片；回收组按登场章全局章序升序注入卡片 + 登场章上下文（正文优先、FORESHADOW_PROSE_BUDGET=8000 预算内整条注入，未生成/文件缺失/超预算降级该章概述）+ 多步回收既往回收章概述；同章种收只归回收组标「登场于本章」；【本章伏笔】块插【下一章】块后【参考文风】前，写作要求条件附加编号顺延，生成前 notify「🔮 本章伏笔：登场 N 条、回收 M 条（X 条降级）」；无绑定伏笔零注入零通知）+ 参考文风（可选增强，不新增校验分支——style-reference-store 按启用过滤，非空在 prompt 尾部【下一章】块后插【参考文风】段（每条「（名字）\n内容」）并在写作要求附模仿条（模仿叙事语言 / 句式节奏 / 描写风格，不抄袭具体情节与专有名词），生成前 notify「🖋️ 本次参考文风：名单」；无启用文风零注入零通知）
+2. **上下文组装（全取自库）**：书名 / logline + 世界观 JSON + 登场角色摘要行（名/定位/外貌/性格/渴望/恐惧——按章节点 character_ids 绑定过滤注入本章阵容；未绑定（null，17 版前旧章）或绑定角色全不在库时回退全库注入并 notify「🎭 本章未绑定登场角色（旧数据）」）+ 部名与部梗概 + 幕名与幕梗概及关键情节点 + 本章名与概述 + 同幕前后章名与概述（衔接上文、给下文留空间）+ **本章绑定伏笔**（可选增强——`buildChapterForeshadowContext`：登场注入卡片；回收组按登场章全局章序升序注入卡片 + 登场章上下文（正文优先、FORESHADOW_PROSE_BUDGET=8000 预算内整条注入，未生成/文件缺失/超预算降级该章概述）+ 多步回收既往回收章概述；同章种收只归回收组标「登场于本章」；【本章伏笔】块插【下一章】块后【参考文风】前，写作要求条件附加编号顺延，生成前 notify「🔮 本章伏笔：登场 N 条、回收 M 条（X 条降级）」；无绑定伏笔零注入零通知）+ 参考文风（可选增强，不新增校验分支——style-reference-store 按启用过滤，非空在 prompt 尾部【下一章】块后插【参考文风】段（每条「（名字）\n内容」）并在写作要求附模仿条（模仿叙事语言 / 句式节奏 / 描写风格，不抄袭具体情节与专有名词），生成前 notify「🖋️ 本次参考文风：名单」；无启用文风零注入零通知）
 3. **生成-校验-修订循环**：初稿 notify（✍️ 正文生成中 / 🔮 本章伏笔 / 🖋️ 参考文风，原有顺序不变）后进入 `for round in 1..MAX_REVIEW_ROUNDS`——onProgress(drafting|revising，revising 附上一轮报告) → `getWritingModel()`（OpenAI 接口兼容端点，环境变量 WRITING_MODEL_* 配置，任一未配置回落 Agent 会话模型 deepseek）单轮 `generateText`（初稿 prompt 与既有形态逐字节一致；修订轮追加【上一版正文】+【整改报告】块于写作要求前，末条要求替换为按报告逐条修订），写作要求含 2000~3000 字、只输出正文文本；空结果拒绝。→ `reviewChapter`（chapter-review，reviewModel 缺省 deepseek——三段独立单轮 generateObject：①内容约束（世界观/章节概述/本章伏笔 lines 同源）②文风评分（无启用样本 skipped 零调用）③前后自洽（仅正文）；段开始 onProgress(review-*)，每段结束再回传 stageResult；无文风样本回传 skipped 且零模型调用）→ 报告 passed 判定：通过 notify「✅ 校验通过（第 N 轮）」跳出；未达标且 round<3 notify「♻️ 第 N+1 轮：上一版未达标准（内容 X 处、文风 Y 分、自洽 Z 处），按整改报告修订重写…」进入下一轮；round=3 仍未达标 notify「⚠️ 3 轮未全部达标，保存最后一版（…）——建议人工复核或重新发起生成」保底
 4. **元数据入库绑定**：onProgress(saving，附最终报告) → 正文落盘（小说名-<id前8位>/部名/章名层级，同名章冲突 -N 后缀不覆盖），文件先落、库后入，库失败回滚删文件 → 元数据单事务入库（file_path + 字数，内容不进库）+ 章节点回写 document_id 并置 status=completed——首次生成走 `saveChapterDocument`，isRegen 走 `replaceChapterDocument` 覆盖替换（删旧行插新行），事务提交后清理旧正文文件（新旧路径相同跳过防误删、幂等容忍缺失）→ notify 保存路径与字数；run_finished 携带小说 ID 供客户端刷新详情（headless 把 onProgress 映射为 write-progress 协议消息；校验依赖 deepseek，会话始终要求 DEEPSEEK_API_KEY）；大纲重生成只降级归档章节点，documents 行与正文文件保留（旧正文与归档章的关联留存）
 
@@ -212,7 +224,7 @@ apps/agent/src/workflows/
 4. **新增角色自动入库**：同 createNovel 收尾动作——`filterNewCharacters` 对新版大纲清单兜底 diff（剔除库内已有名；空清单跳过、零 LLM 调用）→ `autoCreateCharacters` 依据世界观与新版大纲自动填充角色卡逐张入库（清单已在确认门连带确认过，写库前透明可拦截）
 5. **伏笔清单挂接新版幕入库**：同 createNovel 收尾动作——`plantOutlineForeshadows` 对新版大纲 newForeshadows 清单确定性创建（幕名取当前版本树即新版幕节点、服务角色名→角色 ID，未匹配跳过并警告；置于角色自动入库之后）；**旧伏笔行保留不动**（regen 只降级大纲节点，旧伏笔 act_node_id 指向已降级旧幕、悬挂但无害——`listUnboundByAct` 按当前 act 查询天然不回传旧版伏笔，决策见根 DECISIONS）
 
-入库时机小结：novels 初始化即建（先于其余表）｜worldviews 确认后 upsert｜characters 每卡确认后增量｜outlines 大纲确认后整树事务入库——首版走 saveOutlineTree（version=1），重新生成走 saveOutlineTreeNewVersion（旧树与旧章降级归档、新树 max+1 当前；梗概与关键情节点随节点入列，keyPlotPoints 仅幕节点）＋大纲 JSON 落盘 output（产物仅供留存与 theme 读取，重生成后覆盖为最新版；客户端浏览已切换为读 outlines 表节点）｜chapters 章节规划确认后幕下事务批量入库（saveChapters，概述随节点入列；仅客户端单幕规划会话调用——新建小说流程不自动规划章节；随旧版降级归档）｜章节规划新增角色（newCharacters）：清单随规划进确认门连带确认，确认入库后编排层 `filterNewCharacters` 兜底 diff → `autoCreateCharacters`（世界观 + 部/幕伪 Outline + `extraContext` 章节列表全文）自动填充角色卡入库——无确认门（清单已在规划确认门过目），逐卡 notify 通报，version=1 入 characters 表；planActChapters 会话收尾动作与大纲两流程一致，空清单跳过（零 LLM 调用）｜documents 章节正文由 writeChapter 会话生成后**先落文件**（output/<小说名>-<创作ID前8位>/<部名>/<章名>.md，人类可直接阅读编辑；顶层带 ID——同名小说不共享文件夹）**再登记元数据**（file_path + 字数）并绑定章节点（一章一份，重复生成被拒；随小说级联删除并清理文件；大纲重生成只降级归档章节点、正文行与文件保留——旧正文与归档章的关联留存）｜大纲新增角色（newCharacters）：清单随大纲进确认门连带确认，编排层 `filterNewCharacters` 兜底 diff（剔除库内已有名 / 去重 / 空名剔除）后经 `autoCreateCharacters` 自动填充角色卡入库——无确认门（清单已在大纲确认门过目），逐卡 notify 通报，version=1 入 characters 表；createNovel 与 regenerateOutline 两流程收尾动作一致，空清单跳过（零 LLM 调用）｜locations 地点：随大纲（新建 / 重生成）与章节规划确认门连带确认（save_outline / save_chapters 附 newLocations——名字 + 一句话定位），确认入库后（角色自动入库之前）经 `location-intake.ts` 确定性入库（filterNewLocations 兜底 diff + plantNewLocations 逐条 addLocation，无 LLM 调用）；重生成地点只增不改，旧地点保留不动｜foreshadows 伏笔：随大纲 / 规划确认门连带确认（save_outline 附 newForeshadows 挂幕+可选回收幕、save_chapters 附 newForeshadows 登场章 + foreshadowBindings 登场绑定 + foreshadowRecoverBindings 回收绑定指令），确认入库后（角色自动入库之后）经 `foreshadow-intake.ts` 确定性入库——createNovel / regenerateOutline 走 plantOutlineForeshadows 挂幕与回收幕（regen 挂接新版幕节点、旧伏笔行保留不动）、planActChapters 走 plantChapterForeshadows（新伏笔带登场章与幕归属、既有未绑伏笔按绑定指令 patch appear_chapter_id（对称校验）、本幕待回收伏笔按回收绑定指令 patch recover_chapter_ids（多步回收合并））——无 LLM 调用，幕名 / 章名 / 角色名 / 序号未匹配或顺序不满足逐条跳过并 notify 警告，回收状态仍手动维护；客户端编辑表单手动规划回收章（全书章序过滤，登场未绑禁用）｜style_references 参考文风：不走创作流、无确认门——客户端结构树「🖋️ 文风」组经 query CLI 三命令（add-style / update-style / delete-style）直写库（内容 TEXT 直接进库不落文件，enabled 控制正文生成注入），writeChapter 生成时按启用过滤注入（无启用文风零注入）｜NovelState 仍为内存态。
+入库时机小结：novels 初始化即建（先于其余表）｜worldviews 确认后 upsert｜characters 每卡确认后增量｜outlines 大纲确认后整树事务入库——首版走 saveOutlineTree（version=1），重新生成走 saveOutlineTreeNewVersion（旧树与旧章降级归档、新树 max+1 当前；梗概与关键情节点随节点入列，keyPlotPoints 仅幕节点）＋大纲 JSON 落盘 output（产物仅供留存与 theme 读取，重生成后覆盖为最新版；客户端浏览已切换为读 outlines 表节点）｜chapters 章节规划确认后幕下事务批量入库（saveChapters，概述随节点入列；各章登场角色 ID 绑定在建卡后经 setChapterCharacters 单事务回填 character_ids——null=未绑定旧章，正文生成回退全库注入；仅客户端单幕规划会话调用——新建小说流程不自动规划章节；随旧版降级归档、绑定随行保留）｜章节规划新增角色（逐章登场清单派生）：chapters[].characters 随规划进确认门连带确认（确认视图 newCharacters 由 `collectChapterCharacters` + `filterNewCharacters` 派生——所见即入库所得，顶层清单已取消），确认入库后编排层同函数派生 → `autoCreateCharacters`（世界观 + 部/幕伪 Outline + `extraContext` 章节列表全文含登场名单）自动填充角色卡入库——无确认门（清单已在规划确认门过目），逐卡 notify 通报，version=1 入 characters 表；planActChapters 会话收尾动作与大纲两流程一致，空派生跳过（零 LLM 调用）｜documents 章节正文由 writeChapter 会话生成后**先落文件**（output/<小说名>-<创作ID前8位>/<部名>/<章名>.md，人类可直接阅读编辑；顶层带 ID——同名小说不共享文件夹）**再登记元数据**（file_path + 字数）并绑定章节点（一章一份，重复生成被拒；随小说级联删除并清理文件；大纲重生成只降级归档章节点、正文行与文件保留——旧正文与归档章的关联留存）｜大纲新增角色（newCharacters）：清单随大纲进确认门连带确认，编排层 `filterNewCharacters` 兜底 diff（剔除库内已有名 / 去重 / 空名剔除）后经 `autoCreateCharacters` 自动填充角色卡入库——无确认门（清单已在大纲确认门过目），逐卡 notify 通报，version=1 入 characters 表；createNovel 与 regenerateOutline 两流程收尾动作一致，空清单跳过（零 LLM 调用）｜locations 地点：随大纲（新建 / 重生成）与章节规划确认门连带确认（save_outline / save_chapters 附 newLocations——名字 + 一句话定位），确认入库后（角色自动入库之前）经 `location-intake.ts` 确定性入库（filterNewLocations 兜底 diff + plantNewLocations 逐条 addLocation，无 LLM 调用）；重生成地点只增不改，旧地点保留不动｜foreshadows 伏笔：随大纲 / 规划确认门连带确认（save_outline 附 newForeshadows 挂幕+可选回收幕、save_chapters 附 newForeshadows 登场章 + foreshadowBindings 登场绑定 + foreshadowRecoverBindings 回收绑定指令），确认入库后（角色自动入库之后）经 `foreshadow-intake.ts` 确定性入库——createNovel / regenerateOutline 走 plantOutlineForeshadows 挂幕与回收幕（regen 挂接新版幕节点、旧伏笔行保留不动）、planActChapters 走 plantChapterForeshadows（新伏笔带登场章与幕归属、既有未绑伏笔按绑定指令 patch appear_chapter_id（对称校验）、本幕待回收伏笔按回收绑定指令 patch recover_chapter_ids（多步回收合并））——无 LLM 调用，幕名 / 章名 / 角色名 / 序号未匹配或顺序不满足逐条跳过并 notify 警告，回收状态仍手动维护；客户端编辑表单手动规划回收章（全书章序过滤，登场未绑禁用）｜style_references 参考文风：不走创作流、无确认门——客户端结构树「🖋️ 文风」组经 query CLI 三命令（add-style / update-style / delete-style）直写库（内容 TEXT 直接进库不落文件，enabled 控制正文生成注入），writeChapter 生成时按启用过滤注入（无启用文风零注入）｜NovelState 仍为内存态。
 
 ## subAgent 协作协议（确认门四 Agent 共性，auto-character-agent 例外见末条）
 

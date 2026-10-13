@@ -3,6 +3,7 @@ import { runReactAgent } from "../../agents/react";
 import type { UiChannel } from "../../ui/channel";
 import {
   characterSchema,
+  type ChapterPlan,
   type Character,
   type NewCharacterOutline,
   type Outline,
@@ -61,6 +62,24 @@ export function filterNewCharacters(
     result.push({ name, role: item.role });
   }
   return result;
+}
+
+/**
+ * 章节规划逐章登场清单 → 幕级角色并集（纯函数，可单测）：按章序收集各章登场角色，
+ * 同名跨章去重保留首个 role（登场章的一句话定位最完整），名字 trim 后为空的项剔除。
+ * 产出的并集经 filterNewCharacters 对角色库 diff 即得「本次规划新增角色」——
+ * 确认视图派生与编排层建卡共用本函数（确认门所见 = 入库所得，单一事实源）。
+ */
+export function collectChapterCharacters(plan: ChapterPlan): NewCharacterOutline[] {
+  const byName = new Map<string, string>();
+  for (const chapter of plan.chapters) {
+    for (const cast of chapter.characters) {
+      const name = cast.name.trim();
+      if (name.length === 0 || byName.has(name)) continue;
+      byName.set(name, cast.role);
+    }
+  }
+  return [...byName].map(([name, role]) => ({ name, role }));
 }
 
 /**

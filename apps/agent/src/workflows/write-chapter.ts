@@ -95,7 +95,8 @@ function describeReport(report: ReviewReport): string {
 
 /**
  * 章节正文生成工作流（客户端章节点「✍️ 生成本章正文」入口）：
- * 从库中校验并组装写作上下文（小说名/logline、世界观、角色摘要、所属部/幕
+ * 从库中校验并组装写作上下文（小说名/logline、世界观、本章绑定的登场角色摘要
+ * （character_ids 过滤——未绑定的旧章回退全库）、所属部/幕
  * 梗概与关键情节点、本章概述、同幕前后章概述、本章绑定伏笔——登场卡片 /
  * 回收卡片+登场章上下文），交写作模型（OpenAI 接口
  * 兼容端点，与 Agent 会话模型解耦；WRITING_MODEL_* 未配置时回落 Agent
@@ -175,6 +176,21 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
     .listStyleReferences(novelId)
     .filter((stored) => stored.styleReference.enabled);
 
+  // 登场角色注入（章节规划确认时绑定到章节点 character_ids）：按绑定过滤本章阵容，
+  // 收窄 prompt 的【登场角色参考】；未绑定（null，旧数据）或绑定的角色均已不在库中时
+  // 回退全库注入并 notify（行为与旧版一致，兜底不静默）
+  const libraryCharacters = characterStore.listCharacters(novelId);
+  const castByBoundIds =
+    chapter.node.characterIds === null
+      ? []
+      : chapter.node.characterIds
+          .map((id) => libraryCharacters.find((stored) => stored.id === id))
+          .filter((stored): stored is (typeof libraryCharacters)[number] => stored !== undefined);
+  const promptCast = castByBoundIds.length > 0 ? castByBoundIds : libraryCharacters;
+  if (castByBoundIds.length === 0 && libraryCharacters.length > 0) {
+    channel.notify("🎭 本章未绑定登场角色（旧数据），已回退注入全库角色参考");
+  }
+
   // 本章伏笔（可选增强，不阻塞生成）：绑定到本章的伏笔——登场注入卡片、回收注入卡片
   // + 登场章上下文（正文优先、概述兜底、预算护栏，详见 foreshadow-context.ts）；
   // 同一份 lines 同时进写作 prompt 与校验 ①（校验所见即写作者所见）
@@ -238,10 +254,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       JSON.stringify(storedWorldview.worldview),
       "",
       "【登场角色参考】",
-      characterStore
-        .listCharacters(novelId)
-        .map((stored) => characterDigestLine(stored.character))
-        .join("\n") || "（暂无入库角色）",
+      promptCast.map((stored) => characterDigestLine(stored.character)).join("\n") || "（暂无入库角色）",
       "",
       "【所属部】",
       `${part.node.name}：${part.node.summary ?? "（缺部梗概）"}`,

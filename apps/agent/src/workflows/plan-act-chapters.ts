@@ -8,8 +8,9 @@ import { getDefaultLocationStore, type LocationStore } from "../state/location-s
 import { readOutlineTheme } from "../output/outline-writer";
 import type { Outline } from "@novel/shared";
 import { planChapters } from "./agents/chapter-agent";
-import { autoCreateCharacters, filterNewCharacters } from "./agents/auto-character-agent";
+import { autoCreateCharacters, collectChapterCharacters, filterNewCharacters } from "./agents/auto-character-agent";
 import { plantChapterForeshadows } from "./foreshadow-intake";
+import { bindChapterCasts } from "./chapter-cast-intake";
 import { filterNewLocations, plantNewLocations } from "./location-intake";
 
 export interface PlanActChaptersOptions {
@@ -43,9 +44,13 @@ export interface PlanActChaptersResult {
 /**
  * 单幕章节规划工作流（客户端幕节点「规划本幕章节」入口）：
  * 从库中校验并组装目标幕的规划上下文（小说名/logline、所属部、幕梗概与关键情节点，
- * theme 自 output 产物尽力读取），复用章节 Agent 的确认门规划章节，
- * 确认后经 saveChapters 在幕下批量建章；规划 newCharacters 清单中的新增角色
- * 经兜底 diff 后自动填充角色卡入库（空清单跳过，同大纲两条流程的收尾动作）。
+ * theme 自 output 产物尽力读取），复用章节 Agent 的确认门规划章节（每章含登场角色
+ * 清单——库内与新角色全列），确认后经 saveChapters 在幕下批量建章。登场角色处理：
+ * 先按角色库对逐章清单兜底 diff 派生「本次规划新增角色」，经 autoCreateCharacters
+ * 自动填充角色卡入库（空派生跳过、零 LLM 调用，同大纲两条流程的收尾动作）；
+ * 再把各章登场名单（库内既有 + 本轮新入库）名字→ID 解析后单事务回填绑定到章节点
+ * （bindChapterCasts——绑定前全部角色已入库、ID 必然存在；正文生成按绑定注入
+ * 本章阵容角色资料，替代全库注入）。
  * 本幕「未绑登场章」的伏笔随规划上下文回传给 LLM；确认后 newForeshadows 新伏笔
  * 带登场章与幕归属入库、foreshadowBindings 绑定指令把回传伏笔 patch 到登场章（空清单跳过）。
  * 校验失败（小说/幕不存在、非幕节点、旧数据缺内容、已有章节规划、世界观未确认）
@@ -101,7 +106,7 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
   channel.stage("chapter");
   channel.notify(`📑 章节规划 Agent 启动（${act.node.name}）…`);
   const recoverableForeshadows = foreshadowStore.listUnrecoveredByAct(novelId, act.id);
-  const { plan, newCharacters, newForeshadows, foreshadowBindings, foreshadowRecoverBindings, newLocations } = await planChapters(
+  const { plan, newForeshadows, foreshadowBindings, foreshadowRecoverBindings, newLocations } = await planChapters(
     {
       novelTitle: novel.name ?? "未命名小说",
       logline: novel.description ?? "",
@@ -131,9 +136,10 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
     );
   }
 
-  // 章节规划新增角色自动入库：代码级兜底 diff（剔除库内已有名 + 去重），空清单跳过（零 LLM 调用）
+  // 章节规划登场角色处理（确认入库后）：逐章登场清单对角色库兜底 diff 派生「本次规划
+  // 新增角色」——空派生跳过（零 LLM 调用）；非空经自动创建 Agent 逐卡入库
   const existingCharacters = characterStore.listCharacters(novelId).map((c) => c.character);
-  const pendingNew = filterNewCharacters(newCharacters, existingCharacters);
+  const pendingNew = filterNewCharacters(collectChapterCharacters(plan), existingCharacters);
   if (pendingNew.length > 0) {
     channel.notify(`\n✨ 本幕规划引入了 ${pendingNew.length} 个新角色，正在自动填充角色卡并入库…`);
     // 部/幕节点组装伪 Outline（结构匹配 Outline，供自动创建 Agent 作登场情节上下文）
@@ -163,13 +169,33 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
       channel,
       characterStore,
       extraContext: `本次规划的章节列表：\n${plan.chapters
-        .map((c, i) => `第${i + 1}章 ${c.name}：${c.summary}`)
+        .map(
+          (c, i) =>
+            `第${i + 1}章 ${c.name}：${c.summary}（登场：${c.characters.map((cast) => cast.name).join("、")}）`,
+        )
         .join("\n")}`,
     });
     channel.notify(
       `✨ 本次章节规划新增 ${pendingNew.length} 个角色已自动入库：${pendingNew.map((c) => c.name).join("、")}`,
     );
   }
+
+  // 各章登场角色 ID 绑定回填（置于自动建卡之后——名单含本轮新入库角色；伏笔块之前）：
+  // 名字→ID 解析后单事务回填章节点 character_ids，正文生成按绑定注入本章阵容
+  channel.notify(`🎭 正在绑定各章登场角色（${plan.chapters.length} 章）…`);
+  const castResult = bindChapterCasts({
+    novelId,
+    chapters: plan.chapters,
+    chapterNodes,
+    characters: characterStore.listCharacters(novelId),
+    channel,
+    outlineStore,
+  });
+  channel.notify(
+    `✨ 各章登场角色已绑定：${castResult.boundChapters} 章共 ${castResult.totalBindings} 人次${
+      castResult.skipped.length > 0 ? `（${castResult.skipped.length} 处未匹配跳过）` : ""
+    }`,
+  );
 
   // 伏笔处理：新伏笔带登场章与幕入库、既有未绑伏笔按 LLM 绑定指令 patch（确定性代码）。
   // 置于角色自动入库块之后：新伏笔的 characterNames 可能引用本轮自动入库的新角色。

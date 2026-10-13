@@ -351,7 +351,7 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     expect(legacyChar.version).toBe(1);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(16);
+    ).toBe(17);
     db.close();
     await rm(dir, { recursive: true, force: true });
   });

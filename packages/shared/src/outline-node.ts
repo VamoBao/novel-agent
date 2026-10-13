@@ -24,6 +24,11 @@ const outlineNodeObjectSchema = z.object({
     .min(1)
     .nullable()
     .describe("关键情节点（至少 1 条），仅幕节点携带；部/章节点与历史行为 null"),
+  characterIds: z
+    .array(z.string().min(1))
+    .min(1)
+    .nullable()
+    .describe("登场角色 ID 绑定（章节规划确认后由编排层解析回填，至少 1 个），仅章节点携带；未绑定为 null"),
   sort: z.number().int().min(1).describe("同一父级下当前版本内的排序，从 1 起"),
   version: z.number().int().min(1).describe("版本号，从 1 起"),
   isCurrentVersion: z.boolean().describe("是否当前使用版本（同父级下各当前版本 sort 唯一）"),
@@ -33,16 +38,18 @@ const outlineNodeObjectSchema = z.object({
 
 /**
  * 大纲树节点：同一节点可有多个版本行并存，isCurrentVersion 标记生效版本。
- * 内容列随节点入库：summary 为部/幕梗概，keyPlotPoints 仅幕节点携带
- * （历史行迁移前入库，两列均可能为 null）。
+ * 内容列随节点入库：summary 为部/幕梗概，keyPlotPoints 仅幕节点携带，
+ * characterIds 仅章节点携带（历史行与绑定前均为 null）。
  */
-export const outlineNodeSchema = outlineNodeObjectSchema.refine(
-  (node) => node.keyPlotPoints === null || node.type === "act",
-  {
+export const outlineNodeSchema = outlineNodeObjectSchema
+  .refine((node) => node.keyPlotPoints === null || node.type === "act", {
     path: ["keyPlotPoints"],
     message: "关键情节点仅幕节点可携带，部/章节点必须为 null",
-  },
-);
+  })
+  .refine((node) => node.characterIds === null || node.type === "chapter", {
+    path: ["characterIds"],
+    message: "登场角色绑定仅章节点可携带，部/幕节点必须为 null",
+  });
 export type OutlineNode = z.infer<typeof outlineNodeSchema>;
 
 /** 可更新字段：改名 / 内容（梗概与关键情节点）/ 排序 / 版本切换 / 写作状态与正文回填；
@@ -52,6 +59,7 @@ export const outlineNodePatchSchema = outlineNodeObjectSchema
     name: true,
     summary: true,
     keyPlotPoints: true,
+    characterIds: true,
     sort: true,
     isCurrentVersion: true,
     status: true,

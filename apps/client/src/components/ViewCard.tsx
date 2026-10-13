@@ -121,6 +121,7 @@ export function ViewCard({ view }: { view: View }) {
               <p>
                 第{index + 1}章 {chapter.name}：{chapter.summary}
               </p>
+              <p className="plot">登场：{chapter.characters.map((c) => c.name).join("、")}</p>
             </div>
           ))}
           {view.newCharacters && view.newCharacters.length > 0 ? (

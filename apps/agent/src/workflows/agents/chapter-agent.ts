@@ -5,9 +5,9 @@ import type { UiChannel } from "../../ui/channel";
 import { getDefaultCharacterStore, type CharacterStore } from "../../state/character-store";
 import { getDefaultLocationStore, type LocationStore } from "../../state/location-store";
 import type { StoredForeshadow } from "../../state/foreshadow-store";
+import { collectChapterCharacters, filterNewCharacters } from "./auto-character-agent";
 import {
   chapterPlanSchema,
-  newCharacterSchema,
   newLocationSchema,
   chapterNewForeshadowSchema,
   foreshadowBindingSchema,
@@ -28,9 +28,11 @@ const SYSTEM_PROMPT = `你是一名资深小说编辑。你的任务：把给定
 5. 章名贴合小说调性，概括本章核心事件或意象。
 
 角色梳理要求：
-1. 章节概述尽量点名本章出场角色——角色库已有角色使用其真实名字，新角色使用其清单中的名字，让后续写作能直接按概述确定出场阵容；
-2. 登场角色不在角色库中时，必须将其列入 save_chapters 的 newCharacters：name 为角色名，role 为一句话定位并注明登场章（如「第3章登场·血宗打手」）；清单内名字不得重复，角色库已有角色不得列入；
-3. 可用 list_characters 工具查询角色库现状。newCharacters 会在确认时随规划一并展示给用户：确认后这些角色将自动填充角色卡并入库。
+1. 每章在 characters 中列出本章全部登场角色——角色库已有角色与新角色都要列：确认后各章登场角色的 ID 会绑定到章节点，正文生成时按绑定注入角色资料，遗漏即该角色资料缺席本章写作；
+2. name 为角色名（库内已有角色必须用其真实名字），role 为该角色在本章的定位/作用一句话；不在角色库中的新角色，role 须给设定级一句话定位（如「血宗宗主·本章首次登场的主要反派」）——确认后将以此定位为依据自动创建角色卡；
+3. 同一章的登场角色名字不得重复，每章至少 1 名登场角色；
+4. 可用 list_characters 工具查询角色库现状，库内已有角色不得当新角色。确认时不在角色库中的登场角色会汇总展示为「本次规划新增角色」：确认后自动填充角色卡并入库；
+5. 章节概述尽量点名出场角色，与 characters 清单保持一致。
 
 伏笔梳理要求：
 1. 若「本幕未绑登场章的伏笔」清单中的伏笔会在你规划的章节中出现，必须在 foreshadowBindings 中输出绑定（index = 清单序号，chapterName = 登场章名——必须是本次规划中的真实章名）；不在本幕出现的伏笔不要绑定；
@@ -44,7 +46,7 @@ const SYSTEM_PROMPT = `你是一名资深小说编辑。你的任务：把给定
 2. 抽象场所（如梦中、回忆里）与一次性路过、无设定价值的地点不列入，保持清单信噪比；
 3. newLocations 会在确认时随规划一并展示给用户：用户确认后自动入库。
 
-完成后调用 save_chapters 工具保存章节规划（参数 = 完整规划 + newCharacters 新增角色清单，必须严格符合 schema）。save_chapters 会把本幕梗概、关键情节点与推荐的章节列表展示给用户确认：用户确认后保存完成；用户提出修改意见时，根据反馈调整规划后重新调用 save_chapters，直到用户确认为止。`;
+完成后调用 save_chapters 工具保存章节规划（参数 = 完整规划——含每章登场角色清单，必须严格符合 schema）。save_chapters 会把本幕梗概、关键情节点与推荐的章节列表（含登场角色）展示给用户确认：用户确认后保存完成；用户提出修改意见时，根据反馈调整规划后重新调用 save_chapters，直到用户确认为止。`;
 
 /** 章节规划的输入上下文：大纲全局信息 + 所属部 + 目标幕（模型按幕内容推荐章节数量） */
 export interface PlanChaptersInput {
@@ -72,11 +74,8 @@ export interface PlanChaptersAgentOptions {
   unboundForeshadows?: readonly StoredForeshadow[];
 }
 
-/** save_chapters 的结构化入参：章节规划 + 新增角色清单（项内名字不得重复）+ 新伏笔清单（项内表面行为不得重复）与伏笔绑定指令（序号不得重复）+ 新增地点清单（项内名字不得重复） */
+/** save_chapters 的结构化入参：章节规划（含逐章登场角色清单——新增角色与逐章绑定由编排层据此派生）+ 新伏笔清单（项内表面行为不得重复）与伏笔绑定指令（序号不得重复）+ 新增地点清单（项内名字不得重复） */
 export const saveChaptersInputSchema = chapterPlanSchema.extend({
-  newCharacters: z
-    .array(newCharacterSchema)
-    .refine((list) => new Set(list.map((c) => c.name)).size === list.length, "新增角色清单内名字不得重复"),
   newForeshadows: z
     .array(chapterNewForeshadowSchema)
     .refine((list) => new Set(list.map((f) => f.surfaceAction)).size === list.length, "伏笔清单内表面行为不得重复"),
@@ -94,10 +93,10 @@ export const saveChaptersInputSchema = chapterPlanSchema.extend({
     .refine((list) => new Set(list.map((l) => l.name)).size === list.length, "新增地点清单内名字不得重复"),
 });
 
-/** 章节 Agent 的最终产物：确认通过的规划本体 + 随规划连带确认的新增角色清单、新伏笔清单、既有伏笔登场/回收绑定指令与新增地点清单 */
+/** 章节 Agent 的最终产物：确认通过的规划本体（含逐章登场角色清单）与随规划连带确认的新伏笔清单、既有伏笔登场/回收绑定指令与新增地点清单。
+ *  新增角色清单不再由模型单独输出——由编排层经 collectChapterCharacters + filterNewCharacters 从逐章清单对角色库派生（单一事实源）。 */
 export interface ChapterPlanSubmission {
   plan: ChapterPlan;
-  newCharacters: NewCharacterOutline[];
   newForeshadows: ChapterNewForeshadow[];
   foreshadowBindings: ForeshadowBinding[];
   foreshadowRecoverBindings: ForeshadowBinding[];
@@ -118,10 +117,10 @@ export async function planChapters(
   const locationStore = options.locationStore ?? getDefaultLocationStore();
   let saved: ChapterPlanSubmission | undefined;
 
-  /** 角色库查询工具：返回库内全部角色名与叙事定位，供模型点名概述与梳理「新增角色」 */
+  /** 角色库查询工具：返回库内全部角色名与叙事定位，供模型点名登场清单与区分新增角色 */
   const listCharacters = tool({
     description:
-      "查询角色库中已有的全部角色（名字与叙事定位）。梳理 newCharacters 时必须先调用此工具：清单中只能列角色库中没有的角色，库内已有角色不得列入。",
+      "查询角色库中已有的全部角色（名字与叙事定位）。梳理各章登场角色清单时必须先调用此工具：库内已有角色用真实名字列入各章 characters，不得当新角色对待。",
     inputSchema: z.object({}),
     execute: async () => {
       const rows = characterStore.listCharacters(novelId);
@@ -146,10 +145,15 @@ export async function planChapters(
 
   const saveChapters = tool({
     description:
-      "章节规划完成后调用此工具保存（参数 = 完整规划 + newCharacters 新增角色清单 + newForeshadows 新伏笔与 foreshadowBindings / foreshadowRecoverBindings 登场与回收绑定 + newLocations 新增地点清单）。会把本幕梗概、关键情节点、推荐的章节列表与各清单展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整规划后重新调用。",
+      "章节规划完成后调用此工具保存（参数 = 完整规划——含每章登场角色清单 + newForeshadows 新伏笔与 foreshadowBindings / foreshadowRecoverBindings 登场与回收绑定 + newLocations 新增地点清单）。会把本幕梗概、关键情节点、推荐的章节列表（含登场角色）与各清单展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整规划后重新调用。",
     inputSchema: saveChaptersInputSchema,
     execute: async (inputPlan) => {
-      const { newCharacters, newForeshadows, foreshadowBindings, foreshadowRecoverBindings, newLocations, ...plan } = inputPlan;
+      const { newForeshadows, foreshadowBindings, foreshadowRecoverBindings, newLocations, ...plan } = inputPlan;
+      // 「本次规划新增角色」由逐章登场清单对角色库派生（单一事实源）——确认门所见 = 入库所得
+      const newCharacters: NewCharacterOutline[] = filterNewCharacters(
+        collectChapterCharacters(plan),
+        characterStore.listCharacters(novelId).map((r) => r.character),
+      );
       const confirmed = await channel.askConfirm("以上章节规划是否确认？", {
         default: true,
         view: {
@@ -166,7 +170,7 @@ export async function planChapters(
         },
       });
       if (confirmed) {
-        saved = { plan, newCharacters, newForeshadows, foreshadowBindings, foreshadowRecoverBindings, newLocations };
+        saved = { plan, newForeshadows, foreshadowBindings, foreshadowRecoverBindings, newLocations };
         return { ok: true as const };
       }
       const feedback = await channel.askText("请说明章节规划需要调整的地方> ");
@@ -216,7 +220,7 @@ export async function planChapters(
     maxSteps: 12,
     isDone: () => saved !== undefined,
     continuationHint:
-      "请立即调用 save_chapters 工具保存章节规划（参数为完整规划与 newCharacters / newForeshadows / foreshadowBindings / foreshadowRecoverBindings / newLocations 清单），不要只输出文本。",
+      "请立即调用 save_chapters 工具保存章节规划（参数为完整规划——含每章登场角色清单——与 newForeshadows / foreshadowBindings / foreshadowRecoverBindings / newLocations 清单），不要只输出文本。",
   });
 
   if (!saved) {

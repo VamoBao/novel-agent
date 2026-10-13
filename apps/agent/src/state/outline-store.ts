@@ -27,6 +27,9 @@ export interface OutlineNodeInput {
   summary?: string | null;
   /** 关键情节点（JSON 文本列存储）；仅幕节点可携带，缺省 null */
   keyPlotPoints?: ReadonlyArray<string> | null;
+  /** 登场角色 ID 绑定（JSON 文本列存储）；仅章节点可携带，缺省 null——
+   * 章节规划确认后由编排层经 setChapterCharacters 回填 */
+  characterIds?: ReadonlyArray<string> | null;
   sort: number;
   /** 缺省 1，首次生成的节点即第一版 */
   version?: number;
@@ -56,7 +59,7 @@ export interface ChapterInput {
   summary: string;
 }
 
-/** outlines 表行结构（列名蛇形，is_current_version 存 0/1，key_plot_points 存 JSON 文本） */
+/** outlines 表行结构（列名蛇形，is_current_version 存 0/1，key_plot_points 与 character_ids 存 JSON 文本） */
 interface OutlineRow {
   id: string;
   novel_id: string;
@@ -65,6 +68,7 @@ interface OutlineRow {
   name: string;
   summary: string | null;
   key_plot_points: string | null;
+  character_ids: string | null;
   sort: number;
   version: number;
   is_current_version: number;
@@ -75,15 +79,15 @@ interface OutlineRow {
 }
 
 const COLUMNS = `
-  id, novel_id, parent_id, type, name, summary, key_plot_points, sort, version,
+  id, novel_id, parent_id, type, name, summary, key_plot_points, character_ids, sort, version,
   is_current_version, status, document_id, created_at, updated_at
 `;
 
 const INSERT_SQL = `
   INSERT INTO outlines (
-    id, novel_id, parent_id, type, name, summary, key_plot_points, sort, version,
+    id, novel_id, parent_id, type, name, summary, key_plot_points, character_ids, sort, version,
     is_current_version, status, document_id, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 `;
 
 const GET_SQL = `
@@ -103,7 +107,7 @@ const LIST_CURRENT_SQL = `
 
 const UPDATE_SQL = `
   UPDATE outlines
-  SET name = ?, summary = ?, key_plot_points = ?, sort = ?, is_current_version = ?,
+  SET name = ?, summary = ?, key_plot_points = ?, character_ids = ?, sort = ?, is_current_version = ?,
       status = ?, document_id = ?, updated_at = ?
   WHERE id = ?;
 `;
@@ -120,6 +124,18 @@ function parseKeyPlotPoints(raw: string | null, nodeId: string): string[] | null
   }
 }
 
+/** character_ids 列（JSON 文本）还原为数组；损坏数据抛可读错误（同 key_plot_points 兜底） */
+function parseCharacterIds(raw: string | null, nodeId: string): string[] | null {
+  if (raw === null) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as string[];
+  } catch (cause) {
+    throw new Error(`大纲节点登场角色绑定列损坏（非合法 JSON）：${nodeId}`, { cause });
+  }
+}
+
 function rowToStored(row: OutlineRow): StoredOutlineNode {
   return {
     id: row.id,
@@ -133,6 +149,7 @@ function rowToStored(row: OutlineRow): StoredOutlineNode {
       name: row.name,
       summary: row.summary,
       keyPlotPoints: parseKeyPlotPoints(row.key_plot_points, row.id),
+      characterIds: parseCharacterIds(row.character_ids, row.id),
       sort: row.sort,
       version: row.version,
       isCurrentVersion: row.is_current_version === 1,
@@ -143,8 +160,9 @@ function rowToStored(row: OutlineRow): StoredOutlineNode {
 }
 
 /**
- * 大纲树持久化：按创作 ID 绑定存储部/幕/章节点，梗概（summary）与
- * 关键情节点（key_plot_points，仅幕节点，JSON 文本列）随节点入库。
+ * 大纲树持久化：按创作 ID 绑定存储部/幕/章节点，梗概（summary）、
+ * 关键情节点（key_plot_points，仅幕节点）与登场角色 ID 绑定
+ * （character_ids，仅章节点，JSON 文本列）随节点入库。
  * 同一节点可有多个版本行并存；当前版本切换由调用方先降级旧版本再提升新版本，
  * 唯一索引保证同父级下各当前版本 sort 不重复。
  */
@@ -156,7 +174,7 @@ export class OutlineStore {
     return new OutlineStore(openDatabase(path));
   }
 
-  /** 写入大纲节点（先过 schema 校验，缺省 version=1/当前版本/status=planned，内容两列缺省 null） */
+  /** 写入大纲节点（先过 schema 校验，缺省 version=1/当前版本/status=planned，内容三列缺省 null） */
   addOutlineNode(novelId: string, input: OutlineNodeInput): StoredOutlineNode {
     const node = outlineNodeSchema.parse({
       parentId: input.parentId ?? null,
@@ -164,6 +182,7 @@ export class OutlineStore {
       name: input.name,
       summary: input.summary ?? null,
       keyPlotPoints: input.keyPlotPoints ?? null,
+      characterIds: input.characterIds ?? null,
       sort: input.sort,
       version: input.version ?? 1,
       isCurrentVersion: input.isCurrentVersion ?? true,
@@ -180,6 +199,7 @@ export class OutlineStore {
       node.name,
       node.summary,
       node.keyPlotPoints === null ? null : JSON.stringify(node.keyPlotPoints),
+      node.characterIds === null ? null : JSON.stringify(node.characterIds),
       node.sort,
       node.version,
       node.isCurrentVersion ? 1 : 0,
@@ -214,7 +234,7 @@ export class OutlineStore {
       throw new Error(`大纲节点不存在，无法更新：${id}`);
     }
     const validated = outlineNodePatchSchema.parse(patch);
-    // 内容两列可空：undefined 表示不动，null 表示显式清空（对齐 documentId 的合并语义）
+    // 内容三列可空：undefined 表示不动，null 表示显式清空（对齐 documentId 的合并语义）
     const next = outlineNodeSchema.parse({
       parentId: current.node.parentId,
       type: current.node.type,
@@ -224,6 +244,10 @@ export class OutlineStore {
         validated.keyPlotPoints === undefined
           ? current.node.keyPlotPoints
           : validated.keyPlotPoints,
+      characterIds:
+        validated.characterIds === undefined
+          ? current.node.characterIds
+          : validated.characterIds,
       sort: validated.sort ?? current.node.sort,
       version: current.node.version,
       isCurrentVersion: validated.isCurrentVersion ?? current.node.isCurrentVersion,
@@ -237,6 +261,7 @@ export class OutlineStore {
         next.name,
         next.summary,
         next.keyPlotPoints === null ? null : JSON.stringify(next.keyPlotPoints),
+        next.characterIds === null ? null : JSON.stringify(next.characterIds),
         next.sort,
         next.isCurrentVersion ? 1 : 0,
         next.status,
@@ -362,6 +387,39 @@ export class OutlineStore {
       return created;
     });
     return saveChaptersTx(chapters);
+  }
+
+  /**
+   * 批量回填章节点登场角色 ID 绑定（事务原子）：章节规划确认入库、新增角色自动建卡
+   * 之后由编排层调用——按规划登场名单解析出的角色 ID 回填到各章节点，绑定前
+   * 全部角色已入库、ID 必然存在。仅章节点可绑定（schema 强约束，空数组拒绝——
+   * 解析后为空的章不传条目、保持 null 未绑定语义）；任一条失败整体回滚。
+   */
+  setChapterCharacters(
+    novelId: string,
+    entries: ReadonlyArray<{ chapterId: string; characterIds: ReadonlyArray<string> }>,
+  ): StoredOutlineNode[] {
+    if (entries.length === 0) {
+      throw new Error("登场角色绑定列表为空，拒绝回填");
+    }
+    for (const entry of entries) {
+      const stored = this.getOutlineNode(entry.chapterId);
+      if (!stored || stored.novelId !== novelId) {
+        throw new Error(`登场角色绑定的章节点不存在或不属于该小说：${entry.chapterId}`);
+      }
+      if (stored.node.type !== "chapter") {
+        throw new Error(
+          `登场角色只能绑定到章节点（类型为 ${stored.node.type}）：${entry.chapterId}`,
+        );
+      }
+    }
+    const bindTx = this.db.transaction(
+      (list: ReadonlyArray<{ chapterId: string; characterIds: ReadonlyArray<string> }>) =>
+        list.map((entry) =>
+          this.updateOutlineNode(entry.chapterId, { characterIds: [...entry.characterIds] }),
+        ),
+    );
+    return bindTx(entries);
   }
 
   close(): void {

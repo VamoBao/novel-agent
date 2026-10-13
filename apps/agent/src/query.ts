@@ -104,6 +104,7 @@ export function buildNovelDetail(
       sort: stored.node.sort,
       summary: stored.node.summary,
       keyPlotPoints: stored.node.keyPlotPoints,
+      characterIds: stored.node.characterIds,
     }));
   const documents: DocumentEntry[] = new DocumentStore(db)
     .listDocuments(novelId)

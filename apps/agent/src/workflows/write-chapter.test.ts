@@ -228,6 +228,48 @@ describe("writeChapter", () => {
     expect(channel.notifies.some((n) => n.includes("正文已保存"))).toBeTrue();
   });
 
+  test("登场角色按章绑定过滤：绑定章 prompt 只含绑定角色，未绑定章回退全库并通知", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    // 追加第二角色并把第一章绑定到主角一人（模拟章节规划确认后的回填绑定）
+    ctx.characterStore.addCharacter(NOVEL_ID, {
+      ...characterFixture,
+      basicInfo: { name: "萧无咎" },
+      core: { desire: "垄断灵脉", fear: "基业倾覆", narrativeRole: "反派" },
+    });
+    const lin = ctx.characterStore.listCharacters(NOVEL_ID)[0]!;
+    ctx.outlineStore.setChapterCharacters(NOVEL_ID, [
+      { chapterId: ctx.chapterNodeId, characterIds: [lin.id] },
+    ]);
+
+    // 绑定章：只注入本章阵容（林恒），另一角色不进 prompt，无回退通知
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+    const boundChannel = new FakeChannel([]);
+    await writeChapter({ channel: boundChannel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
+    const boundPrompt = generateTextCalls[0]!.prompt;
+    expect(boundPrompt).toContain("林恒");
+    expect(boundPrompt).not.toContain("萧无咎");
+    expect(boundChannel.notifies.some((n) => n.includes("🎭 本章未绑定登场角色"))).toBeFalse();
+
+    // 未绑定的第二章（旧数据形态）：回退全库注入（含萧无咎）并 notify 兜底
+    generateTextCalls = [];
+    const legacyChannel = new FakeChannel([]);
+    await writeChapter({
+      channel: legacyChannel,
+      novelId: NOVEL_ID,
+      model: DUMMY_MODEL,
+      ...ctx,
+      chapterNodeId: ctx.secondChapterNodeId,
+    });
+    const legacyPrompt = generateTextCalls[0]!.prompt;
+    expect(legacyPrompt).toContain("林恒");
+    expect(legacyPrompt).toContain("萧无咎");
+    expect(
+      legacyChannel.notifies.some((n) => n.includes("🎭 本章未绑定登场角色（旧数据），已回退注入全库角色参考")),
+    ).toBeTrue();
+  });
+
   test("前置校验：小说不存在 / 章节不存在 / 非章节点 / 已有正文 / 世界观未确认均报可读错误", async () => {
     const ctx = await setupDb();
     cleanupAll.push(ctx.cleanup);

@@ -77,8 +77,19 @@ describe("renderView", () => {
       keyPlotPoints: ["第1幕情节点"],
       plan: {
         chapters: [
-          { name: "第一章·雨夜", summary: "雨夜的剧情概述" },
-          { name: "第二章·来客", summary: "来客的剧情概述" },
+          {
+            name: "第一章·雨夜",
+            summary: "雨夜的剧情概述",
+            characters: [{ name: "林恒", role: "本章主视角" }],
+          },
+          {
+            name: "第二章·来客",
+            summary: "来客的剧情概述",
+            characters: [
+              { name: "林恒", role: "遭伏击的组织者" },
+              { name: "萧无咎", role: "血宗宗主·本章首次登场的主要反派" },
+            ],
+          },
         ],
       },
     });
@@ -86,8 +97,10 @@ describe("renderView", () => {
     expect(text).toContain("本幕梗概：第1幕梗概");
     expect(text).toContain("1) 第1幕情节点");
     expect(text).toContain("拟分 2 章：");
-    expect(text).toContain("第1章 第一章·雨夜：雨夜的剧情概述");
-    expect(text).toContain("第2章 第二章·来客：来客的剧情概述");
+    expect(text).toContain("第1章 第一章·雨夜：雨夜的剧情概述（登场：林恒）");
+    expect(text).toContain(
+      "第2章 第二章·来客：来客的剧情概述（登场：林恒、萧无咎）",
+    );
   });
 
   test("chapter-plan：携带 newCharacters 时渲染新增角色清单，缺失不渲染", () => {
@@ -96,7 +109,15 @@ describe("renderView", () => {
       actName: "第2幕",
       actSummary: "本幕梗概",
       keyPlotPoints: ["情节点A"],
-      plan: { chapters: [{ name: "第一章·雨夜", summary: "雨夜夺脉" }] },
+      plan: {
+        chapters: [
+          {
+            name: "第一章·雨夜",
+            summary: "雨夜夺脉",
+            characters: [{ name: "萧无咎", role: "血宗宗主·本章首次登场" }],
+          },
+        ],
+      },
       newCharacters: [{ name: "萧无咎", role: "第1章登场·血宗宗主" }],
     } as const;
     const withNew = renderView(view as never);
@@ -130,7 +151,11 @@ describe("renderView", () => {
   test("chapter-plan：携带 newForeshadows / foreshadowBindings 时渲染两区块，缺失不渲染", () => {
     const view = {
       kind: "chapter-plan", actName: "第2幕", actSummary: "梗概", keyPlotPoints: ["情节点"],
-      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+      plan: {
+        chapters: [
+          { name: "第一章·雨夜", summary: "概述", characters: [{ name: "林恒", role: "本章主视角" }] },
+        ],
+      },
       newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], chapterName: "第一章·雨夜" }],
       foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }],
     };
@@ -158,7 +183,11 @@ describe("renderView", () => {
   test("chapter-plan：携带 foreshadowRecoverBindings 时渲染回收绑定区块，缺失或空不渲染", () => {
     const view = {
       kind: "chapter-plan", actName: "第2幕", actSummary: "梗概", keyPlotPoints: ["情节点"],
-      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+      plan: {
+        chapters: [
+          { name: "第一章·雨夜", summary: "概述", characters: [{ name: "林恒", role: "本章主视角" }] },
+        ],
+      },
       foreshadowRecoverBindings: [{ index: 1, chapterName: "第二章·来客" }],
     };
     const rendered = renderView(view as never);
@@ -171,7 +200,11 @@ describe("renderView", () => {
   test("chapter-plan：携带 newLocations 时渲染地点区块，缺失或空不渲染", () => {
     const view = {
       kind: "chapter-plan", actName: "第2幕", actSummary: "梗概", keyPlotPoints: ["情节点"],
-      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+      plan: {
+        chapters: [
+          { name: "第一章·雨夜", summary: "概述", characters: [{ name: "林恒", role: "本章主视角" }] },
+        ],
+      },
       newLocations: [{ name: "青云城", description: "第2章主战场·东部边境要塞" }],
     };
     const rendered = renderView(view as never);

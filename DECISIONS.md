@@ -1,3 +1,12 @@
+## 2026-10-13 章节登场人物 ID 绑定：逐章清单单一事实源、outlines.character_ids 列、正文按绑定注入
+
+- **背景**：正文生成的【登场角色参考】注入**全库角色**——角色库随创作推进膨胀（大纲、每幕规划持续自动入库），每章正文生成都要为无关角色付出 token；且「哪些角色在哪章登场」没有结构化数据（顶层 newCharacters 的 role 文本「第2章登场·…」仅供人读，系统从不解析）。用户提出：在大纲表新增角色 ID 绑定列（仅章节点有效），章节规划时逐章梳理登场角色，确认入库后建卡 → 名字→ID 回填绑定，正文生成按绑定收窄上下文。
+- **决策一：逐章 characters 清单为唯一事实源，顶层 newCharacters 清单取消（方案设计时与用户对齐）**：save_chapters 的 chapters[] 项新增 `characters: [{name, role}]`（min 1，章内名不重复，全员必填 role——库内角色=在本章中的作用、新角色=设定级一句话定位即建卡依据，用户选定）；「本次规划新增角色」由编排层经 `collectChapterCharacters`（逐章并集、跨章同名保首个 role）+ `filterNewCharacters`（对角色库 diff）**派生**，确认视图与建卡入库共用同一对纯函数——确认门所见 = 入库所得，消除「幕级清单 vs 章级清单」双清单漂移。否决「保留顶层清单并行」（漂移）与「纯名字清单」（新角色建卡失去定位输入）。
+- **决策二：绑定存 outlines.character_ids JSON 文本列，仅章节点携带（用户指定「大纲表可控列」）**：完全对齐 key_plot_points 先例——schema refine 强约束（部/幕必须 null）、TEXT 存 JSON 数组、损坏抛可读错误、schema min(1)（null 或 ≥1，不出现空数组——解析后为空的章不绑、保持 null 未绑定语义）；patch 支持 set/clear。否决「独立 chapter_characters 关联表」（当前无按角色反查章的查询需求，列内 JSON 与 key_plot_points/character_ids（伏笔）同风格）。时序按用户指定：saveChapters 建章 → 地点入库 → 派生建卡（autoCreateCharacters）→ `bindChapterCasts`（resolveCharacterIds trim 全等复用 + setChapterCharacters 单事务回填）→ 伏笔——绑定前名单全部角色已入库、ID 必然存在，index 对齐免名字匹配。
+- **决策三：正文生成按绑定收窄，未绑定旧章回退全库（兼容兜底）**：characterIds 非空且可解析 → 仅注入本章阵容 digest；null（17 版前旧章）或绑定角色全不在库 → 回退全库注入并 notify「🎭 本章未绑定登场角色（旧数据）」——旧数据行为逐字节不变，回退不静默。
+- **结论**：SCHEMA_VERSION 16→17（ALTER 补列与版本同 immediate 事务、表缺失或列已存在只写版本标记；15→16 段改显式写 16 供链式直升）；shared 四 schema（outlineNode / outlineNodePatch / chapterPlan.chapters / outlineNodeEntry）+ OutlineStore 全链路 + setChapterCharacters；chapter-agent prompt 重写与派生视图；chapter-cast-intake.ts 确定性回填；write-chapter 按绑定过滤；query 契约与客户端（ViewCard 章行登场名单、章卡「🎭 登场人物」区块——未匹配兜底原 ID，用户选定展示）+ CLI renderView 同步。AC：typecheck 3 工程 / lint / 393 用例全过（净增 12：shared schema 5 + 迁移 1 + store 3 + chapter-cast-intake 3 + plan-act-chapters / write-chapter / cli-channel / OutlineNodeCard 用例扩展）。
+
+
 ## 2026-10-12 小说创作条件：绑定 novels、分阶段持久化、历史留空
 
 背景：类型、受众与核心冲突仅在内存 state，重生成无法复用原创作意图。用户确认任务包并指示开始（设计见 `docs/superpowers/specs/2026-10-12-novel-creation-params-design.md`）。

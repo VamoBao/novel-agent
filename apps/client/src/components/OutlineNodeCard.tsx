@@ -45,6 +45,9 @@ interface OutlineNodeCardProps {
   onPlanChapters?: () => void;
   /** 本章已生成的正文（详情 documents 按 chapterId 匹配）；无则显示生成入口 */
   document?: DocumentEntry;
+  /** 本章登场人物名（章节规划确认时绑定的 characterIds 经详情 characters 解析，
+   *  未匹配兜底原 ID；未绑定（旧数据）传 null/undefined 不渲染区块） */
+  castNames?: string[] | null;
   /** 正文生成会话进行中（单例 agent：进行中禁用各章入口，目标章显示生成中） */
   writing?: boolean;
   /** 本章正文生成进度（write-progress 消息；仅目标章传入，其余章 undefined） */
@@ -82,6 +85,7 @@ export function OutlineNodeCard({
   hasChapters = false,
   onPlanChapters,
   document,
+  castNames,
   writing = false,
   writeProgress,
   onWriteChapter,
@@ -129,6 +133,12 @@ export function OutlineNodeCard({
           ) : (
             <p className="dim">（暂无关键情节点——旧数据未入库内容）</p>
           )}
+        </section>
+      ) : null}
+      {node.type === "chapter" && castNames && castNames.length > 0 ? (
+        <section className="viewcard">
+          <p className="card-label">🎭 登场人物</p>
+          <p className="outline-summary">{castNames.join("、")}</p>
         </section>
       ) : null}
       {node.type === "chapter" && document ? (

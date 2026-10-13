@@ -5,7 +5,7 @@ import { OutlineNodeCard, type ChapterWriteProgress } from "./OutlineNodeCard";
 
 const chapter: OutlineNodeEntry = {
   id: "chapter-1", parentId: "act-1", type: "chapter", name: "第一章",
-  sort: 1, summary: "少年拾得碎片", keyPlotPoints: null,
+  sort: 1, summary: "少年拾得碎片", keyPlotPoints: null, characterIds: null,
 };
 
 function render(progress: ChapterWriteProgress): string {
@@ -56,5 +56,23 @@ describe("OutlineNodeCard 正文生成进度", () => {
     ] });
     expect(html).toContain("文风校验（已跳过）");
     expect(html).not.toContain("✓ 文风校验");
+  });
+});
+
+describe("OutlineNodeCard 登场人物区块", () => {
+  test("绑定章渲染登场人物名单，未绑定（旧数据）不渲染区块", () => {
+    const bound = renderToStaticMarkup(
+      <OutlineNodeCard
+        node={{ ...chapter, characterIds: ["c-1", "c-2"] }}
+        castNames={["林恒", "萧无咎"]}
+      />,
+    );
+    expect(bound).toContain("🎭 登场人物");
+    expect(bound).toContain("林恒、萧无咎");
+
+    const unbound = renderToStaticMarkup(
+      <OutlineNodeCard node={chapter} castNames={null} />,
+    );
+    expect(unbound).not.toContain("登场人物");
   });
 });

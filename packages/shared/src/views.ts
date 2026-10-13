@@ -52,8 +52,8 @@ export const chapterPlanViewSchema = z.object({
   actName: z.string().describe("幕名（规划的拆解对象）"),
   actSummary: z.string().describe("幕梗概"),
   keyPlotPoints: z.array(z.string()).describe("幕关键情节点"),
-  plan: chapterPlanSchema.describe("推荐的本幕章节规划"),
-  /** 确认门携带的「新增角色清单」（名字+一句话定位）；旧消息不带 */
+  plan: chapterPlanSchema.describe("推荐的本幕章节规划（含逐章登场角色清单）"),
+  /** 确认门携带的「新增角色清单」（名字+一句话定位）——由逐章登场清单对角色库派生（未在库中的名字）；旧消息不带 */
   newCharacters: z.array(newCharacterSchema).optional(),
   /** 确认门携带的伏笔清单；旧消息不带 */
   newForeshadows: z.array(chapterNewForeshadowSchema).optional(),

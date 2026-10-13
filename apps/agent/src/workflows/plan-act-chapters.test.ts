@@ -69,17 +69,33 @@ const partsFixture = [
   },
 ];
 
+/** 章节规划 fixture：每章登场清单含库内角色（林恒）与新角色（萧无咎——确认后派生自动建卡） */
 const chapterPlanFixture = {
   chapters: [
-    { name: "第一章·雨夜", summary: "雨夜夺脉的剧情概述" },
-    { name: "第二章·来客", summary: "神秘来客的剧情概述" },
-    { name: "第三章·破晓", summary: "黎明反击的剧情概述" },
+    { name: "第一章·雨夜", summary: "雨夜夺脉的剧情概述", characters: [{ name: "林恒", role: "本章主视角" }] },
+    {
+      name: "第二章·来客",
+      summary: "神秘来客的剧情概述",
+      characters: [
+        { name: "林恒", role: "遭伏击的组织者" },
+        { name: "萧无咎", role: "血宗宗主·本章首次登场的主要反派" },
+      ],
+    },
+    { name: "第三章·破晓", summary: "黎明反击的剧情概述", characters: [{ name: "林恒", role: "反击领袖" }] },
   ],
-  newCharacters: [],
   newForeshadows: [],
   foreshadowBindings: [],
   foreshadowRecoverBindings: [],
   newLocations: [],
+};
+
+/** 登场清单仅含库内角色的变体：派生新角色为空 → 跳过自动创建（零 LLM 调用） */
+const noNewCastFixture = {
+  ...chapterPlanFixture,
+  chapters: chapterPlanFixture.chapters.map((c) => ({
+    ...c,
+    characters: [{ name: "林恒", role: "本章主视角" }],
+  })),
 };
 
 const worldviewFixture = {
@@ -189,13 +205,13 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
       firstAct.id,
       secondAct.id,
     );
-    // 双轮脚本：轮 1 章节 Agent save_chapters（新增角色 + 新伏笔 + 既有伏笔绑定指令 + 新增地点）→ 轮 2 自动创建 Agent save_character 入库
+    // 双轮脚本：轮 1 章节 Agent save_chapters（逐章登场清单含新角色 + 新伏笔 + 既有伏笔绑定指令 + 新增地点）
+    // → 轮 2 自动创建 Agent save_character 入库（新角色由登场清单对角色库派生）
     textScript = [
       [[{
         tool: "save_chapters",
         args: {
           ...chapterPlanFixture,
-          newCharacters: [{ name: "萧无咎", role: "第2章登场·血宗宗主" }],
           newForeshadows: [{ surfaceAction: "来客留下半块玉佩", hiddenTruth: "玉佩是主角身世信物", attentionLevel: 5, characterNames: ["林恒"], chapterName: "第二章·来客" }],
           foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }],
           foreshadowRecoverBindings: [{ index: 1, chapterName: "第三章·破晓" }],
@@ -225,7 +241,12 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
     expect(channel.stages).toEqual(["chapter"]);
     expect(channel.notifies).toContain("📑 章节规划 Agent 启动（第2幕）…");
     expect(channel.notifies).toContain("📑 章节已入库：第2幕 规划 3 章");
-    expect(channel.views.at(-1)).toMatchObject({ kind: "chapter-plan", actName: "第2幕" });
+    // 确认视图：逐章登场清单随规划展示，新角色由登场清单对角色库派生（确认门所见 = 入库所得）
+    expect(channel.views.at(-1)).toMatchObject({
+      kind: "chapter-plan",
+      actName: "第2幕",
+      newCharacters: [{ name: "萧无咎", role: "血宗宗主·本章首次登场的主要反派" }],
+    });
 
     const chapters = world.outlineStore
       .listOutlineNodes(NOVEL_ID)
@@ -243,6 +264,21 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
     expect(
       world.characterStore.listCharacters(NOVEL_ID).map((c) => c.character.basicInfo.name),
     ).toEqual(["林恒", "萧无咎"]);
+
+    // 各章登场角色绑定回填：库内（林恒）+ 本轮新入库（萧无咎）的名字→ID 落到章节点；
+    // 自动创建 Agent 的 extraContext 章节行带登场名单
+    expect(agentPrompts[1]).toContain("（登场：林恒、萧无咎）");
+    const linHengId = world.characterStore
+      .listCharacters(NOVEL_ID)
+      .find((c) => c.character.basicInfo.name === "林恒")!.id;
+    const xiaoId = world.characterStore
+      .listCharacters(NOVEL_ID)
+      .find((c) => c.character.basicInfo.name === "萧无咎")!.id;
+    expect(
+      chapters.map((c) => c.node.characterIds),
+    ).toEqual([[linHengId], [linHengId, xiaoId], [linHengId]]);
+    expect(channel.notifies.some((n) => n.includes("🎭 正在绑定各章登场角色（3 章）"))).toBe(true);
+    expect(channel.notifies.some((n) => n.includes("✨ 各章登场角色已绑定：3 章共 4 人次"))).toBe(true);
 
     // 新增地点确定性入库：库内同名「北境大陆」被兜底 diff 剔除，仅「青云城」追加；先于角色自动创建
     const locRows = world.locationStore.listLocations(NOVEL_ID);
@@ -262,9 +298,6 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
     expect(agentPrompts[0]).toContain("1. 断脉散中的蛊种——蛊种成熟时宗主将借体夺舍");
 
     // 伏笔：新伏笔带登场章与幕入库；既有未绑伏笔绑定第一章
-    const linHengId = world.characterStore
-      .listCharacters(NOVEL_ID)
-      .find((c) => c.character.basicInfo.name === "林恒")!.id;
     const fs = world.foreshadowStore.listForeshadows(NOVEL_ID);
     const created = fs.find((f) => f.foreshadow.surfaceAction === "来客留下半块玉佩");
     const chapterIds = world.outlineStore.listOutlineNodes(NOVEL_ID).filter((n) => n.node.type === "chapter");
@@ -403,9 +436,9 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
     expect(channel.notifies).toHaveLength(0);
   });
 
-  test("规划未引入新角色：空清单跳过自动创建（零 LLM 调用）", async () => {
+  test("规划未引入新角色：登场清单全为库内角色，派生为空跳过自动创建（零 LLM 调用）", async () => {
     const world = await seed();
-    textScript = [[[{ tool: "save_chapters", args: chapterPlanFixture }]]]; // fixture 的 newCharacters 为 []
+    textScript = [[[{ tool: "save_chapters", args: noNewCastFixture }]]]; // 登场清单仅含库内角色（林恒）
     const channel = new FakeChannel([true]);
     await planActChapters({
       channel,
@@ -423,12 +456,17 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
     expect(
       world.characterStore.listCharacters(NOVEL_ID).map((c) => c.character.basicInfo.name),
     ).toEqual(["林恒"]);
+    // 绑定照常回填（库内角色也需要绑定）
+    const chapters = world.outlineStore
+      .listOutlineNodes(NOVEL_ID)
+      .filter((n) => n.node.type === "chapter");
+    expect(chapters.every((c) => c.node.characterIds?.length === 1)).toBe(true);
   });
 
   test("本幕无伏笔且规划未引入：跳过伏笔处理（零额外调用）", async () => {
     const world = await seed();
-    // fixture 的 newForeshadows / foreshadowBindings 均为 []，且本幕（第 1 幕）无未绑伏笔
-    textScript = [[[{ tool: "save_chapters", args: chapterPlanFixture }]]];
+    // fixture 的 newForeshadows / foreshadowBindings 均为 []，本幕（第 1 幕）无未绑伏笔，登场清单全为库内角色
+    textScript = [[[{ tool: "save_chapters", args: noNewCastFixture }]]];
     agentPrompts = [];
     const channel = new FakeChannel([true]);
     await planActChapters({

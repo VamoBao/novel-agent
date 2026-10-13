@@ -268,7 +268,11 @@ describe("outlineSchema", () => {
 });
 
 describe("chapterPlanSchema", () => {
-  const chapter = (name: string) => ({ name, summary: `${name}的剧情概述` });
+  const chapter = (name: string) => ({
+    name,
+    summary: `${name}的剧情概述`,
+    characters: [{ name: "林恒", role: "本章主视角" }],
+  });
 
   test("多章规划通过，章名与概述均保留", () => {
     const plan = chapterPlanSchema.parse({
@@ -276,6 +280,7 @@ describe("chapterPlanSchema", () => {
     });
     expect(plan.chapters).toHaveLength(5);
     expect(plan.chapters[0]?.summary).toBe("第1章的剧情概述");
+    expect(plan.chapters[0]?.characters).toEqual([{ name: "林恒", role: "本章主视角" }]);
   });
 
   test("零章与超过 12 章被拒绝（数量防漂移上下限）", () => {
@@ -288,8 +293,38 @@ describe("chapterPlanSchema", () => {
   });
 
   test("空章名或空概述被拒绝", () => {
-    expect(() => chapterPlanSchema.parse({ chapters: [{ name: "", summary: "概述" }] })).toThrow();
-    expect(() => chapterPlanSchema.parse({ chapters: [{ name: "第一章", summary: "" }] })).toThrow();
+    expect(() =>
+      chapterPlanSchema.parse({ chapters: [{ ...chapter("第一章"), name: "" }] }),
+    ).toThrow();
+    expect(() =>
+      chapterPlanSchema.parse({ chapters: [{ ...chapter("第一章"), summary: "" }] }),
+    ).toThrow();
+  });
+
+  test("登场角色清单缺失 / 空清单 / 空名或空定位被拒绝", () => {
+    const valid = chapter("第一章");
+    expect(() => chapterPlanSchema.parse({ chapters: [{ name: "第一章", summary: "概述" }] })).toThrow();
+    expect(() => chapterPlanSchema.parse({ chapters: [{ ...valid, characters: [] }] })).toThrow();
+    expect(() =>
+      chapterPlanSchema.parse({ chapters: [{ ...valid, characters: [{ name: "", role: "主角" }] }] }),
+    ).toThrow();
+    expect(() =>
+      chapterPlanSchema.parse({ chapters: [{ ...valid, characters: [{ name: "林恒", role: "" }] }] }),
+    ).toThrow();
+  });
+
+  test("同一章登场角色重名被拒绝（跨章同名放行）", () => {
+    const valid = chapter("第一章");
+    expect(() =>
+      chapterPlanSchema.parse({
+        chapters: [
+          { ...valid, characters: [{ name: "林恒", role: "主视角" }, { name: "林恒", role: "重复" }] },
+        ],
+      }),
+    ).toThrow("同一章的登场角色清单内名字不得重复");
+    expect(() =>
+      chapterPlanSchema.parse({ chapters: [valid, chapter("第二章")] }),
+    ).not.toThrow();
   });
 });
 
@@ -300,6 +335,7 @@ describe("outlineNodeSchema", () => {
     name: "第一幕·开端",
     summary: "主角发现异常",
     keyPlotPoints: ["异常初现", "决定追查"],
+    characterIds: null,
     sort: 1,
     version: 1,
     isCurrentVersion: true,
@@ -333,12 +369,39 @@ describe("outlineNodeSchema", () => {
     expect(() => outlineNodeSchema.parse({ ...baseNode, keyPlotPoints: [""] })).toThrow();
   });
 
+  test("章节点携带登场角色 ID 绑定通过，部/幕节点携带被拒绝", () => {
+    const node = outlineNodeSchema.parse({
+      ...baseNode,
+      type: "chapter",
+      keyPlotPoints: null,
+      characterIds: ["c1", "c2"],
+    });
+    expect(node.characterIds).toEqual(["c1", "c2"]);
+    expect(() =>
+      outlineNodeSchema.parse({ ...baseNode, characterIds: ["c1"] }),
+    ).toThrow("登场角色绑定仅章节点可携带");
+    expect(() =>
+      outlineNodeSchema.parse({ ...baseNode, type: "part", keyPlotPoints: null, characterIds: ["c1"] }),
+    ).toThrow("登场角色绑定仅章节点可携带");
+  });
+
+  test("空登场角色 ID 数组被拒绝（null 与缺省以外的最小约束）", () => {
+    expect(() =>
+      outlineNodeSchema.parse({ ...baseNode, type: "chapter", keyPlotPoints: null, characterIds: [] }),
+    ).toThrow();
+    expect(() =>
+      outlineNodeSchema.parse({ ...baseNode, type: "chapter", keyPlotPoints: null, characterIds: [""] }),
+    ).toThrow();
+  });
+
   test("patch 放行内容字段更新与清空", () => {
     const patch = outlineNodePatchSchema.parse({
       summary: "修订后的梗概",
       keyPlotPoints: null,
+      characterIds: ["c1"],
     });
-    expect(patch).toEqual({ summary: "修订后的梗概", keyPlotPoints: null });
+    expect(patch).toEqual({ summary: "修订后的梗概", keyPlotPoints: null, characterIds: ["c1"] });
+    expect(outlineNodePatchSchema.parse({ characterIds: null })).toEqual({ characterIds: null });
   });
 });
 
@@ -410,7 +473,7 @@ describe("chapterPlanViewSchema 的 newCharacters 可选字段", () => {
     actName: "第2幕",
     actSummary: "本幕梗概",
     keyPlotPoints: ["情节点A"],
-    plan: { chapters: [{ name: "第一章·雨夜", summary: "雨夜夺脉" }] },
+    plan: { chapters: [{ name: "第一章·雨夜", summary: "雨夜夺脉", characters: [{ name: "林恒", role: "本章主视角" }] }] },
   };
 
   test("携带 newCharacters 的确认视图通过校验", () => {
@@ -470,7 +533,7 @@ describe("newForeshadowSchema 及变体", () => {
       actName: "第1幕",
       actSummary: "梗概",
       keyPlotPoints: ["情节点"],
-      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述", characters: [{ name: "林恒", role: "本章主视角" }] }] },
       foreshadowRecoverBindings: [
         { index: 1, chapterName: "第二章·来客" },
         { index: 1, chapterName: "第三章·破晓" },
@@ -482,7 +545,7 @@ describe("newForeshadowSchema 及变体", () => {
       actName: "第1幕",
       actSummary: "梗概",
       keyPlotPoints: ["情节点"],
-      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述", characters: [{ name: "林恒", role: "本章主视角" }] }] },
     }).foreshadowRecoverBindings).toBeUndefined();
   });
 
@@ -516,7 +579,7 @@ describe("两确认视图的地点可选字段", () => {
       actName: "第1幕",
       actSummary: "梗概",
       keyPlotPoints: ["情节点"],
-      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述", characters: [{ name: "林恒", role: "本章主视角" }] }] },
     };
     expect(chapterPlanViewSchema.parse({ ...base, newLocations: [loc] }).newLocations).toHaveLength(1);
     expect(chapterPlanViewSchema.parse(base).newLocations).toBeUndefined();
@@ -571,7 +634,7 @@ describe("两确认视图的伏笔可选字段", () => {
       actName: "第1幕",
       actSummary: "梗概",
       keyPlotPoints: ["情节点"],
-      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述" }] },
+      plan: { chapters: [{ name: "第一章·雨夜", summary: "概述", characters: [{ name: "林恒", role: "本章主视角" }] }] },
     };
     const view = chapterPlanViewSchema.parse({
       ...base,

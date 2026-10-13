@@ -51,6 +51,7 @@ const validOutlineNodes = [
     sort: 1,
     summary: "少年觉醒",
     keyPlotPoints: null,
+    characterIds: null,
   },
   {
     id: "0199c0de-0000-7000-8000-0000000000a2",
@@ -60,6 +61,17 @@ const validOutlineNodes = [
     sort: 1,
     summary: "灵脉初现",
     keyPlotPoints: ["遭遇袭击", "觉醒"],
+    characterIds: null,
+  },
+  {
+    id: "0199c0de-0000-7000-8000-0000000000a3",
+    parentId: "0199c0de-0000-7000-8000-0000000000a2",
+    type: "chapter",
+    name: "第一章·雨夜来客",
+    sort: 1,
+    summary: "雨夜遭遇袭击",
+    keyPlotPoints: null,
+    characterIds: ["0199c0de-0000-7000-8000-000000000002"],
   },
 ];
 
@@ -196,8 +208,9 @@ describe("novelDetailSchema", () => {
       styleReferences: [],
     });
     expect(detail.characters).toHaveLength(1);
-    expect(detail.outlineNodes).toHaveLength(2);
+    expect(detail.outlineNodes).toHaveLength(3);
     expect(detail.outlineNodes[1]?.keyPlotPoints).toHaveLength(2);
+    expect(detail.outlineNodes[2]?.characterIds).toEqual(["0199c0de-0000-7000-8000-000000000002"]);
     expect(detail.documents).toHaveLength(1);
     expect(detail.documents[0]?.chapterId).toBe("0199c0de-0000-7000-8000-00000000000b");
     expect(detail.documents[0]?.filePath).toBe("灵脉拾遗/第一部/第一章.md");
