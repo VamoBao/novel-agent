@@ -6,7 +6,7 @@ import { z } from "zod";
  *
  * 三段校验各自独立单轮 LLM 调用（上下文互不继承），结果合并为一份报告：
  * - content 内容约束：正文与世界观 / 章节概述 / 本章伏笔的符合性（issue 列表）
- * - style 文风对比：正文与启用参考文风的相似度评分（0-100，≥90 合格；无启用文风 skipped）
+ * - style 文风对比：正文与启用参考文风的相似度评分（0-100，按会话生效阈值判定；无启用文风 skipped）
  * - consistency 前后自洽：正文内部的描述矛盾（issue 列表）
  */
 
@@ -33,7 +33,7 @@ export type ReviewIssue = z.infer<typeof reviewIssueSchema>;
 
 /**
  * 文风段结果：无启用文风时整段跳过（skipped: true，不发 LLM 调用，与生成侧
- * 「零注入」对称）；有文风时输出相似度评分（0-100 整数，≥90 合格）+ 评分依据
+ * 「零注入」对称）；有文风时输出相似度评分（0-100 整数，按会话生效阈值判定）+ 评分依据
  * + 改进建议（达标可为空数组）。
  */
 export const styleReviewSchema = z.discriminatedUnion("skipped", [

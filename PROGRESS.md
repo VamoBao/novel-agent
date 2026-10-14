@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-15 [fix] 写作偏好审查问题修复：保存未选中小说的偏好只刷新书库，当前小说详情刷新以最新选中 ID 拦截迟到成功/失败响应；writeChapter 各阶段携带实际 stylePassScore，经 headless/shared 协议传给客户端，文风阶段警告与建议同审核阈值判定（旧消息默认 80、支持 0）；偏好加载失败显示原始错误与取消按钮、隐藏保存入口。新增 10 项回归，App 与 PreviewPane 使用真实 React/DOM，覆盖非当前保存、当前刷新、切换期间迟到响应、会话阈值与详情不一致、协议兼容和加载失败；关键失败场景先红后绿。AC：typecheck 3 工程 / lint / 全量 539 项（52 文件）通过，独立复审无新增问题；本次未调用真实模型。
+
 - 2026-10-14 [feat] 章节篇幅与文风合格线两级可配置（复杂需求，跨 shared / agent 数据层与工作流 / Electron 客户端；需求参数由用户完整给出、会话自主执行，任务包确认门按参数直接落清单推进，决策见 DECISIONS）：①shared 新建 `writing-prefs.ts`——内置默认（篇幅 2000~3000 字、文风合格线 80，替代历史硬编码 90）+ 边界 schema（篇幅 100~100000 整数、合格线 0-100）+ novelWritingPrefsSchema 全量提交契约（篇幅 min/max 成对且下限 ≤ 上限）+ resolveChapterLength / resolveStylePassScore「小说级 > 系统级 > 内置默认」解析纯函数（篇幅整体覆盖、半设乱序防御性跳过、合格线独立覆盖），query 契约 novelDetail.novel 增 chapterLengthMin / chapterLengthMax / stylePassScore（旧载荷缺省 null）；②数据层 SCHEMA_VERSION 19→20——novels 增三可空列（immediate 事务补列 + 锁内复查，旧行 NULL=跟随系统设置）+ NovelStore.updateWritingPrefs 全量替换写（schema 校验）；③query CLI 增 `set-writing-prefs <novelId> <JSON>` 命令与详情携带；④workflows——`providers/writing-prefs.ts` 读系统级环境变量（NOVEL_CHAPTER_LENGTH_MIN/MAX + NOVEL_STYLE_PASS_SCORE，非法值静默归 null），writeChapter 解析生效值（写作 prompt 篇幅条用生效值、小说级覆盖生效时 notify 通报），chapter-review 合格线参数化（input.stylePassScore → 评分 prompt / isReportPassing / formatRevisionBlock，缺省内置默认），Options 增 systemWritingPrefs 注入；⑤客户端——settings.json 增 writing 组（normalizeSettings 逐字段校验、非法归 null）+ resolveWritingEnv 三级优先级注入 + 设置弹窗「写作偏好（默认）」组；⑥书库右键「📏 写作偏好」→ WritingPrefsDialog（加载现值 / 三项编辑 / 留空=跟随系统设置）经 library:setWritingPrefs IPC → set-writing-prefs 直写库，两弹窗共用 `writing-prefs-form.ts` 表单解析（成对填写、下限 ≤ 上限、整数边界）。AC：typecheck 3 工程 / lint / 全量 529 用例通过（净增 22：shared writing-prefs 7 + db 迁移 1 + novel-store 1 + query 2 + providers 3 + chapter-review 阈值 2 + write-chapter 偏好 2 + client settings 3 + WritingPrefsDialog 交互 1，另有既有用例随契约与阈值默认改写）；真实库副本 19→20 迁移实跑无损（版本升 20、10 表行数一致、旧小说三列 NULL、updateWritingPrefs 往返、重开不重复迁移）；真实模型端到端与 GUI 观感待用户复验。
 
 - 2026-10-14 [feat] 伏笔最终回收与正文审校：按全书章序最晚回收章要求完整真相揭露和收尾，阶段回收保留核心真相；写作/修订/eval 同源约束，最终收尾优先于概述中的延后揭露描述。主记录、边界与剩余任务包见 [workflows PROGRESS](apps/agent/src/workflows/PROGRESS.md)。AC：新增 8 项回归先红后绿，全量 507 项、typecheck、lint 通过，独立审查与复审无遗留必须修复问题；保留现有三轮未通过时保底保存并警告，真实模型文学效果未验证。
@@ -16,11 +18,9 @@
 
 - 2026-10-14 [feat] Agent 模型 OpenAI 兼容接入：新增 agent-model.ts 与 AGENT_MODEL_API_KEY / AGENT_MODEL_NAME / AGENT_MODEL_BASE_URL，所有 Agent、润色与正文审校改用通用模型，独立写作未配置时回落同一实例；移除 DeepSeek 专用依赖。客户端 agentModel 三字段与 Base URL 输入，兼容旧 deepseek 设置组和 DEEPSEEK_* 环境变量，逐字段保持设置 > .env > 继承优先级，同来源通用变量先于旧变量。模型名与地址保留 DeepSeek 默认值。新增 12 项回归（配置、CLI/headless、真实 SDK 文本/工具/JSON 请求与回落、设置迁移及优先级、真实 React 表单保存往返）；启动测试使用内存库隔离无关磁盘 fsync。AC：typecheck / lint / 全量 489 项通过（47 文件），独立审查无必须修复问题；真实服务连接及模型创作效果未调用验证。规格与计划见 docs/superpowers 对应 2026-10-14 agent-openai-compatible 文档。
 
-- 2026-10-14 [fix] 角色迁移审查七项修复：复制新建不覆盖源；已确认编辑禁止清空确认条件；插入/重排/换版在事务提交前验证完整字段链并拒绝破坏下游旧值；新增 save-migration / saveMigration 原子保存与确认，失败、重试和取消表单零残留；迁移计划行标明角色姓名；详情 migrationVersions 支持取消与后移后的旧影响范围陈旧提示；历史表缺失且存在多版角色时升级报错回滚。净增 24 项回归（477 总计）：真实 React + happy-dom + 临时 SQLite 表单交互、真实 CLI 往返、主行与快照回滚、全链与跨版本、历史升级与陈旧范围；扩展写作/审校多角色同源请求断言。AC：定向 177 / 全量 477 通过，typecheck 与 lint 通过，独立复审无必须修复问题。新增 bun run test:character-migrations 和 docs/character-migration-testing.md；模型文学效果仍需人工验收。
-
 ## 历史归档
 
-- 2026-10-14 历史滚动摘要：2026-10-13 角色编辑陈旧可见性（characters.updated_at 与章卡提示，后由迁移影响范围判定接替）；2026-10-13 固定角色基准与角色迁移（角色首版即固定基准、character_migrations 表达人物变化、18→19 迁移恢复基准并逐字段导入草案、客户端迁移面板与陈旧提示）——原验收与决策见 Git 历史及 DECISIONS。
+- 2026-10-15 历史滚动摘要：2026-10-13 角色编辑陈旧可见性（characters.updated_at 与章卡提示，后由迁移影响范围判定接替）；2026-10-13 固定角色基准与角色迁移（角色首版即固定基准、character_migrations 表达人物变化、18→19 迁移恢复基准并逐字段导入草案、客户端迁移面板与陈旧提示）——原验收与决策见 Git 历史及 DECISIONS。；本次归并：2026-10-14 角色迁移审查七项修复（原子保存确认、链守卫、修订历史与真实表单回归；477 项通过，完整验收见 Git 历史与模块记录）。
 
 - 2026-10-12 历史滚动摘要：2026-10-12 [feat] 正文校验逐阶段反馈；小说创作参数持久化（完整实现与验收见对应提交。）
 

@@ -126,17 +126,19 @@ export function WritingPrefsDialog({ novelId, novelName, onClose, onSaved }: Wri
               />
             </div>
             <p className="settings-hint">篇幅下限与上限须同时填写或同时留空，且下限不大于上限；清空全部即恢复跟随系统设置。</p>
-            {error ? <p className="form-error">{error}</p> : null}
-            <div className="dialog-actions">
-              <button className="primary" disabled={saving} onClick={save}>
-                {saving ? "保存中…" : "保存"}
-              </button>
-              <button disabled={saving} onClick={onClose}>
-                取消
-              </button>
-            </div>
           </>
         ) : null}
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
+        <div className="dialog-actions">
+          {form !== null ? (
+            <button className="primary" disabled={saving} onClick={save}>
+              {saving ? "保存中…" : "保存"}
+            </button>
+          ) : null}
+          <button disabled={saving} onClick={onClose}>
+            取消
+          </button>
+        </div>
       </section>
     </div>
   );

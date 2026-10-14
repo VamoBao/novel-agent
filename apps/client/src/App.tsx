@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CharacterEntry,
   NovelDetail,
@@ -59,6 +59,7 @@ export function App() {
   const [novels, setNovels] = useState<NovelListItem[] | null>(null);
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef(selectedId);
 
   const [detail, setDetail] = useState<NovelDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -89,6 +90,7 @@ export function App() {
 
   // 选中小说变化 → 重新加载详情；切换时清空上一次的结构树选中
   useEffect(() => {
+    selectedIdRef.current = selectedId;
     if (!selectedId) {
         setDetail(null);
         setDetailError(null);
@@ -205,10 +207,14 @@ export function App() {
 
   /** 重载当前详情（不动选中状态）：章节规划完成后结构树出现章节点，保持选中该幕 */
   const reloadDetail = useCallback(async (id: string): Promise<void> => {
+    if (selectedIdRef.current !== id) return;
     try {
-      setDetail(await window.agent.getNovelDetail(id));
+      const loaded = await window.agent.getNovelDetail(id);
+      if (selectedIdRef.current !== id) return;
+      setDetail(loaded);
+      setDetailError(null);
     } catch (error) {
-      setDetailError(errorMessage(error));
+      if (selectedIdRef.current === id) setDetailError(errorMessage(error));
     }
   }, []);
 
@@ -260,7 +266,7 @@ export function App() {
   const handleWritingPrefsSaved = (): void => {
     const id = writingPrefs?.novelId;
     setWritingPrefs(null);
-    if (id) void reloadDetail(id);
+    if (id === selectedId && id) void reloadDetail(id);
     void refreshList();
   };
 

@@ -396,10 +396,12 @@ describe("writeChapter", () => {
     };
 
     const channel = new FakeChannel([]);
+    const events: WriteProgressEvent[] = [];
     await writeChapter({
       channel,
       novelId: NOVEL_ID,
       model: DUMMY_MODEL,
+      onProgress: (event) => events.push(event),
       systemWritingPrefs: { chapterLengthMin: 1500, chapterLengthMax: 2500, stylePassScore: 60 },
       ...ctx,
     });
@@ -412,6 +414,8 @@ describe("writeChapter", () => {
     const stylePrompt = generateObjectCalls.find((call) => call.prompt.includes("文风比对评审"))!.prompt;
     expect(stylePrompt).toContain("85 分及以上为合格");
     expect(generateTextCalls).toHaveLength(2);
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((event) => event.stylePassScore === 85)).toBeTrue();
     // 修订块的合格线同源（85）
     const revisionPrompt = generateTextCalls[1]!.prompt;
     expect(revisionPrompt).toContain("文风相似度 82 分（合格线 85）");
@@ -953,6 +957,7 @@ describe("writeChapter", () => {
     ]);
     expect(events.every((event) => event.chapterNodeId === ctx.chapterNodeId)).toBeTrue();
     expect(events.every((event) => event.totalRounds === 3)).toBeTrue();
+    expect(events.every((event) => event.stylePassScore === 80)).toBeTrue();
     // 段开始事件不带报告，段结束带单项结果；saving 携带完整报告
     expect(events[1]!.report).toBeUndefined();
     expect(events[2]!.stageResult).toMatchObject({ phase: "review-content", result: { issues: [] } });

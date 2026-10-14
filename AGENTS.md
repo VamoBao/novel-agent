@@ -93,3 +93,4 @@
 
 章节篇幅（原 prompt 硬编码 2000~3000 字）与文风合格线（原硬编码 90 分）改为两级可配置：小说级（novels 表三可空列，19→20 迁移，书库右键「📏 写作偏好」经 set-writing-prefs 直写库）> 系统设置（settings.json writing 组，childEnv 经 NOVEL_CHAPTER_LENGTH_MIN/MAX + NOVEL_STYLE_PASS_SCORE 注入）> 内置默认 2000~3000 字 / 80 分（文风默认按用户要求由 90 调整为 80）。shared `writing-prefs.ts` 承载默认值、边界 schema 与解析纯函数——篇幅 min/max 作为整体覆盖（半设/乱序的级防御性跳过，不拼接两级端点），文风合格线独立覆盖；writeChapter 解析生效值（篇幅条进 prompt、合格线贯穿 chapter-review 评分 prompt / isReportPassing / formatRevisionBlock），小说级覆盖生效时 notify 通报。设置弹窗与偏好弹窗共用 `writing-prefs-form.ts` 表单解析（成对填写、下限 ≤ 上限、整数边界），服务端 schema 双保险。
 
+正文 `write-progress` 消息携带会话生效的 `stylePassScore`（shared 协议可选、旧消息默认 80），章卡阶段警告和建议同审核阈值判定；偏好保存仅重载当前选中小说详情，迟到响应不得覆盖切换后的页面；偏好加载失败显示错误与取消入口。

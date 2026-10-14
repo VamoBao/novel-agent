@@ -47,6 +47,8 @@ export interface WriteProgressEvent {
   round: number;
   totalRounds: number;
   phase: WriteProgressPhase;
+  /** 会话开始时解析的生效文风合格线，与审核判定同源 */
+  stylePassScore: number;
   report?: ReviewReport;
   stageResult?: ReviewStageResult;
 }
@@ -355,6 +357,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       round,
       totalRounds: MAX_REVIEW_ROUNDS,
       phase: isRevision ? "revising" : "drafting",
+      stylePassScore,
       ...(isRevision && report ? { report } : {}),
     });
     if (isRevision && report) {
@@ -399,6 +402,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
         onProgress: (phase, stageResult) =>
           onProgress?.({
             chapterNodeId, round, totalRounds: MAX_REVIEW_ROUNDS, phase,
+            stylePassScore,
             ...(stageResult ? { stageResult } : {}),
           }),
       },
@@ -421,6 +425,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
     round: report?.round ?? MAX_REVIEW_ROUNDS,
     totalRounds: MAX_REVIEW_ROUNDS,
     phase: "saving",
+    stylePassScore,
     ...(report ? { report } : {}),
   });
 

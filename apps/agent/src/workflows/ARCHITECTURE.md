@@ -294,3 +294,7 @@ createNovel 在类型选择、受众多选与补充、核心冲突归一化展�
 ## 角色迁移回归边界（2026-10-14）
 
 `chapter-context.describePlan` 每条计划带角色基准姓名，保证同章多角色、同字段且相同旧值时仍可识别归属。`write-chapter` 与内容审校继续消费同一份行列表；集成测试检查两名角色的目标同时出现在写作与审校请求中。迁移链拒绝与原子表单提交由 state/query 负责，陈旧范围由客户端消费修订快照负责，不进入正文生成状态。测试矩阵与真实模型人工验收见根目录 `docs/character-migration-testing.md`，定向入口为 `bun run test:character-migrations`。
+
+## 正文进度的文风阈值（2026-10-15）
+
+writeChapter 在会话开始解析一次 stylePassScore，所有 WriteProgressEvent（初稿/修订、各校验段开始/结束、保存）携带同一数值。headless 将其透传为 shared write-progress 的可选字段，客户端沿用该会话值判定文风阶段警告与建议，避免实时配置变化或固定分数导致与审核结果不一致；旧消息缺字段时使用 shared 内置默认 80。工作流测试同时检查默认阈值与小说级覆盖阈值在各阶段及修订轮次的传递。

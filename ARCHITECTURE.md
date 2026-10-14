@@ -327,9 +327,10 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 
 ## 写作偏好两级配置（2026-10-14）
 
-章节篇幅与文风合格线按「小说级 > 系统级 > 内置默认」解析，正文生成（writeChapter）在组上下文前解析一次生效值：篇幅条直接进写作 prompt（`篇幅约 X~Y 字`），合格线贯穿 chapter-review 的评分 prompt、`isReportPassing` 通过判定与 `formatRevisionBlock` 修订块文案。
+章节篇幅与文风合格线按「小说级 > 系统级 > 内置默认」解析，正文生成（writeChapter）在组上下文前解析一次生效值：篇幅条直接进写作 prompt（`篇幅约 X~Y 字`），合格线贯穿 chapter-review 的评分 prompt、`isReportPassing` 通过判定与 `formatRevisionBlock` 修订块文案。各阶段进度事件携带同一 `stylePassScore`，经 headless → shared `write-progress` 协议 → PreviewPane → OutlineNodeCard 传递，阶段警告与整改建议使用该会话阈值（含 0 分）；旧消息缺字段时使用内置默认 80。
 
 - **小说级**：novels 表三可空列（chapter_length_min / chapter_length_max / style_pass_score，19→20 迁移、NULL=跟随系统设置），客户端书库右键「📏 写作偏好」经 WritingPrefsDialog → set-writing-prefs 直写库（全量替换、schema 成对校验）；小说级覆盖生效时生成前 notify 通报。
 - **系统级**：settings.json `writing` 组（normalizeSettings 逐字段校验、非法归 null），childEnv 经 resolveWritingEnv 三级优先级（设置 > .env > 继承环境变量）注入 NOVEL_CHAPTER_LENGTH_MIN/MAX + NOVEL_STYLE_PASS_SCORE；agent 侧 `providers/writing-prefs.ts` 读取（非法值静默归 null），协议宿主 / CLI 亦可直设。
 - **内置默认**：篇幅 2000~3000 字（沿用历史值）；文风合格线 80（用户指定，替代历史硬编码 90）。
 - 解析规则（shared `writing-prefs.ts` 纯函数）：篇幅 min/max 为**一个整体**覆盖——某级只有一半或 min > max 时该级整体视为未设置（不拼接两级端点）；文风合格线独立覆盖、逐层取第一个非空合法值。
+- 客户端刷新：保存偏好始终刷新书库，仅目标为当前选中小说时重载详情；详情刷新完成或失败时复查最新选中 ID，切换后丢弃迟到响应。WritingPrefsDialog 加载失败显示原始错误与取消按钮，仅加载成功后显示保存入口。

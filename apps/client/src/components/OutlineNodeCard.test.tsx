@@ -34,7 +34,7 @@ describe("OutlineNodeCard 正文生成进度", () => {
       consistency: { issues: [{ kind: "consistency", description: "时间冲突", suggestion: "统一时间" }] },
     };
     const html = render({
-      round: 1, totalRounds: 3, phase: "saving", report,
+      round: 1, totalRounds: 3, phase: "saving", report, stylePassScore: 90,
       stageResults: [
         { phase: "review-content", result: report.content },
         { phase: "review-style", result: report.style },
@@ -56,6 +56,23 @@ describe("OutlineNodeCard 正文生成进度", () => {
     ] });
     expect(html).toContain("文风校验（已跳过）");
     expect(html).not.toContain("✓ 文风校验");
+  });
+
+  test.each([
+    { threshold: undefined, score: 85, failed: false },
+    { threshold: 95, score: 92, failed: true },
+    { threshold: 95, score: 95, failed: false },
+    { threshold: 0, score: 0, failed: false },
+  ])("文风阶段按会话阈值判定：$threshold / $score", ({ threshold, score, failed }) => {
+    // 固定 90 或用 || 默认值会错误显示警告/隐藏建议；旧消息缺阈值按默认 80。
+    const html = render({
+      round: 1, totalRounds: 3, phase: "review-consistency", stylePassScore: threshold,
+      stageResults: [{ phase: "review-style", result: {
+        skipped: false, score, rationale: "评分依据", suggestions: ["调整句式节奏"],
+      } }],
+    });
+    expect(html).toContain(failed ? "⚠ 文风校验" : "✓ 文风校验");
+    expect(html.includes("调整句式节奏")).toBe(failed);
   });
 });
 

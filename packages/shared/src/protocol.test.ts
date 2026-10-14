@@ -144,6 +144,17 @@ describe("protocol schemas", () => {
     expect(agentMessageSchema.safeParse({ type: "write-progress", chapterNodeId: "ch1", round: 0, totalRounds: 3, phase: "drafting" }).success).toBe(false);
   });
 
+  test("write-progress 保留生效文风阈值，兼容旧消息并拒绝非法阈值", () => {
+    const base = { type: "write-progress", chapterNodeId: "ch1", round: 1, totalRounds: 3, phase: "review-style" };
+    for (const stylePassScore of [0, 80, 95, 100]) {
+      expect(agentMessageSchema.parse({ ...base, stylePassScore })).toMatchObject({ stylePassScore });
+    }
+    expect(agentMessageSchema.safeParse(base).success).toBe(true);
+    for (const stylePassScore of [-1, 101, 80.5]) {
+      expect(agentMessageSchema.safeParse({ ...base, stylePassScore }).success).toBe(false);
+    }
+  });
+
   test("client 消息：response 四种 answer 类型", () => {
     for (const answer of ["文本", ["甲", "乙"], true, 5]) {
       expect(clientMessageSchema.parse({ type: "response", id: 1, answer })).toMatchObject({

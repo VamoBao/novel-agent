@@ -91,3 +91,39 @@ test("写作偏好弹窗：加载现值、编辑保存载荷正确、半设篇�
   ]);
   expect(result.errorText).toContain("同时");
 });
+
+test("写作偏好加载失败显示原始错误，取消可关闭且不能保存", async () => {
+  // 把错误和取消按钮放在加载成功分支，会让查询失败静默且无关闭入口。
+  const probe = `
+    import { Window } from 'happy-dom';
+    const dom = new Window({ url: 'http://localhost' });
+    Object.assign(globalThis, { window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
+    const { act, createElement } = await import('react');
+    const { createRoot } = await import('react-dom/client');
+    const { WritingPrefsDialog } = await import('./src/components/WritingPrefsDialog');
+    dom.agent = { getNovelDetail: async () => { throw new Error('查询子进程超时（8s）'); } };
+    const container = dom.document.createElement('div');
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    let closed = false;
+    await act(async () => root.render(createElement(WritingPrefsDialog, {
+      novelId: 'n1', novelName: '小说', onClose: () => { closed = true; }, onSaved: () => {},
+    })));
+    const error = container.querySelector('.form-error')?.textContent ?? null;
+    const canSave = container.querySelector('button.primary') !== null;
+    const cancel = [...container.querySelectorAll('button')].find(button => button.textContent === '取消');
+    await act(async () => cancel?.click());
+    await act(async () => root.unmount());
+    await dom.happyDOM.close();
+    process.stdout.write(JSON.stringify({ error, canSave, closed }));
+  `;
+  const proc = Bun.spawn([process.execPath, "--eval", probe], {
+    cwd: fileURLToPath(new URL("../..", import.meta.url)), stdout: "pipe", stderr: "pipe",
+  });
+  const [stdout, stderr, exit] = await Promise.all([
+    new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
+  ]);
+  expect(stderr).toBe("");
+  expect(exit).toBe(0);
+  expect(JSON.parse(stdout)).toEqual({ error: "查询子进程超时（8s）", canSave: false, closed: true });
+});

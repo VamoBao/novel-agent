@@ -1,4 +1,5 @@
 import type { DocumentEntry, OutlineNodeEntry, ReviewReport, ReviewStageResult, WriteProgressPhase } from "@novel/shared";
+import { DEFAULT_STYLE_PASS_SCORE } from "@novel/shared";
 import type { StaleCastMigration } from "../character-staleness";
 
 /** 章卡伏笔显示模型（PreviewPane 过滤登场/回收两组并解析角色名后传入，卡片纯渲染） */
@@ -17,6 +18,8 @@ export interface ChapterWriteProgress {
   round: number;
   totalRounds: number;
   phase: WriteProgressPhase;
+  /** 生成会话实际生效的阈值；旧消息缺省使用内置默认 */
+  stylePassScore?: number;
   report?: ReviewReport;
   stageResults: ReviewStageResult[];
 }
@@ -186,7 +189,7 @@ export function OutlineNodeCard({
             {PROGRESS_STEPS.map((step, index) => {
               const stage = writeProgress.stageResults.find((item) => step.phases.includes(item.phase));
               const failed = stage?.phase === "review-style"
-                ? !stage.result.skipped && stage.result.score < 90
+                ? !stage.result.skipped && stage.result.score < (writeProgress.stylePassScore ?? DEFAULT_STYLE_PASS_SCORE)
                 : stage !== undefined && stage.result.issues.length > 0;
               const skipped = stage?.phase === "review-style" && stage.result.skipped;
               return (

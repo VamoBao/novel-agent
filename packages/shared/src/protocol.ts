@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { characterSchema } from "./character";
 import { reviewReportSchema, reviewStageResultSchema } from "./review";
+import { stylePassScoreSchema } from "./writing-prefs";
 import { viewSchema } from "./views";
 
 /** stdio JSON 行协议版本；hello 时不一致由 client 拒绝继续 */
@@ -103,6 +104,7 @@ export const agentMessageSchema = z.discriminatedUnion("type", [
     round: z.number().int().min(1),
     totalRounds: z.number().int().min(1),
     phase: writeProgressPhaseSchema,
+    stylePassScore: stylePassScoreSchema.optional().describe("本次会话生效的文风合格线；旧消息缺省按内置默认"),
     report: reviewReportSchema.optional(),
     stageResult: reviewStageResultSchema.optional(),
   }),

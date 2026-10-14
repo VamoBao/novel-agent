@@ -317,6 +317,7 @@ export function PreviewPane({
             round: message.round,
             totalRounds: message.totalRounds,
             phase: message.phase,
+            stylePassScore: message.stylePassScore ?? previous?.stylePassScore,
             report: message.report ?? previous?.report,
             stageResults: message.stageResult
               ? [...priorResults.filter((item) => item.phase !== message.stageResult?.phase), message.stageResult]
