@@ -87,21 +87,24 @@ function groupByTreeVersion(stored: readonly StoredOutlineNode[]): Map<number, C
 }
 
 /** 全书大纲版本（章所在树的根节点 version）与本章在其内的章序 */
-interface TreePosition {
+export interface ChapterTreePosition {
   version: number;
   order: number;
+  /** 目标章所属全书大纲版本的完整章序（包含归档树，版本之间不比较） */
+  chapterOrder: ReadonlyMap<string, number>;
 }
 
 /** 解析目标章所属全书大纲版本与章序；不可解析（父级链断裂 / 非章节点）返回 undefined */
-function treePosition(
+export function resolveChapterTreePosition(
   outlineStore: OutlineStore,
   novelId: string,
   chapterNodeId: string,
-): TreePosition | undefined {
+): ChapterTreePosition | undefined {
   const groups = groupByTreeVersion(outlineStore.listOutlineNodes(novelId));
   for (const [version, nodes] of groups) {
-    const order = buildChapterOrder(nodes).get(chapterNodeId);
-    if (order !== undefined) return { version, order };
+    const chapterOrder = buildChapterOrder(nodes);
+    const order = chapterOrder.get(chapterNodeId);
+    if (order !== undefined) return { version, order, chapterOrder };
   }
   return undefined;
 }
@@ -181,13 +184,8 @@ export function buildCharacterStateContext(
     return { lines: [], characterCount: 0, planCount: 0, completedCount: 0, fallbackToLibrary: false };
   }
 
-  const position = treePosition(outlineStore, novelId, chapterNodeId);
-  const orderByChapter = new Map<string, number>();
-  if (position) {
-    const groups = groupByTreeVersion(outlineStore.listOutlineNodes(novelId));
-    const nodes = groups.get(position.version) ?? [];
-    for (const [id, order] of buildChapterOrder(nodes)) orderByChapter.set(id, order);
-  }
+  const position = resolveChapterTreePosition(outlineStore, novelId, chapterNodeId);
+  const orderByChapter = position?.chapterOrder ?? new Map<string, number>();
 
   const castIdSet = new Set(cast.map((stored) => stored.id));
   // 只取**同全书大纲版本**的已确认迁移（换版后旧迁移保留在旧版本、不混入新版）
@@ -366,7 +364,7 @@ export function buildNeighborChapterContext(
   options: NeighborChapterContextOptions,
 ): NeighborChapterContext {
   const { novelId, chapterNodeId, outlineStore, documentStore, outputDir } = options;
-  const position = treePosition(outlineStore, novelId, chapterNodeId);
+  const position = resolveChapterTreePosition(outlineStore, novelId, chapterNodeId);
   if (!position) return { previous: null, previousProse: null, next: null };
 
   const currentNodes = outlineStore.listOutlineNodes(novelId, { currentOnly: true });

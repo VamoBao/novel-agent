@@ -116,7 +116,8 @@ apps/agent/src/
     │                    #   （同章种收只归回收组标「登场于本章」），登场注入卡片；回收组按登场章全局章序升序
     │                    #   注入卡片 + 登场章上下文（正文优先——FORESHADOW_PROSE_BUDGET=8000 预算内整条注入
     │                    #   不截断，未生成/文件缺失/超预算降级该章概述；归档旧版章按 ID 直查照常解析）+
-    │                    #   多步回收既往回收章概述（防重复揭底）；无绑定伏笔空 lines（调用方零注入零通知）；
+    │                    #   多步回收既往回收章概述；按目标树全书章序最大的回收点标最终回收，要求揭露完整
+    │                    #   真相并收尾，前段阶段回收保留核心真相；无绑定伏笔空 lines（调用方零注入零通知）；
     │                    #   write-chapter 直接导入，不入 index.ts 出口
     ├── foreshadow-intake.ts # 确定性伏笔入库模块（无 LLM）：resolveCharacterIds 角色名→ID（trim 全等 / 重复名幂等 /
     │                    #   未解析名单返回）+ buildChapterOrder 全书章全局序（部sort→幕sort→章sort，回收/登场
@@ -266,6 +267,8 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 3. **生成-校验-修订循环与落盘**：`getWritingModel()`（providers/writing-model，OpenAI 接口兼容端点，`WRITING_MODEL_*` 三环境变量齐才启用，任一未配置回落 Agent 会话模型）单轮 `generateText`（非 ReAct——无工具无提问），写作要求含 2000~3000 字、遵守世界观禁忌、只输出正文文本；空结果拒绝且零残留。每轮生成后经 `reviewChapter`（chapter-review，Agent 模型三段独立校验——①内容约束（世界观/章节概述/本章伏笔/**本章角色状态与变化计划**，与写作者同源）②文风相似度（≥90 合格，无启用样本 skipped）③前后自洽）产出结构化整改报告：`isReportPassing` 通过（①③零问题且文风达标）→ 落盘；未达标按报告修订式重写（prompt 追加【上一版正文】+【整改报告】块，末条要求替换为按报告逐条修订），最多 3 轮；第 3 轮仍未达标 → ⚠️ 警告（含文风分与问题计数）后保底保存最后一版。进度全程经 onProgress 回调透传（drafting/review-*/revising/saving，报告附着在 revising/saving 事件）。正文经 document-writer 写 `output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`（sanitize 段清理，同名冲突加 `-N` 后缀不覆盖既有文件），文件先落、库后入，库失败回滚删除文件
    三项校验各在开始与结束时发送 `write-progress`，结束事件附 `stageResult`；客户端按轮累积阶段结果，有问题即在对应阶段显示警告与建议，新轮清空阶段结果。完整 `report` 仍随修订 / 保存事件供末尾汇总。
 4. **元数据入库绑定**：首次生成走 `saveChapterDocument`、重新生成走 `replaceChapterDocument`（单事务删旧行插新行）插 documents 行（file_path 相对路径 + 字数，内容不进库）+ 章节点回写 `document_id` 并置 `status=completed`；重生成在事务提交后清理旧正文文件（新旧路径相同——旧文件本就缺失——时跳过防误删新文件；幂等容忍缺失）；任一环节失败回滚删新文件，旧正文行与文件零影响；notify 保存路径与字数；run_finished 携带小说 ID 供客户端刷新详情（章节点 ID 稳定，选中与正文展示保持）；大纲重生成只降级归档章节点，documents 行与正文文件保留（旧正文与归档章的关联留存）
+
+> 伏笔回收按目标章所属树的全书章序区分阶段回收与最终回收；最终章要求完整揭露真相并收尾，内容审校按同源材料检查并产出伏笔整改项。缺失/跨版回收点不猜测最终章，保留既有三轮修订与保底警告策略。详细职责与边界见 [workflows 架构：伏笔最终回收与审校](apps/agent/src/workflows/ARCHITECTURE.md#伏笔最终回收与审校2026-10-14)。
 
 ## ReAct 终态工具模式（src/agents/react.ts）
 

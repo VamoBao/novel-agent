@@ -265,6 +265,87 @@ describe("buildChapterForeshadowContext", () => {
     expect(f.id).toBeDefined();
   });
 
+  test("回收点无序且重复：按全书章序区分阶段回收和最终回收，不受卡片状态影响", async () => {
+    const ctx = await setupDb();
+    cleanups.push(ctx.cleanup);
+    ctx.foreshadowStore.addForeshadow(NOVEL_ID, foreshadowFixture({
+      appearChapterId: ctx.c1,
+      recoverChapterIds: [ctx.c4, ctx.c2, ctx.c3, ctx.c4, ctx.c2],
+      recoveryStatus: "recovered",
+    }));
+    for (const chapterId of [ctx.c2, ctx.c3]) {
+      const text = ctx.build(chapterId).lines.join("\n");
+      expect(text).toContain("回收阶段：阶段回收");
+      expect(text).toContain("最终回收章：《第四章》（全书第 4 章）");
+      expect(text).toContain("不得提前完整揭露隐藏真相");
+      expect(text).not.toContain("回收阶段：最终回收");
+    }
+    const finalText = ctx.build(ctx.c4).lines.join("\n");
+    expect(finalText).toContain("回收阶段：最终回收");
+    expect(finalText).toContain("本章必须完整揭露隐藏真相");
+    expect(finalText).toContain("解释表面行为与真相的联系");
+    expect(finalText).toContain("不得继续悬置或推迟到后章");
+    expect(finalText).not.toContain("回收阶段：阶段回收");
+  });
+
+  test("跨部跨幕：后部首章 sort=1 仍是全书最晚的最终回收章", async () => {
+    const ctx = await setupDb();
+    cleanups.push(ctx.cleanup);
+    const part = ctx.outlineStore.addOutlineNode(NOVEL_ID, { type: "part", name: "第二部", sort: 2 });
+    const act = ctx.outlineStore.addOutlineNode(NOVEL_ID, {
+      type: "act", parentId: part.id, name: "第二部第一幕", sort: 1,
+    });
+    const [last] = ctx.outlineStore.saveChapters(NOVEL_ID, act.id, [{ name: "终章", summary: "揭露碎片真相" }]);
+    ctx.foreshadowStore.addForeshadow(NOVEL_ID, foreshadowFixture({
+      appearChapterId: ctx.c1, recoverChapterIds: [last!.id, ctx.c2],
+    }));
+    expect(ctx.build(ctx.c2).lines.join("\n")).toContain("最终回收章：《终章》（全书第 5 章）");
+    const text = ctx.build(last!.id).lines.join("\n");
+    expect(text).toContain("回收阶段：最终回收");
+    expect(text).toContain("本章必须完整揭露隐藏真相");
+  });
+
+  test("归档目标章：用目标所属树版本计算最终回收，不混入新版章序", async () => {
+    const ctx = await setupDb();
+    cleanups.push(ctx.cleanup);
+    ctx.foreshadowStore.addForeshadow(NOVEL_ID, foreshadowFixture({
+      appearChapterId: ctx.c1, recoverChapterIds: [ctx.c4, ctx.c2],
+    }));
+    const [, act] = ctx.outlineStore.saveOutlineTreeNewVersion(NOVEL_ID, [{
+      name: "新版部", summary: "新版", acts: [{ name: "新版幕", summary: "新版", keyPlotPoints: ["新版情节"] }],
+    }]);
+    ctx.outlineStore.saveChapters(NOVEL_ID, act!.id, [{ name: "新版首章", summary: "新故事" }]);
+    expect(ctx.build(ctx.c2).lines.join("\n")).toContain("最终回收章：《第四章》（全书第 4 章）");
+    expect(ctx.build(ctx.c4).lines.join("\n")).toContain("回收阶段：最终回收");
+  });
+
+  test("有缺失回收点：不把最后一个可解析回收点猜成最终章", async () => {
+    const ctx = await setupDb();
+    cleanups.push(ctx.cleanup);
+    ctx.foreshadowStore.addForeshadow(NOVEL_ID, foreshadowFixture({
+      appearChapterId: ctx.c1, recoverChapterIds: [ctx.c2, "missing-recovery-chapter"],
+    }));
+    const text = ctx.build(ctx.c2).lines.join("\n");
+    expect(text).toContain("回收阶段：无法确定");
+    expect(text).not.toContain("回收阶段：最终回收");
+    expect(text).not.toContain("本章必须完整揭露隐藏真相");
+  });
+
+  test("回收点跨大纲版本：阶段无法确定，不比较不同树中的章序", async () => {
+    const ctx = await setupDb();
+    cleanups.push(ctx.cleanup);
+    const [, act] = ctx.outlineStore.saveOutlineTreeNewVersion(NOVEL_ID, [{
+      name: "新版部", summary: "新版", acts: [{ name: "新版幕", summary: "新版", keyPlotPoints: ["新版情节"] }],
+    }]);
+    const [current] = ctx.outlineStore.saveChapters(NOVEL_ID, act!.id, [{ name: "新首章", summary: "新故事" }]);
+    ctx.foreshadowStore.addForeshadow(NOVEL_ID, foreshadowFixture({
+      appearChapterId: ctx.c1, recoverChapterIds: [ctx.c2, current!.id],
+    }));
+    const text = ctx.build(current!.id).lines.join("\n");
+    expect(text).toContain("回收阶段：无法确定");
+    expect(text).not.toContain("回收阶段：最终回收");
+  });
+
   test("预算护栏：按登场章序升序逐条扣减，超出整条降级概述、不截断已注入正文", async () => {
     const ctx = await setupDb();
     cleanups.push(ctx.cleanup);
@@ -321,6 +402,8 @@ describe("buildChapterForeshadowContext", () => {
     expect(text).not.toContain("一、本章登场");
     expect(text).toContain("二、本章回收");
     expect(text).toContain("登场于本章：");
+    expect(text).toContain("回收阶段：最终回收");
+    expect(text).toContain("本章必须完整揭露隐藏真相");
     expect((text.match(/表面行为：少年拾得的碎片刻有宗门印记/g) ?? []).length).toBe(1);
     expect(text).not.toContain("登场于《");
     expect(text).not.toContain("登场章正文");
@@ -341,6 +424,8 @@ describe("buildChapterForeshadowContext", () => {
     const result = ctx.build(ctx.c2);
     const text = result.lines.join("\n");
     expect(text).toContain("（登场章信息不可用）");
+    expect(text).toContain("回收阶段：最终回收");
+    expect(text).toContain("本章必须完整揭露隐藏真相");
     expect(text).toContain("表面行为：少年拾得的碎片刻有宗门印记");
     expect(text).not.toContain("登场章正文");
     expect(result.degradedCount).toBe(0);

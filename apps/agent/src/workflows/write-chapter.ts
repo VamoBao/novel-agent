@@ -210,7 +210,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   }
   if (hasForeshadows) {
     extraRequirements.push(
-      "本章如有登场伏笔，按注意度控制显隐程度、自然带出不刻意；如有回收伏笔，呼应登场章的具体细节、不复述登场原文；",
+      "本章如有登场伏笔，按注意度控制显隐程度、自然带出不刻意；如有回收伏笔，按每条标注的回收阶段呼应登场细节：阶段回收保留核心真相，最终回收必须在本章揭露完整真相并收尾，解释表面行为与真相的联系，不得留待后章；对明确标为最终回收的伏笔，最终收尾要求优先于概述中推迟揭露或继续悬置的描述，其余情节仍遵循概述；不要复述登场原文；",
     );
   }
   if (enabledStyles.length > 0) {

@@ -744,6 +744,76 @@ describe("writeChapter", () => {
     ).toBeTrue();
   });
 
+  test("阶段回收章：写作与 eval 同源约束保留核心真相，不按数组末项判定最终回收", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = "宗门追查碎片的刻痕，尚未说明它的全部用途。";
+    ctx.foreshadowStore.addForeshadow(NOVEL_ID, {
+      surfaceAction: "碎片刻痕", hiddenTruth: "碎片是密钥", attentionLevel: 6,
+      recoveryStatus: "recovered", appearChapterId: ctx.chapterNodeId,
+      recoverChapterIds: [ctx.thirdChapterNodeId, ctx.secondChapterNodeId],
+    });
+    await writeChapter({ channel: new FakeChannel([]), novelId: NOVEL_ID, model: DUMMY_MODEL,
+      ...ctx, chapterNodeId: ctx.secondChapterNodeId });
+    const writing = generateTextCalls[0]!.prompt;
+    const review = generateObjectCalls.find(call => call.prompt.includes("设定审校编辑"))!.prompt;
+    for (const prompt of [writing, review]) {
+      expect(prompt).toContain("回收阶段：阶段回收");
+      expect(prompt).toContain("最终回收章：《第三章》（全书第 3 章）");
+      expect(prompt).toContain("不得提前完整揭露隐藏真相");
+      expect(prompt).not.toContain("回收阶段：最终回收");
+    }
+    expect(review).toContain("阶段回收不得提前完整揭露真相");
+  });
+
+  test("最终回收未收尾：eval 拒绝后修订，最终约束保留且只保存通过的修订稿", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    ctx.outlineStore.updateOutlineNode(ctx.thirdChapterNodeId, {
+      summary: "只发现刻痕线索，真相留待后章",
+    });
+    generateTextCalls = [];
+    const draft = "碎片再次发热，他决定日后再查明用途。";
+    const revised = "他把刻痕对准锁孔。碎片原来是密钥，宗门印记标明了开锁方向，失窃之谜终于解开。";
+    generateTextQueue = [draft, revised];
+    reviewScript = { content: [
+      { issues: [{ kind: "foreshadow", description: "最终章仍将密钥真相留待日后",
+        suggestion: "本章揭露碎片是密钥并解释宗门印记，完成伏笔收尾" }] },
+      { issues: [] },
+    ] };
+    ctx.foreshadowStore.addForeshadow(NOVEL_ID, {
+      surfaceAction: "碎片刻有宗门印记", hiddenTruth: "碎片是密钥", attentionLevel: 6,
+      recoveryStatus: "unrecovered", appearChapterId: ctx.chapterNodeId,
+      recoverChapterIds: [ctx.thirdChapterNodeId, ctx.secondChapterNodeId],
+    });
+    const events: WriteProgressEvent[] = [];
+    await writeChapter({ channel: new FakeChannel([]), novelId: NOVEL_ID, model: DUMMY_MODEL,
+      ...ctx, chapterNodeId: ctx.thirdChapterNodeId, onProgress: event => events.push(event) });
+    expect(generateTextCalls).toHaveLength(2);
+    const reviews = generateObjectCalls.filter(call => call.prompt.includes("设定审校编辑"));
+    expect(reviews).toHaveLength(2);
+    for (const call of [...generateTextCalls, ...reviews]) {
+      expect(call.prompt).toContain("回收阶段：最终回收");
+      expect(call.prompt).toContain("最终回收章：《第三章》（全书第 3 章）");
+      expect(call.prompt).toContain("本章必须完整揭露隐藏真相");
+      expect(call.prompt).toContain("解释表面行为与真相的联系");
+      expect(call.prompt).toContain("最终收尾要求优先于概述中推迟揭露或继续悬置的描述");
+    }
+    expect(generateTextCalls[0]!.prompt).toContain("最终回收必须在本章揭露完整真相并收尾");
+    expect(generateTextCalls[1]!.prompt).toContain("（伏笔）：最终章仍将密钥真相留待日后");
+    expect(reviews[0]!.prompt).toContain("未完整揭露真相");
+    expect(reviews[0]!.prompt).toContain("不得仅因落实最终收尾而报告 summary 问题");
+    expect(events.find(event => event.phase === "revising")?.report).toMatchObject({
+      passed: false, content: { issues: [{ kind: "foreshadow" }] },
+    });
+    expect(events.find(event => event.phase === "saving")?.report).toMatchObject({ passed: true, round: 2 });
+    const stored = ctx.documentStore.getDocumentByChapter(ctx.thirdChapterNodeId)!;
+    const saved = readFileSync(join(ctx.outputDir, stored.filePath), "utf8");
+    expect(saved).toContain(revised);
+    expect(saved).not.toContain(draft);
+  });
+
   test("校验一次通过：三段校验调用注入模型，进度事件按序触发，saving 事件携带通过报告", async () => {
     const ctx = await setupDb();
     cleanupAll.push(ctx.cleanup);

@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
-import type { Worldview } from "@novel/shared";
+import type { ReviewIssue, Worldview } from "@novel/shared";
 
 /**
  * chapter-review 模块单测：mock 掉 'ai' 模块（generateObject 按 prompt 段落标识
@@ -120,6 +120,32 @@ describe("reviewChapter", () => {
       { kind: "consistency", description: "前文五个字后文四个字", suggestion: "统一为五个字" },
     ]);
     expect(report.passed).toBeFalse();
+  });
+
+  test("① 最终回收未揭露真相或未收尾时报告伏笔问题，并区分阶段回收", async () => {
+    generateObjectCalls = [];
+    const issue = {
+      kind: "foreshadow", description: "终章只写碎片发热，未解释密钥真相",
+      suggestion: "揭露碎片是密钥并解释刻痕与开锁的联系，在本章收尾",
+    } satisfies ReviewIssue;
+    scriptedResults = { content: { issues: [issue] }, consistency: { issues: [] } };
+    const report = await reviewChapter(baseInput({
+      foreshadowLines: ["【本章伏笔】", "隐藏真相：碎片是密钥", "回收阶段：最终回收"],
+      summary: "只发现刻痕线索，真相留待后章", styleSamples: [],
+      content: "他只看见碎片发热，决定下一章再追查。",
+    }), baseDeps());
+    const contentPrompt = generateObjectCalls[0]!.prompt;
+    const dimensions = contentPrompt.split("审查维度（逐条检查）：")[1]!;
+    expect(dimensions).toContain("最终回收");
+    expect(dimensions).toContain("未完整揭露真相");
+    expect(dimensions).toContain("未解释表面行为与真相的联系");
+    expect(dimensions).toContain("阶段回收不得提前完整揭露真相");
+    expect(dimensions).toContain("foreshadow 问题");
+    expect(dimensions).toContain("最终收尾要求优先于概述中推迟揭露或继续悬置的描述");
+    expect(dimensions).toContain("不得仅因落实最终收尾而报告 summary 问题");
+    expect(report.content.issues).toEqual([issue]);
+    expect(report.passed).toBeFalse();
+    expect(formatRevisionBlock(report)).toContain("（伏笔）");
   });
 
   test("① 载入本章角色状态与变化计划，并给出 character 审查维度", async () => {

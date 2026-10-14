@@ -69,10 +69,13 @@ apps/agent/src/workflows/
 │                             #   取紧邻前/后章：上一章正文在 PREVIOUS_CHAPTER_PROSE_BUDGET=8000 内整条
 │                             #   注入（超出/缺失回退概述），下一章只取概述。migrationPhaseAt 纯函数判定
 │                             #   四阶段；write-chapter 直接导入，不入 index.ts 出口
+│                             #   resolveChapterTreePosition 解析目标章所属树版本与完整章序，角色迁移与
+│                             #   伏笔最终回收判断共用；支持归档目标章，版本之间不比较章序。
 ├── chapter-review.ts         # 校验 subAgent 模块（无 ReAct、无确认门）：reviewChapter 三段独立
 │                             #   单轮 generateObject——①内容约束（世界观 JSON/章名概述/本章伏笔行/
 │                             #   本章角色状态与变化计划行——与写作者同源，含 character 维度：过早改变、
-│                             #   缺少过渡、未保留应保留特征）②文风相似度评分
+│                             #   缺少过渡、未保留应保留特征；foreshadow 维度区分阶段回收与最终回收，
+│                             #   最终章未完整揭露真相、未解释表面行为或继续悬置须报问题）②文风相似度评分
 │                             #   （≥STYLE_PASS_SCORE=90 合格；无启用样本 skipped 且段事件零发送，
 │                             #   模型只产 score/rationale/suggestions、skipped 包装由代码完成）
 │                             #   ③前后自洽（仅正文全文，kind 由代码补全 consistency 杜绝类别漂移）
@@ -86,7 +89,9 @@ apps/agent/src/workflows/
 │                             #   登场注入卡片（表面行为/隐藏真相/注意度/埋线方式/创作目的/服务角色名），
 │                             #   回收组按登场章全局章序升序注入卡片 + 登场章上下文（正文优先——
 │                             #   FORESHADOW_PROSE_BUDGET=8000 字符预算内整条注入不截断；未生成/文件
-│                             #   缺失/超预算降级该章概述）+ 多步回收既往回收章概述（防重复揭底）；
+│                             #   缺失/超预算降级该章概述）+ 多步回收既往回收章概述；去重回收点按目标树
+│                             #   全书章序取最大值，前段标阶段回收保留核心真相，最终章要求完整揭露并收尾；
+│                             #   回收点缺失/跨版标阶段无法确定，不猜测最终章，阶段指令与审校同源；
 │                             #   登场章按 ID 直查不过滤版本（归档旧版章照常解析）；节点不可解析仅注入
 │                             #   卡片标注；无绑定伏笔返回空 lines（调用方零注入零通知）；
 │                             #   write-chapter 直接导入，不入 index.ts 出口
@@ -202,7 +207,7 @@ apps/agent/src/workflows/
 - `write-chapter.ts` → `ai`（generateText）、`providers/`（writing-model getWritingModel——写作模型，非 Agent 会话模型；agent-model model——校验模型缺省实例）、`ui/`（UiChannel 注入）、`state/`（novel-store / outline-store / worldview-store / character-store / document-store / style-reference-store / foreshadow-store / migration-store）、`output/`（document-writer 正文落盘与登场章/上一章正文读取 + outline-writer OUTPUT_DIR）、本模块 `foreshadow-context.ts`（本章伏笔 prompt 块）、`chapter-context.ts`（角色状态与迁移阶段 + 跨幕前后章）与 `chapter-review.ts`（三段校验 + 判定 + 修订块）；model / reviewModel / onProgress / outputDir 与各 store 可注入（缺省 getWritingModel() + agent-model model + 不回调 + NOVEL_OUTPUT_DIR + 默认 SQLite store，测试替换）
 - `chapter-review.ts` → `ai`（generateObject）、`zod`、`@novel/shared`（review schema——reviewIssueSchema 复用为 ① 的输出 schema，② ③ 的输出 schema 模块内定义、kind 补全由代码完成；① 的 characterLines 与写作者同源）；LanguageModelV4 与 onProgress 注入，无 channel / store 依赖
 - `chapter-context.ts` → `@novel/shared`（character-migration 的字段读写与 applyCharacterField、CHARACTER_FIELD_SPECS、outline-order 的 buildChapterOrder）、`state/`（character-store / migration-store / outline-store / document-store——类型导入）、`output/`（document-writer readDocumentArtifact 读上一章正文）；纯函数、零 LLM、不经 UiChannel，不入 index.ts 出口
-- `foreshadow-context.ts` → `state/`（outline-store / character-store / document-store / foreshadow-store——类型导入）、`output/`（document-writer readDocumentArtifact 读登场章正文）、本模块 `foreshadow-intake.ts`（buildChapterOrder 全局章序——回收组排序与既往回收章筛选）；纯函数、零 LLM、不经 UiChannel
+- `foreshadow-context.ts` → `state/`（outline-store / character-store / document-store / foreshadow-store——类型导入）、`output/`（document-writer readDocumentArtifact 读登场章正文）、本模块 `chapter-context.ts`（resolveChapterTreePosition 目标章所属树版本与全局章序——最终回收判定、回收组排序与既往回收章筛选）；纯函数、零 LLM、不经 UiChannel
 - `agents/*.ts` → `ai`（tool）、`zod`、`src/agents/`（runReactAgent）、`tools/`（ask-user 工厂，经注入的 channel 提问）、`ui/`（UiChannel 注入：确认门携带结构化视图）、`@novel/shared`（schemas）、`state/types`（仅 outline-agent 需要 NovelParams 类型）、`state/character-store`（outline-agent 与 chapter-agent 的 list_characters 角色库查询、auto-character-agent 的 save_character 入库依赖，可注入、缺省默认 SQLite store）
 - 下层不得反向依赖本模块；`createCharacter` 目前仅供模块内编排使用，未入 `index.ts` 出口
 - `CreateNovelOptions` 注入 `channel`（必填）与 `store / characterStore / worldviewStore / novelStore / outlineStore / foreshadowStore`，store 缺省用内存 state store + 各默认 SQLite store（测试与未来换实现不改编排代码）
@@ -272,6 +277,12 @@ apps/agent/src/workflows/
 ## 小说创作条件的持久化边界
 
 createNovel 在类型选择、受众多选与补充、核心冲突归一化展示完成时，分别调用 NovelStore.updateNovel 保存 genre / audience / coreConflict；后续中止不撤回已采集结果。regenerateOutline 从小说行读取各非 null 条件传入 OutlineContext；旧小说缺失项省略，沿用大纲 Agent 缺省策略。共享字段 schema、JSON 编解码、迁移与详情契约见根 ARCHITECTURE.md。
+
+## 伏笔最终回收与审校（2026-10-14）
+
+`resolveChapterTreePosition` 返回目标章所属全书大纲版本与其完整章序，角色迁移和伏笔判定共用排序依据。`foreshadow-context` 对去重的 `recoverChapterIds` 取章序最大者为最终回收章；数组顺序、幕内 sort 和卡片 `recoveryStatus` 不影响判断。非最终回收章标「阶段回收」，按概述推进线索或局部揭示，保留核心真相；最终章须完整揭露真相、解释表面行为与真相的联系并完成收尾，最终收尾要求优先于概述中推迟揭露或继续悬置的描述，概述未提及也不能豁免；其余情节遵循概述，summary 审校不能仅因落实最终收尾而报偏离。任一回收点缺失或不属于目标树版本则标「无法确定」，不猜测最终点。登场章可引用归档资料，同章种收及登场章不可解析不影响已确定的最终收尾要求；无本章绑定仍零注入。
+
+写作初稿、修订稿与内容审校共用带阶段指令的伏笔 lines。eval 的 foreshadow 维度检查阶段章提前完整揭底、最终章未完整揭露/未解释联系/继续悬置，返回带具体建议的伏笔问题，经既有三轮修订闭环处理；三轮仍未达标的保底保存与警告策略保持。测试验证请求契约、最终点计算和整改入库链路，真实模型的揭露效果需人工阅读验收。
 
 
 ## 角色迁移回归边界（2026-10-14）

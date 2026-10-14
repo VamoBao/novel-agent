@@ -3,7 +3,7 @@ import type { CharacterStore } from "../state/character-store";
 import type { DocumentStore } from "../state/document-store";
 import type { ForeshadowStore } from "../state/foreshadow-store";
 import type { OutlineStore } from "../state/outline-store";
-import { buildChapterOrder } from "./foreshadow-intake";
+import { resolveChapterTreePosition } from "./chapter-context";
 
 /** 回收伏笔登场章正文的字符预算（小上下文写作模型护栏）：超出整条降级概述，不截断 */
 export const FORESHADOW_PROSE_BUDGET = 8000;
@@ -33,11 +33,47 @@ function resolveCharacterName(id: string, names: ReadonlyMap<string, string>): s
   return names.get(id) ?? id;
 }
 
+/** 按目标章所在树的全书章序取最终回收点；任一回收点无法排序时不猜测收尾章。 */
+function describeRecoveryStage(
+  chapterNodeId: string,
+  recoverChapterIds: readonly string[],
+  order: ReadonlyMap<string, number>,
+  outlineStore: OutlineStore,
+): string[] {
+  let finalChapterId: string | null = null;
+  let finalOrder = 0;
+  for (const id of new Set(recoverChapterIds)) {
+    const stepOrder = order.get(id);
+    if (stepOrder === undefined) {
+      return [
+        "   回收阶段：无法确定（回收章缺失或不属于本章大纲版本）；按本章概述推进线索，不得擅自认定最终收尾章。",
+      ];
+    }
+    if (stepOrder > finalOrder) {
+      finalOrder = stepOrder;
+      finalChapterId = id;
+    }
+  }
+  const finalName = finalChapterId ? outlineStore.getOutlineNode(finalChapterId)?.node.name : undefined;
+  const finalChapterLine = `   最终回收章：《${finalName ?? "（无法解析）"}》（全书第 ${finalOrder} 章）`;
+  if (chapterNodeId === finalChapterId) {
+    return [
+      "   回收阶段：最终回收；本章必须完整揭露隐藏真相，解释表面行为与真相的联系并完成伏笔收尾，不得继续悬置或推迟到后章；最终收尾要求优先于概述中推迟揭露或继续悬置的描述，概述未提及揭露也必须落实这一收尾约束，其余情节仍遵循概述。",
+      finalChapterLine,
+    ];
+  }
+  return [
+    "   回收阶段：阶段回收；按本章概述推进线索或局部揭示并呼应登场细节，保留尚未揭晓的核心真相，不得提前完整揭露隐藏真相或宣称伏笔已最终收尾。",
+    finalChapterLine,
+  ];
+}
+
 /**
  * 组装「本章伏笔」prompt 块（纯函数、零 LLM）：绑定到本章的伏笔分登场/回收两组——
  * 登场注入卡片（表面行为自然带出、不点破真相）；回收注入卡片 + 登场章上下文
  * （正文优先——读者实际读到的具体呈现，未生成/文件缺失/超预算降级概述）+
- * 多步回收的既往回收章概述（防重复揭底）。同章种收归回收组标「登场于本章」。
+ * 多步回收的既往回收章概述。按全书章序最大的回收章区分阶段回收与最终回收，
+ * 最终章必须揭露完整真相并收尾；同章种收归回收组标「登场于本章」。
  * 无绑定伏笔返回空 lines，调用方零注入零通知（对齐参考文风先例）。
  */
 export function buildChapterForeshadowContext(
@@ -65,11 +101,8 @@ export function buildChapterForeshadowContext(
     return { lines: [], appearCount: 0, recoverCount: 0, degradedCount: 0 };
   }
 
-  const order = buildChapterOrder(
-    outlineStore
-      .listOutlineNodes(novelId, { currentOnly: true })
-      .map((n) => ({ id: n.id, parentId: n.node.parentId, type: n.node.type, sort: n.node.sort })),
-  );
+  const order = resolveChapterTreePosition(outlineStore, novelId, chapterNodeId)?.chapterOrder
+    ?? new Map<string, number>();
   const characterNames = new Map(
     characterStore.listCharacters(novelId).map((c) => [c.id, c.character.basicInfo.name]),
   );
@@ -107,7 +140,7 @@ export function buildChapterForeshadowContext(
   }
 
   if (recoverSorted.length > 0) {
-    lines.push("二、本章回收（揭晓「隐藏真相」，须与登场时的具体呈现呼应，不复述原文）：");
+    lines.push("二、本章回收（按每条伏笔的回收阶段推进，须与登场时的具体呈现呼应，不复述原文）：");
     let proseBudgetUsed = 0;
     recoverSorted.forEach((s, index) => {
       const card = s.foreshadow;
@@ -115,10 +148,11 @@ export function buildChapterForeshadowContext(
         ? `，服务：${card.characterIds.map((id) => resolveCharacterName(id, characterNames)).join("、")}`
         : "";
       const headline = `表面行为：${card.surfaceAction} / 隐藏真相：${card.hiddenTruth}（注意度 ${card.attentionLevel}/10${service}）`;
+      const stageLines = describeRecoveryStage(chapterNodeId, card.recoverChapterIds ?? [], order, outlineStore);
 
       // 同章种收：登场即回收，不注入任何章内容
       if (card.appearChapterId === chapterNodeId) {
-        lines.push(`${index + 1}. 登场于本章：${headline}`);
+        lines.push(`${index + 1}. 登场于本章：${headline}`, ...stageLines);
         return;
       }
       // 登场章按 ID 直查、不过滤版本（归档旧版章照常解析名与正文）；不可解析只注入卡片
@@ -126,10 +160,10 @@ export function buildChapterForeshadowContext(
         ? outlineStore.getOutlineNode(card.appearChapterId)
         : undefined;
       if (!appearNode || appearNode.novelId !== novelId) {
-        lines.push(`${index + 1}. （登场章信息不可用）${headline}`);
+        lines.push(`${index + 1}. （登场章信息不可用）${headline}`, ...stageLines);
         return;
       }
-      lines.push(`${index + 1}. 登场于《${appearNode.node.name}》：${headline}`);
+      lines.push(`${index + 1}. 登场于《${appearNode.node.name}》：${headline}`, ...stageLines);
 
       // 多步回收：全局章序在当前章之前的既往回收章概述（去重；节点缺失跳过）
       for (const stepId of new Set(card.recoverChapterIds ?? [])) {
