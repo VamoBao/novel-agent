@@ -1,3 +1,4 @@
+import { resolveAgentModelConfig } from "./providers/agent-model";
 import * as path from "node:path";
 import { characterSchema, PROTOCOL_VERSION, type AgentMessage, type Character } from "@novel/shared";
 import { createNovel, planActChapters, polishCharacter, regenerateOutline, writeChapter } from "./workflows";
@@ -16,7 +17,7 @@ import { OUTPUT_DIR } from "./output/outline-writer";
  * 新建流缺省；formJson 为表单当前值 JSON——argv 传参，结果经 polish-result 消息回传）；
  * `write-chapter <novelId> <chapterNodeId>` = 章节正文生成（写作模型单轮生成，
  * 三段校验 + 修订循环后入库；流程经 write-progress 消息实时回传；
- * 校验经 Agent 会话模型 deepseek，故本会话与其余会话同样需要 DEEPSEEK_API_KEY）。
+ * 校验经 Agent 会话模型，故本会话与其余会话同样需要 AGENT_MODEL_API_KEY）。
  */
 
 /** 会话模式：与 client 侧 AgentStartOptions（@novel/shared）一一对应 */
@@ -108,11 +109,9 @@ async function runSession(session: Session, channel: ProtocolChannel, send: (mes
 
 async function main(): Promise<void> {
   const session = parseSession(process.argv.slice(2));
-  // DeepSeek Key 为 Agent 会话模型（四个 ReAct 会话）与正文校验模型（chapter-review
-  // 三段校验）所需——write-chapter 会话经校验模型同样依赖 DeepSeek，与其余会话
-  // 一致地要求 Key（写作模型配置齐不再豁免）
-  if (!process.env.DEEPSEEK_API_KEY) {
-    process.stderr.write("NOVEL_AGENT_FATAL: 未设置 DEEPSEEK_API_KEY\n");
+  // 所有会话（包括正文校验）均需要 Agent 模型 API Key。
+  if (!resolveAgentModelConfig().apiKey) {
+    process.stderr.write("NOVEL_AGENT_FATAL: 未设置 AGENT_MODEL_API_KEY（兼容旧 DEEPSEEK_API_KEY）\n");
     process.exit(1);
   }
   const dbPath = path.resolve(process.env.NOVEL_DB_PATH ?? "data/novel.db");

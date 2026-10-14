@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { getWritingModel, isWritingModelConfigured } from "./writing-model";
-import { model as agentModel } from "./deepseek";
+import { model as agentModel } from "./agent-model";
 
 const ENV_KEYS = [
   "WRITING_MODEL_NAME",
@@ -45,7 +45,7 @@ describe("isWritingModelConfigured", () => {
 });
 
 describe("getWritingModel", () => {
-  test("未配置（含空串）回落 Agent 会话模型——与 deepseek.ts 的 model 同一实例", () => {
+  test("未配置（含空串）回落 Agent 会话模型——与 agent-model.ts 的 model 同一实例", () => {
     const model = getWritingModel();
     expect(model).toBe(agentModel);
     expect(model.specificationVersion).toBe("v4");

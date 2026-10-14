@@ -1,11 +1,12 @@
 import { createNovel } from "./workflows";
 import { UserAbortedError } from "./ui/aborted";
 import { CliChannel } from "./ui/cli-channel";
+import { resolveAgentModelConfig } from "./providers/agent-model";
 
 async function main(): Promise<void> {
-  if (!process.env.DEEPSEEK_API_KEY) {
+  if (!resolveAgentModelConfig().apiKey) {
     console.error(
-      "❌ 未设置 DEEPSEEK_API_KEY。请在项目根目录 .env 中配置（模型可用 DEEPSEEK_MODEL_NAME 覆盖，默认 deepseek-flash）。",
+      "❌ 未设置 AGENT_MODEL_API_KEY。请在项目根目录 .env 中配置 API Key、AGENT_MODEL_NAME 和 AGENT_MODEL_BASE_URL（模型与地址留空默认使用 DeepSeek；兼容旧 DEEPSEEK_API_KEY）。",
     );
     process.exit(1);
   }

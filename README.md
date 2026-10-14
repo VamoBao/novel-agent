@@ -29,7 +29,7 @@
 
 - 运行时：Bun 1.4（`bun.lock` 锁定依赖）
 - 语言：TypeScript 6（`strict`、`noUncheckedIndexedAccess` 等严格选项）
-- LLM 接入：Vercel AI SDK 7（`ai`）+ 官方 `@ai-sdk/deepseek`（Agent 会话模型）+ 官方 `@ai-sdk/openai-compatible`（写作模型），工具参数 schema 用 zod 4
+- LLM 接入：Vercel AI SDK 7（`ai`）+ 官方 `@ai-sdk/openai-compatible`（Agent 会话与写作模型均使用 OpenAI 兼容接口），工具参数 schema 用 zod 4
 - 数据库：SQLite（Bun 内置 `bun:sqlite`）
 - 桌面端：Electron + electron-vite + React
 - 静态检查：ESLint 10 + typescript-eslint 8（扁平配置）
@@ -40,15 +40,16 @@
 ### 环境要求
 
 - [Bun](https://bun.com) 1.4+
-- DeepSeek API Key（Agent 会话：世界观 / 角色 / 大纲 / 章节规划）
+- OpenAI 兼容服务的 API Key（Agent 会话与正文校验使用；模型名与 Base URL 可配置）
 - 写作模型服务（可选，章节正文生成时才需要）：任意 OpenAI 接口兼容端点
 
 ### 安装与配置
 
 ```bash
 bun install
-cp .env.example .env   # 编辑 .env，填入 DEEPSEEK_API_KEY；
-                       # 需要正文生成时再填 WRITING_MODEL_* 三项
+cp .env.example .env   # 编辑 .env，填入 AGENT_MODEL_API_KEY；
+                       # 接入其他服务时填 AGENT_MODEL_NAME / AGENT_MODEL_BASE_URL；
+                       # 可选 WRITING_MODEL_* 三项配置独立写作模型
 ```
 
 ### 运行
@@ -83,17 +84,20 @@ bun run dev:client
 
 | 变量 | 必填 | 说明 | 默认值 |
 | --- | --- | --- | --- |
-| `DEEPSEEK_API_KEY` | 是* | DeepSeek API Key（Agent 会话模型；正文生成会话不需要） | — |
-
-\* 三处来源任一配置即可；客户端设置弹窗配置后可不留 `.env`。
-| `DEEPSEEK_MODEL_NAME` | 否 | Agent 会话模型名 | `deepseek-flash` |
-| `WRITING_MODEL_NAME` | 否 | 写作模型名（正文生成专用，可与 Agent 模型不同） | — |
-| `WRITING_MODEL_API_KEY` | 否 | 写作模型 API Key | — |
-| `WRITING_MODEL_BASE_URL` | 否 | 写作模型接口 Base URL（OpenAI 接口兼容端点） | — |
+| `AGENT_MODEL_API_KEY` | 是* | Agent API Key（所有会话与正文校验） | — |
+| `AGENT_MODEL_NAME` | 否 | Agent 会话模型名 | `deepseek-flash` |
+| `AGENT_MODEL_BASE_URL` | 否 | Agent 接口 Base URL（OpenAI Chat Completions 兼容） | `https://api.deepseek.com` |
+| `WRITING_MODEL_NAME` | 否 | 独立写作模型名（正文生成专用） | — |
+| `WRITING_MODEL_API_KEY` | 否 | 独立写作模型 API Key | — |
+| `WRITING_MODEL_BASE_URL` | 否 | 独立写作模型接口 Base URL | — |
 | `NOVEL_DB_PATH` | 否 | SQLite 库文件路径 | `data/novel.db` |
-| `NOVEL_OUTPUT_DIR` | 否 | 产物输出目录（大纲 JSON 与正文 Markdown） | `output` |
+| `NOVEL_OUTPUT_DIR` | 否 | 产物输出目录 | `output` |
 
-> 写作模型三项需同时配置才生效；未配置时不影响其他功能，仅正文生成入口报可读错误。
+\* 三处来源任一配置即可；客户端「⚙️ 模型设置」的 Agent 组支持 API Key、模型名与 Base URL，保存后下一次会话生效。接入其他服务时填写对应模型名与地址（例如 `https://api.example.com/v1`）。所选服务与模型需支持工具调用及 JSON 输出。
+
+旧 `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL_NAME` 仍可使用；同一来源内优先使用 `AGENT_MODEL_*`，不同来源仍按上述优先级逐字段解析。历史客户端 `deepseek` 设置组读取时迁移为 `agentModel`，新组已存在时以新组为准。
+
+写作模型三项需同时配置才启用；任一未配置时正文生成回落到 Agent 模型。即使配置了独立写作模型，正文校验仍使用 Agent 模型。
 
 ## 数据存储
 

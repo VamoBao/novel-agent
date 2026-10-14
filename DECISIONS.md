@@ -1,3 +1,11 @@
+## 2026-10-14 Agent 模型统一 OpenAI 兼容接口
+
+- **背景**：早期 Agent 绑定 DeepSeek 便于开发，现在需要和写作模型一样配置任意兼容服务的 Key、模型名与 Base URL；用户已确认设计并要求开始。
+- **备选**：沿用 DeepSeek 命名会误导配置含义；增加多 provider 选择器会为同一种接口引入额外分支。
+- **结论**：复用现有 @ai-sdk/openai-compatible，Agent 采用 agent-model.ts / AGENT_MODEL_* / agentModel 设置组，移除专用 provider 依赖。保留旧变量和旧设置组读取，模型名与地址默认值保持 DeepSeek 体验。
+- **兼容边界**：按来源优先级逐字段解析，同来源通用变量优先。新设置组存在时不从旧组恢复已清空字段。JSON 使用通用 json_object，由 SDK 校验结果，不强制端点支持严格 JSON Schema。独立写作模型仍可配置，审校固定走通用 Agent 模型。
+- **规格**：docs/superpowers/specs/2026-10-14-agent-openai-compatible-design.md。
+
 ## 2026-10-13 固定角色基准与角色迁移：基准不可覆盖、变化经迁移表达、阶段按目标章计算
 
 - **背景**：`updateCharacter` 的版本化编辑把「角色卡当前值」当成唯一事实源——每次编辑覆盖主行、旧卡归档。用户指出这满足不了「人物在故事中变化」的创作需求：改名/性格转变这类变化是**剧情事件**，需要绑定「从第几章起、到第几章止、因为什么、中间怎么过渡」，而版本化编辑只有「现在的样子」；同时历史编辑（如 v1→v2→v3）无法表达为剧情时间线，正文生成也读不到「这一章的角色处于哪个阶段」。任务包（`temp/2026-10-13-character-migrations-task-package.md`）先经用户逐项确认后执行。

@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-14 [feat] Agent 模型 OpenAI 兼容接入（主记录与配置规则见根 PROGRESS）：create-novel / polish-character / write-chapter 统一引用 providers/agent-model，正文审校与写作回落均使用通用 Agent 模型；现有模型注入接口与业务流程保留。相关注释和架构文档同步。AC：typecheck / lint / 全量 489 项通过，独立审查无必须修复问题；真实服务未调用验证。
+
 - 2026-10-14 [fix] 角色迁移审查修复（完整范围见根 PROGRESS）：每条进行中/结束章计划标明角色归属；写作与内容审校同源请求集成测试扩展为两角色、同字段、相同旧值、不同目标；纯函数回归覆盖计划归属。库层原子确认/链一致性与客户端真实表单/陈旧范围回归见根记录。AC：定向 177 / 全量 477 通过，typecheck / lint 通过，独立复审无必须修复问题；测试流程见 docs/character-migration-testing.md。
 
 - 2026-10-13 [feat] 固定角色基准与角色迁移（跨模块需求，任务包 `temp/2026-10-13-character-migrations-task-package.md`，完整决策与 AC 见根 PROGRESS / DECISIONS）：**本模块**——新建 `chapter-context.ts` 纯函数模块（`buildCharacterStateContext` 角色状态与迁移阶段：四阶段相对目标章计算、基准卡+已结束迁移组成参考、进行中/结束章变化进独立计划块、创作指导字段声明、只取同全书大纲版本已确认迁移；`buildNeighborChapterContext` 全书章序跨幕前后章 + 上一章正文 8000 字符预算回退；`migrationPhaseAt` 纯函数）；write-chapter 以角色块替换原全库角色摘要行、前后章改按全书章序（可跨幕）、写作要求增角色变化计划条件条（编号顺延于伏笔/文风之前）、校验 ① 传入同源 characterLines；chapter-review ① 增 character 维度（过早改变 / 缺少过渡 / 未保留应保留特征）；foreshadow-intake 的 buildChapterOrder 上收至 @novel/shared 后转出（导入路径不变）。净增 chapter-context 12 条单测，write-chapter 集成 +3、chapter-review +1
@@ -16,11 +18,9 @@
 
 - 2026-10-13 [feat] 章节登场人物 ID 绑定（跨模块需求，计划经用户确认，完整决策与 AC 见根 PROGRESS / DECISIONS）：**本模块**——chapter-agent 角色梳理改逐章 characters 清单（顶层 newCharacters 取消、确认视图派生填充）+ auto-character-agent 增 collectChapterCharacters；新建 `chapter-cast-intake.ts`（bindChapterCasts：逐章清单 index 对齐 resolveCharacterIds→setChapterCharacters 单事务回填，未匹配逐章剔除警告、空解析章保持 null）；plan-act-chapters 编排顺序 saveChapters→地点→派生建卡（extraContext 带登场名单）→绑定回填→伏笔；write-chapter【登场角色参考】按 character_ids 收窄注入（未绑定旧章回退全库+notify）。净增 chapter-cast-intake 3 条单测，plan-act-chapters / write-chapter / chapter-agent 测试随新契约改写扩展
 
-- 2026-10-12 [feat] 小说创作条件入库与复用：createNovel 在类型/受众/核心冲突各阶段完成后立即更新 novels；regenerateOutline 读取 genre / audience / coreConflict，历史 null 项省略；outline-agent 注释同步。新建 6 项与重生成 5 项集成测试通过（覆盖中止后重开及原条件复用），完整跨模块验证与决策见根 PROGRESS.md / DECISIONS.md。
-
 ## 历史归档
 
-- 2026-10-12 [feat] 正文校验阶段结束即时回传单项结果；主任务清单、验证结果与全量测试环境限制见仓库根目录 `PROGRESS.md`。（完整实现与验收见对应提交。）
+- 2026-10-12 历史滚动摘要：2026-10-12 [feat] 正文校验阶段结束即时回传单项结果；主任务清单、验证结果与全量测试环境限制见仓库根目录 `PROGRESS.md`。；小说创作条件入库与复用（完整实现与验收见对应提交。）
 
 - 2026-10-12 [feat] 章节正文重新生成——覆盖替换 + 弹框确认（跨模块需求，设计规格 `docs/superpowers/specs/2026-10-12-chapter-regen-design.md` + 实现计划 `docs/superpowers/plans/2026-10-12-chapter-regen.md`，4 任务逐一实现后清单归一；两项决策经用户确认：旧正文覆盖替换 / 弹框确认，决策见根 DECISIONS）：**本模块仅 write-chapter.ts 改动**——前置校验移除「已有正文」拒绝（getDocumentByChapter 有行即 isRegen 分流：notify「🔄 重新生成中（将覆盖现有正文）」、落库走 replaceChapterDocument 覆盖替换、事务提交后清理旧正文文件——路径相同跳过防误删、幂等容忍缺失；任一环节失败回滚删新文件旧正文零影响）；生成与校验流程与首次生成完全一致（同一会话、协议与 headless 零改动）。document-store replaceChapterDocument 与客户端重生成入口/弹框见根 PROGRESS 当日条目。AC：typecheck 3 工程 / lint / 361 用例全过（本模块净增 3 条重生成集成用例——覆盖替换成功 / 库故障回滚 / 校验抛错保旧；前置校验用例「已有正文拒绝」随行为翻转移除，既有用例全数保留）；真实端到端待用户复验
 - 2026-10-12 [feat] 章节正文生成校验-修订闭环（跨模块需求，设计规格 `docs/superpowers/specs/2026-10-12-chapter-review-loop-design.md` + 实现计划 `docs/superpowers/plans/2026-10-12-chapter-review-loop.md`，6 任务逐一实现后清单归一；三项决策经用户确认：3 轮上限仍未达标保底保存最后一版并警告 / 校验模型用 Agent 会话模型 deepseek / 修订式重写，决策见根 DECISIONS）：**本模块净增 chapter-review.ts 校验 subAgent（reviewChapter 三段独立单轮 generateObject——①内容约束（世界观/章节概述/本章伏笔同源 lines）②文风相似度（≥90 合格、无启用样本 skipped 段事件零发送）③前后自洽（仅正文、kind 代码补全）+ isReportPassing + formatRevisionBlock；reviewModel 与 onProgress 注入、异常直接抛错）与 write-chapter.ts 循环化改造（生成段包进 3 轮循环、修订轮 prompt 追加【上一版正文】+【整改报告】块、3 轮保底保存警告、Options 增 reviewModel/onProgress 注入）**；shared review schema 与 write-progress 协议、headless 接线与 Key 检查收窄（write-chapter 自此始终要求 DEEPSEEK_API_KEY）、客户端进度区块见根 PROGRESS 当日条目。AC：typecheck 3 工程 / lint / 355 用例全过（本模块净增 13：chapter-review 8 + write-chapter 集成 5，既有 334 全数保留——初稿 prompt 逐字节回归、伏笔/文风注入用例全保留）；真实 LLM / 写作模型端到端待用户复验

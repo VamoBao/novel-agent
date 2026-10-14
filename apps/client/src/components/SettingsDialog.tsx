@@ -14,11 +14,12 @@ const THEME_OPTIONS = (Object.keys(THEME_LABELS) as ThemeSetting[]).map((value) 
   label: THEME_LABELS[value],
 }));
 
-/** 表单态：五个模型字段 + 主题（theme 即持久化值，非字符串表单字段） */
+/** 表单态：六个模型字段 + 主题（theme 即持久化值，非字符串表单字段） */
 interface FormState {
   theme: ThemeSetting;
-  deepseekApiKey: string;
-  deepseekModelName: string;
+  agentApiKey: string;
+  agentModelName: string;
+  agentBaseUrl: string;
   writingModelName: string;
   writingModelApiKey: string;
   writingModelBaseUrl: string;
@@ -26,8 +27,9 @@ interface FormState {
 
 const EMPTY_FORM: FormState = {
   theme: "system",
-  deepseekApiKey: "",
-  deepseekModelName: "",
+  agentApiKey: "",
+  agentModelName: "",
+  agentBaseUrl: "",
   writingModelName: "",
   writingModelApiKey: "",
   writingModelBaseUrl: "",
@@ -39,7 +41,7 @@ interface SettingsDialogProps {
 }
 
 /**
- * 模型设置弹窗（头部 ⚙️ 入口）：Agent 会话模型（DeepSeek Key + 模型名）与
+ * 模型设置弹窗（头部 ⚙️ 入口）：Agent 会话模型（OpenAI 兼容：Key + 模型名 + Base URL）与
  * 写作模型（模型名 / Key / Base URL，三项需同时配置、留空整体回落 Agent
  * 模型）两组字段；Key 输入用 password 型防旁窥。设置存 userData 明文
  * JSON（VS Code 式，用户决策），优先级 设置 > .env > 继承环境变量——
@@ -60,8 +62,9 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
         if (cancelled) return;
         setForm({
           theme: settings.theme,
-          deepseekApiKey: settings.deepseek.apiKey,
-          deepseekModelName: settings.deepseek.modelName,
+          agentApiKey: settings.agentModel.apiKey,
+          agentModelName: settings.agentModel.modelName,
+          agentBaseUrl: settings.agentModel.baseUrl,
           writingModelName: settings.writingModel.modelName,
           writingModelApiKey: settings.writingModel.apiKey,
           writingModelBaseUrl: settings.writingModel.baseUrl,
@@ -87,7 +90,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
     setError(null);
     const settings: AppSettings = {
       theme: form.theme,
-      deepseek: { apiKey: form.deepseekApiKey, modelName: form.deepseekModelName },
+      agentModel: { apiKey: form.agentApiKey, modelName: form.agentModelName, baseUrl: form.agentBaseUrl },
       writingModel: {
         modelName: form.writingModelName,
         apiKey: form.writingModelApiKey,
@@ -130,25 +133,35 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
               <p className="settings-hint">主题保存后立即生效，「跟随系统」随系统浅色/深色自动切换；模型配置仍为下一次会话生效。</p>
             </div>
             <div className="settings-group">
-              <p className="settings-group-label">Agent 会话模型（DeepSeek）——世界观 / 角色 / 大纲 / 章节规划</p>
+              <p className="settings-group-label">Agent 会话模型（OpenAI 接口兼容）——世界观 / 角色 / 大纲 / 章节规划 / 正文校验</p>
               <div className="field">
                 <label>API Key</label>
                 <input
                   type="password"
-                  value={form.deepseekApiKey}
+                  value={form.agentApiKey}
                   disabled={saving}
-                  onChange={(e) => setField("deepseekApiKey", e.target.value)}
+                  onChange={(e) => setField("agentApiKey", e.target.value)}
                 />
               </div>
               <div className="field">
                 <label>模型名（可选）</label>
                 <input
-                  value={form.deepseekModelName}
+                  value={form.agentModelName}
                   disabled={saving}
                   placeholder="deepseek-flash"
-                  onChange={(e) => setField("deepseekModelName", e.target.value)}
+                  onChange={(e) => setField("agentModelName", e.target.value)}
                 />
               </div>
+              <div className="field">
+                <label>Base URL（可选）</label>
+                <input
+                  value={form.agentBaseUrl}
+                  disabled={saving}
+                  placeholder="https://api.deepseek.com"
+                  onChange={(e) => setField("agentBaseUrl", e.target.value)}
+                />
+              </div>
+              <p className="settings-hint">模型名与 Base URL 留空默认使用 DeepSeek；接入其他服务请填写对应模型名和接口地址（如 https://api.example.com/v1）。</p>
             </div>
             <div className="settings-group">
               <p className="settings-group-label">写作模型（OpenAI 接口兼容）——章节正文生成专用</p>

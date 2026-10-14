@@ -5,7 +5,7 @@ import {
   type ModelMessage,
   type ToolSet,
 } from "ai";
-import { model } from "../providers/deepseek";
+import { model } from "../providers/agent-model";
 
 export interface ReactAgentOptions {
   system: string;

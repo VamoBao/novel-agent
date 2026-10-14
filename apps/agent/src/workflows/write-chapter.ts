@@ -3,7 +3,7 @@ import type { LanguageModelV4 } from "@ai-sdk/provider";
 import type { ReviewReport, ReviewStageResult, WriteProgressPhase, Document } from "@novel/shared";
 import type { UiChannel } from "../ui/channel";
 import { getWritingModel } from "../providers/writing-model";
-import { model as agentSessionModel } from "../providers/deepseek";
+import { model as agentSessionModel } from "../providers/agent-model";
 import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
 import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
 import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
@@ -52,7 +52,7 @@ export interface WriteChapterOptions {
   chapterNodeId: string;
   /** 写作模型实例；缺省 getWritingModel()（OpenAI 接口兼容端点，环境变量配置，测试注入替身） */
   model?: LanguageModelV4;
-  /** 校验模型实例（三段校验独立调用）；缺省 Agent 会话模型 deepseek——配置了独立写作模型时天然「他评」 */
+  /** 校验模型实例（三段校验独立调用）；缺省 Agent 会话模型——配置了独立写作模型时天然「他评」 */
   reviewModel?: LanguageModelV4;
   /** 流程进度回调（headless 映射为 write-progress 协议消息；CLI / 测试可不传） */
   onProgress?: (event: WriteProgressEvent) => void;
@@ -94,8 +94,8 @@ function describeReport(report: ReviewReport): string {
  * 梗概与关键情节点、本章概述、同幕前后章概述、本章绑定伏笔——登场卡片 /
  * 回收卡片+登场章上下文），交写作模型（OpenAI 接口
  * 兼容端点，与 Agent 会话模型解耦；WRITING_MODEL_* 未配置时回落 Agent
- * 会话模型 deepseek）生成正文；生成后、落盘前经校验 subAgent（chapter-review，
- * deepseek 三段独立调用——内容约束 / 文风相似度 / 前后自洽）产出结构化整改
+ * 会话模型）生成正文；生成后、落盘前经校验 subAgent（chapter-review，
+ * Agent 模型三段独立调用——内容约束 / 文风相似度 / 前后自洽）产出结构化整改
  * 报告：通过（内容与自洽零问题且文风 skipped 或 ≥90 分）才落盘入库；未达标
  * 按报告修订式重写（原上下文 + 上一版正文 + 整改报告），最多 MAX_REVIEW_ROUNDS
  * 轮，第 3 轮仍未达标保存最后一版并警告（产物优先，用户确认的决策）。
@@ -353,7 +353,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       throw new Error("写作模型返回了空正文，请稍后重试");
     }
 
-    // 三段校验（chapter-review，deepseek 独立调用；异常直接抛错终止会话零残留）
+    // 三段校验（chapter-review，Agent 模型独立调用；异常直接抛错终止会话零残留）
     report = await reviewChapter(
       {
         novelId,

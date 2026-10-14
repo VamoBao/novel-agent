@@ -83,7 +83,7 @@ mock.module("ai", () => ({
 
 const { writeChapter } = await import("./write-chapter");
 // 回落目标：Agent 会话模型实例（providers 静态导入，不受 mock 'ai' 影响）
-const { model: agentModel } = await import("../providers/deepseek");
+const { model: agentModel } = await import("../providers/agent-model");
 
 const DUMMY_MODEL = { modelId: "dummy-writing-model" } as unknown as LanguageModelV4;
 
@@ -422,7 +422,7 @@ describe("writeChapter", () => {
     ).rejects.toThrow("世界观未确认");
   });
 
-  test("写作模型未配置：回落 Agent 会话模型（deepseek）仍完成生成与入库", async () => {
+  test("写作模型未配置：回落 Agent 会话模型（OpenAI 兼容）仍完成生成与入库", async () => {
     const ctx = await setupDb();
     cleanupAll.push(ctx.cleanup);
     generateTextCalls = [];
@@ -434,7 +434,7 @@ describe("writeChapter", () => {
       ...ctx,
     });
 
-    // 回落实例即 deepseek.ts 的 model；正文照常落文件入库
+    // 回落实例即 agent-model.ts 的 model；正文照常落文件入库
     expect(generateTextCalls).toHaveLength(1);
     expect(generateTextCalls[0]!.model).toBe(agentModel);
     expect(existsSync(join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md"))).toBe(true);

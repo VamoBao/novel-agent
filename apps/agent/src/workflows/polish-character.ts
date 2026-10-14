@@ -1,5 +1,5 @@
 import { generateObject } from "ai";
-import { model } from "../providers/deepseek";
+import { model } from "../providers/agent-model";
 import type { UiChannel } from "../ui/channel";
 import { characterSchema, type Character } from "@novel/shared";
 import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";

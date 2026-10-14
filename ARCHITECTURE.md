@@ -14,7 +14,7 @@ apps/agent/src/
 │                         #   （编辑流传角色 ID、新建流不带；结果经 polish-result 消息回传），
 │                         #   `write-chapter <novelId> <chapterNodeId>` = 章节正文生成（生成 → 三段
 │                         #   校验+修订循环 → 落盘入库；进度经 write-progress 消息回传——onProgress
-│                         #   回调映射协议消息；校验经 deepseek，会话始终要求 DEEPSEEK_API_KEY）
+│                         #   回调映射协议消息；校验经 Agent 模型，会话始终要求 AGENT_MODEL_API_KEY）
 ├── query.ts              # 库查询与管理入口：一次性 CLI——查询（list / get——get 携带世界观+角色
 │                         #   +大纲当前版本节点+章节正文 documents+伏笔 foreshadows+地点 locations
 │                         #   +参考文风 style_references 全量行按入库顺序）+ 管理
@@ -33,10 +33,10 @@ apps/agent/src/
 │                         #   协议实现）/ FakeChannel 测试替身；
 │                         #   业务层（workflows/agents/tools）交互与输出的唯一出口
 ├── providers/
-│   ├── deepseek.ts       # LLM 接入层：DeepSeek provider 实例与 model 导出（Agent 会话模型）
+│   ├── agent-model.ts    # LLM 接入层：OpenAI 兼容 Agent provider，AGENT_MODEL_* 三字段与旧变量兼容，model 导出
 │   └── writing-model.ts  # 写作模型惰性工厂 getWritingModel(): LanguageModelV4——OpenAI 接口兼容
 │                         #   端点（@ai-sdk/openai-compatible），正文创作工作流接入后使用；
-│                         #   三变量齐才创建实例，未配置可安全导入、取用抛可读错误
+│                         #   三变量齐才创建实例，任一未配置回落同一 Agent 模型实例
 ├── agents/
 │   └── react.ts          # 通用 ReAct Agent 运行器（generateText + stopWhen 终态工具模式）
 ├── tools/
@@ -101,7 +101,7 @@ apps/agent/src/
     │                    #   回收卡片+登场章上下文——正文优先概述兜底+预算护栏）+ 参考文风（style-reference-store
     │                    #   按启用过滤，非空注入【参考文风】段于 prompt 尾部 + 模仿要求 + notify 名单，无启用零改动）
     │                    #   → 生成-校验-修订循环（最多 MAX_REVIEW_ROUNDS=3 轮）：写作模型 getWritingModel()
-    │                    #   单轮 generateText（无确认门）→ chapter-review 三段校验（deepseek）产出整改报告
+    │                    #   单轮 generateText（无确认门）→ chapter-review 三段校验（Agent 模型）产出整改报告
     │                    #   → isReportPassing 通过跳出 / 未达标按报告修订式重写（原上下文+上一版正文+整改报告），
     │                    #   3 轮仍未达标保底保存最后一版并警告 → 正文落文件（层级目录）+
     │                    #   saveChapterDocument 元数据入库绑定；进度经 Options 注入的 onProgress 回调透传
@@ -259,11 +259,11 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 
 ## 章节正文生成工作流（src/workflows/write-chapter.ts）
 
-客户端章节点卡「✍️ 生成本章正文」入口的会话编排（headless `write-chapter <novelId> <chapterNodeId>` 模式；写作模型未配置回落 Agent 会话模型——校验模型固定走 deepseek，会话始终要求 DEEPSEEK_API_KEY）：
+客户端章节点卡「✍️ 生成本章正文」入口的会话编排（headless `write-chapter <novelId> <chapterNodeId>` 模式；写作模型未配置回落 Agent 会话模型——校验模型使用 Agent 模型，会话始终要求 AGENT_MODEL_API_KEY）：
 
 1. **前置校验**（全部抛可读错误，由协议入口转 fatal error）：小说存在 → 章节点存在、同小说且类型为 chapter → 章剧情概述非空（旧数据缺内容拒绝）→ 所属幕与部节点存在 → 世界观已确认（worldviews 表有记录）；已有正文不再拒绝——检测到既有 document 即走重新生成路径（isRegen 分流 notify 与保存路径，流程与首次生成完全一致）
 2. **上下文组装（全取自库）**：书名 / logline + 世界观 JSON + 角色摘要行（名/定位/外貌/性格/渴望/恐惧，控制 prompt 体积）+ 部名与部梗概 + 幕名与幕梗概及关键情节点 + 本章名与剧情概述 + 同幕前后章名与概述（衔接上文、给下文留空间）+ **本章绑定伏笔（可选增强）**：`buildChapterForeshadowContext`（workflows/foreshadow-context）——登场注入卡片、回收组按登场章全局章序升序注入卡片 + 登场章上下文（正文优先、8000 字符预算内整条注入，未生成/文件缺失/超预算降级概述）+ 多步回收既往回收章概述，【本章伏笔】块插【下一章】块后【参考文风】段前、写作要求条件附加编号顺延、生成前 notify「🔮 本章伏笔」统计与降级计数；无绑定伏笔零注入零通知 + **参考文风（可选增强）**：style_references 表按启用过滤（enabled=1），非空在 prompt 尾部【下一章】块之后插【参考文风】段（每条「（名字）\n内容」，长样本置尾不推远核心上下文且紧邻风格指令）、写作要求附模仿条（模仿叙事语言 / 句式节奏 / 描写风格，不抄袭具体情节与专有名词）、生成前 notify「🖋️ 本次参考文风：名单」；无启用文风零注入零通知（行为与无此功能逐字节一致）
-3. **生成-校验-修订循环与落盘**：`getWritingModel()`（providers/writing-model，OpenAI 接口兼容端点，`WRITING_MODEL_*` 三环境变量齐才启用，任一未配置回落 Agent 会话模型 deepseek）单轮 `generateText`（非 ReAct——无工具无提问），写作要求含 2000~3000 字、遵守世界观禁忌、只输出正文文本；空结果拒绝且零残留。每轮生成后经 `reviewChapter`（chapter-review，deepseek 三段独立校验——①内容约束（世界观/章节概述/本章伏笔/**本章角色状态与变化计划**，与写作者同源）②文风相似度（≥90 合格，无启用样本 skipped）③前后自洽）产出结构化整改报告：`isReportPassing` 通过（①③零问题且文风达标）→ 落盘；未达标按报告修订式重写（prompt 追加【上一版正文】+【整改报告】块，末条要求替换为按报告逐条修订），最多 3 轮；第 3 轮仍未达标 → ⚠️ 警告（含文风分与问题计数）后保底保存最后一版。进度全程经 onProgress 回调透传（drafting/review-*/revising/saving，报告附着在 revising/saving 事件）。正文经 document-writer 写 `output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`（sanitize 段清理，同名冲突加 `-N` 后缀不覆盖既有文件），文件先落、库后入，库失败回滚删除文件
+3. **生成-校验-修订循环与落盘**：`getWritingModel()`（providers/writing-model，OpenAI 接口兼容端点，`WRITING_MODEL_*` 三环境变量齐才启用，任一未配置回落 Agent 会话模型）单轮 `generateText`（非 ReAct——无工具无提问），写作要求含 2000~3000 字、遵守世界观禁忌、只输出正文文本；空结果拒绝且零残留。每轮生成后经 `reviewChapter`（chapter-review，Agent 模型三段独立校验——①内容约束（世界观/章节概述/本章伏笔/**本章角色状态与变化计划**，与写作者同源）②文风相似度（≥90 合格，无启用样本 skipped）③前后自洽）产出结构化整改报告：`isReportPassing` 通过（①③零问题且文风达标）→ 落盘；未达标按报告修订式重写（prompt 追加【上一版正文】+【整改报告】块，末条要求替换为按报告逐条修订），最多 3 轮；第 3 轮仍未达标 → ⚠️ 警告（含文风分与问题计数）后保底保存最后一版。进度全程经 onProgress 回调透传（drafting/review-*/revising/saving，报告附着在 revising/saving 事件）。正文经 document-writer 写 `output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`（sanitize 段清理，同名冲突加 `-N` 后缀不覆盖既有文件），文件先落、库后入，库失败回滚删除文件
    三项校验各在开始与结束时发送 `write-progress`，结束事件附 `stageResult`；客户端按轮累积阶段结果，有问题即在对应阶段显示警告与建议，新轮清空阶段结果。完整 `report` 仍随修订 / 保存事件供末尾汇总。
 4. **元数据入库绑定**：首次生成走 `saveChapterDocument`、重新生成走 `replaceChapterDocument`（单事务删旧行插新行）插 documents 行（file_path 相对路径 + 字数，内容不进库）+ 章节点回写 `document_id` 并置 `status=completed`；重生成在事务提交后清理旧正文文件（新旧路径相同——旧文件本就缺失——时跳过防误删新文件；幂等容忍缺失）；任一环节失败回滚删新文件，旧正文行与文件零影响；notify 保存路径与字数；run_finished 携带小说 ID 供客户端刷新详情（章节点 ID 稳定，选中与正文展示保持）；大纲重生成只降级归档章节点，documents 行与正文文件保留（旧正文与归档章的关联留存）
 
@@ -281,9 +281,10 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 
 - 环境变量（Bun 自动加载 `.env`，参考 `.env.example`）：
   - 模型配置三来源：客户端设置弹窗（`userData/settings.json` 明文 JSON，⚙️ 维护）> `.env` > 继承环境变量（client 侧 childEnv 解析注入，agent 子进程无感）
-  - `DEEPSEEK_API_KEY`：必填，DeepSeek API Key
-  - `DEEPSEEK_MODEL_NAME`：可选，默认 `deepseek-flash`
-  - `WRITING_MODEL_NAME` / `WRITING_MODEL_API_KEY` / `WRITING_MODEL_BASE_URL`：可选，写作模型（OpenAI 接口兼容端点，模型名 / Key / Base URL 三项需同时配置）——正文创作时使用，可与 Agent 会话模型不同；任一未配置回落 Agent 会话模型（DeepSeek），正文生成开箱即用
+  - `AGENT_MODEL_API_KEY`：必填，Agent API Key（兼容旧 DEEPSEEK_API_KEY）
+  - `AGENT_MODEL_NAME`：可选，默认 `deepseek-flash`（兼容旧 DEEPSEEK_MODEL_NAME）
+  - `AGENT_MODEL_BASE_URL`：可选，默认 `https://api.deepseek.com`；其他兼容服务需填写对应模型名与接口 Base URL
+  - `WRITING_MODEL_NAME` / `WRITING_MODEL_API_KEY` / `WRITING_MODEL_BASE_URL`：可选，写作模型（OpenAI 接口兼容端点，模型名 / Key / Base URL 三项需同时配置）——正文创作时使用，可与 Agent 会话模型不同；任一未配置回落 Agent 会话模型（OpenAI 兼容），正文生成开箱即用
   - `NOVEL_DB_PATH`：可选，SQLite 路径，默认 `data/novel.db`
   - `NOVEL_OUTPUT_DIR`：可选，大纲输出目录，默认 `output`；协议模式下由宿主进程传绝对路径，`hello` 消息回显校验
 - SQLite：Bun 内置 `bun:sqlite`，各 store 共享默认连接（懒加载单例），`PRAGMA foreign_keys=ON` 按连接开启。**跨进程并发约定**（agent 会话写库 / 查询 CLI 子进程同时打开库）：所有连接统一 `PRAGMA busy_timeout=5000`（短锁冲突等待重试，而非默认 0 立即抛 database is locked）；`journal_mode` 与 `user_version` 的写入仅在真正需要时执行（幂等读检查 / 只在迁移分支内写）——版本匹配的纯浏览打开是零写操作，WAL 下读连接与写连接天然共存。十一张表主键均为应用层生成的 **UUIDv7**（时间有序，索引友好）：`novels`（小说信息，1 的根，`pinned` / `favorite` 为书库管理标记，置顶优先排序、收藏星标不影响排序）；`characters` 与 characterSchema 对应（1:N，自增序 + `novel_id` 外键索引，`version` / `updated_at` 为历史元数据），创作流确认后入库 version=1 即**固定基准**——基准卡只增不改（`updateCharacter` 已退役、IPC/preload 删除、CLI 命令显式拒绝、客户端角色卡只读），人物变化一律经 `character_migrations` 表达；`character_versions` 为角色历史版本快照表（`character_id` / `novel_id` 外键 + 索引，`version` 记编辑前版本号、`character` 存整卡 JSON 文本）——运行期不再写入，仅供 18→19 升级导入与追溯；`character_migrations`（角色迁移，一行一个角色的一个字段变化：`migrate_field` 受控字段路径（覆盖 characterSchema 全部叶子字段，应用层校验）、`old_value` 服务端派生只读、`new_value` 目标值、`start_chapter_id` / `end_chapter_id` 区间（结束章 NULL = 开放区间）、`trigger` / `transition_guidance` 创作计划文本（确认时必填）、`sequence` 同角色内原子分配不复用、`revision` 每次编辑或状态变更递增、`status` CHECK 草案/已确认/已取消（草案与取消项不参与角色状态解析）、`outline_version` 绑定的**全书大纲版本**（取章所在树根节点 version，非章节点自身 version；未绑定草案可空）、`group_id` 同次历史编辑的字段差异关联）；`character_migration_versions`（迁移修订快照，`migration_id` / `novel_id` 外键 + 索引，每次编辑或状态变更前整行 JSON 归档，与角色卡历史表区分）；`worldviews`（1:1，`novel_id` 唯一外键，upsert 覆盖更新，`taboos` 数组存 JSON 文本）；`outlines`（大纲树，`parent_id` 自引用外键 + `novel_id` 外键索引，`type` CHECK 部/幕/章——部/幕为大纲阶段两级，章为章节规划段在幕下批量创建；**内容随节点入库**：`summary` 为部/幕梗概与章剧情概述、`key_plot_points` 为幕级关键情节点（JSON 文本列，仅幕节点携带，schema refine 强约束），供写作期按幕内容生成章节、按章概述写正文；`character_ids` 为章级登场角色 ID 绑定（JSON 文本列，仅章节点携带，schema refine 强约束——章节规划确认、新增角色自动建卡之后由编排层名字→ID 解析回填，未绑定的旧章为 NULL=回退全库角色注入）；`status` CHECK 计划中/写作中/写作完成/已废弃，同节点多版本行并存 `version`+`is_current_version`，部分唯一表达式索引 `(novel_id, COALESCE(parent_id,''), sort) WHERE is_current_version=1` 保证同父级下当前版本 sort 唯一——根节点 parent 为 NULL，SQLite 唯一索引视 NULL 互异故 COALESCE 归一；大纲确认后经 `saveOutlineTree` 整树事务入库，重复保存被唯一索引拒绝；章节规划确认后经 `saveChapters` 幕下事务批量建章（父级须为幕且同小说，同一幕重复保存同样被唯一索引拒绝），各章登场角色绑定经 `setChapterCharacters` 单事务批量回填（置于新增角色自动建卡之后——绑定前名单中全部角色已入库、ID 必然存在）；当前版本切换由调用方先降级旧版再提升新版，`document_id` 为章节正文绑定回写列——documents 表已落地，由 `saveChapterDocument` 入库事务同指针写并置 status=completed，列上外键因 SQLite 不支持 ALTER 补加而由事务与 documents.chapter_id 外键共同保证一致性）；`documents`（章节正文元数据，一章一份：`chapter_id` 唯一外键挂 outlines 章节点、`file_path` 正文文件相对路径——**内容存文件系统** `output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`（顶层带 ID 去重，sanitize 段清理，同名章冲突 -N 后缀）、`word_count` 不含空白字符字数（入库时计算）——`saveChapterDocument` 单事务「插元数据 + 回写章节点 document_id + status=completed」，重复保存被唯一索引拒绝；deleteNovel 级联时先于 outlines 删元数据行并逐文件清理；小说 rename 经 updateFilePaths 联动迁移文件（ID 段不变、仅名段更新）；10→11 迁移把存量 content 内联按「小说名-ID」层级落文件）；`locations`（小说世界的地理位置，`parent_id` 自引用外键成层级（城市→大陆）+ `novel_id` 外键索引，`description` 一句话定位、坐标 `x`/`y` REAL、图层 `layer` 自由文本（天上/地面/地底等）、`population` 可空非负整数——x/y/layer/population 均可空（12→13 放宽：自动入库只产生「名字+定位」，地图向坐标留给未来地图功能编辑）——**创作流采集已接入**（大纲与章节规划确认后经 `location-intake.ts` 确定性入库），查询 CLI 已读（novelDetail.locations → 客户端结构树地点组））；`foreshadows`（伏笔，`novel_id` 外键索引：`surface_action` 表面行为 / `hidden_truth` 隐藏的真相必填，`attention_level` CHECK 1-10 读者注意度（1 易发现→10 难发现），`recovery_status` CHECK 枚举 unrecovered/partial/recovered 默认未回收，埋线方式 / 创作目的可选，`appear_chapter_id` 出现章节为可空裸列（chapter 节点写作期落地后补约束，先例 document_id），`act_node_id` 埋设幕节点与 `recover_act_node_id` 回收幕节点同为可空裸列（大纲阶段挂幕，章节规划按幕圈定回传「未绑登场章」与「待回收」伏笔并分别绑定登场/回收章；SQLite 不支持 ALTER 补外键，一致性由写入方保证，先例 outlines.document_id），`recover_chapter_ids` 回收章节 / `character_ids` 服务角色存 JSON 文本多值——完整 CRUD 支持回收状态流转，服务角色应用层校验同小说——**创作流采集与回收规划均已接入**（大纲确认挂幕与回收幕、章节规划绑定登场与回收章、编辑表单手动规划回收章），客户端浏览 UI 为后续需求）；`style_references`（参考文风，`novel_id` 外键索引：`name` 名字 / `content` 文本内容必填——**内容直接进库不落文件**（文风是喂给 LLM 的素材而非人类阅读产物、体量小而恒定、每次生成正文全量注入无懒加载空间，决策见 DECISIONS），`enabled` CHECK 0/1 启用开关默认启用——生成正文只注入启用条目——**客户端结构树「🖋️ 文风」组与 query CLI 三命令（add-style / update-style / delete-style）已接入**（不走创作流、无确认门，编辑表单直写库；小说改名零联动、删除随 deleteNovel 级联））。schema 变更用 `PRAGMA user_version` 版本号管理（当前 19）：**4→5 起 client 书库已投产，仅做保数据的 ALTER 增量迁移**（4→5 为 novels 增列 pinned / favorite；5→6 为 outlines 增列 summary / key_plot_points，旧行留 NULL 不回填；6→7 为纯新增 locations 表、7→8 为纯新增 foreshadows 表，均由 CREATE TABLE IF NOT EXISTS 幂等落地；8→9 为 characters 增列 version（ALTER，DEFAULT 1 旧行不回填）+ 新增 character_versions 快照表、9→10 为纯新增 documents 表（均由 CREATE TABLE IF NOT EXISTS 幂等落地）、10→11 为 documents 去 content 列改文件存储（存量行 content 先按层级落文件再 DROP 列，file_path 回填）；11→12 为 foreshadows 增列 act_node_id（守卫 `version >= 8 && version <= 11`——foreshadows 表自 v8 起已存在，8~11 的库都持无此列的旧表形态，CREATE TABLE IF NOT EXISTS 对其不生效，故守卫须覆盖整段而非仅 version === 11）；12→13 为 locations 表重建迁移——放宽 x/y/layer 可空 + 新增 description 列（SQLite 无法 ALTER 放宽 NOT NULL，按官方重建流程：FK 关闭 → 改名旧表 → 建新表 → 拷数据 → 删旧表 → FK 重开，自引用外键下拷贝顺序无关化；守卫 `version >= 7 && version <= 12`，表异常缺失时跳过重建由基线 DDL 直建新形态）；13→14 为 foreshadows 增列 recover_act_node_id（守卫 `version >= 8 && version <= 13`，表异常缺失时跳过由基线 DDL 直建，同 11→12 先例）；14→15 为纯新增 style_references 表（CREATE TABLE IF NOT EXISTS 幂等落地，无 ALTER，同 9→10 先例）；15→16 为 novels 增列 genre / audience / core_conflict（创作条件直接绑定小说，补列与版本号在 immediate 事务中原子提交、取得写锁后复查版本防并发重复迁移，段内显式写 16 供链式直升继续）；16→17 为 outlines 增列 character_ids（登场角色绑定，补列与版本同事务提交，表缺失或列已存在时只写版本标记）；17→18 为 characters 增列 updated_at（角色卡最近更新时间，补列后回填「最新编辑快照时间，从未编辑则取 created_at」——存量数据语义即末次变更时刻；段内显式写 18 供链式直升继续）；18→19 为固定角色基准与角色迁移——新增 character_migrations 与 character_migration_versions 两表（幂等建表），并在**同一 immediate 事务**内完成「version>1 的角色从 character_versions 第 1 版快照恢复基准写入主行（id / novel_id / created_at / version / updated_at 稳定）+ 沿『快照版本升序 + 当前卡』变化链逐字段比较，改动项各建一条 draft 迁移（同次编辑的多个字段共用 group_id，未改字段不建迁移；历史草案不猜测起始章 / 结束章 / 诱因 / 过渡过程）」；找不到或校验不过第一版时**抛错回滚**（绝不把当前卡冒充第一版），建表 / 恢复 / 导入与版本推进原子提交、导入前复查迁移表为空保证重复打开不重复导入；旧正文文件与章节不被改写；迁移分支按版本链式逐级补列——每段显式写各自目标版本号（非 SCHEMA_VERSION），否则链式直升时后续段会被短路——每段以来源版本守卫（`version === 4` / `version <= 5`），已是目标形态的段不重放，否则重复 ALTER 报 duplicate column），DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底。NovelState 整体（status/params/outline）当前仍为内存态，SQLite 化为后续接入点；整本删除（书库管理）由 `deleteNovel` 单事务级联清各表（outlines / locations 自引用树单语句整删；character_migration_versions 先于 character_migrations、character_migrations 与 character_versions 先于 characters 删除——migration_id / character_id 外键约束；style_references 无文件联动直接随级联清理）并由查询入口清理 `output/<id>.json` 产物
@@ -304,3 +305,7 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 - `CharacterMigrationPanel` 区分新建/编辑状态；复制只提供初始内容，保存创建新行且不修改源记录。表单统一经 `save-migration` CLI 与 `library:saveMigration` IPC 提交，确认失败零写入。
 - v18 升级缺少历史表时检查是否有 version>1 角色；有则报出角色 ID 并回滚，不将当前编辑卡视为基准。
 - `happy-dom` 是客户端测试开发依赖，交互测试运行真实 React + DOM 并接真实 SQLite；定向入口 `bun run test:character-migrations`，完整回归矩阵见 [角色迁移测试流程](docs/character-migration-testing.md)。
+
+## Agent 模型配置与历史兼容（2026-10-14）
+
+`providers/agent-model.ts` 统一创建 OpenAI Chat Completions 兼容模型，替换 DeepSeek 专用 provider；所有 Agent、角色润色和正文审校引用该 model，独立写作模型未配置时回落同一实例。配置详见 README 的 AGENT_MODEL_* 三字段。客户端 settings 的 agentModel 与 writingModel 均为三字段，normalizeSettings 在新组缺失时迁移旧 deepseek 组；resolveModelEnv 按来源优先级查找，同一来源通用变量先于旧变量，输出六个模型变量供 childEnv 注入。CLI/headless 均用 resolveAgentModelConfig 检查非空 Key。
