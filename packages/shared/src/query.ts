@@ -7,6 +7,10 @@ import { outlineNodeTypeSchema } from "./outline-node";
 import { styleReferenceSchema } from "./style-reference";
 import { worldviewSchema } from "./worldview";
 import { novelCreationParamsSchema } from "./novel";
+import {
+  chapterLengthBoundSchema,
+  stylePassScoreSchema,
+} from "./writing-prefs";
 
 /**
  * 库查询结果契约：agent 一次性查询 CLI（apps/agent/src/query.ts）的序列化输出
@@ -21,9 +25,22 @@ export const novelListItemSchema = z.object({
   pinned: z.boolean().describe("置顶（列表排序优先，组内按创建时间倒序）"),
   favorite: z.boolean().describe("收藏（星标，不影响排序）"),
   createdAt: z.string().describe("创建时间（ISO 8601）"),
-  updatedAt: z.string().describe("最近更新时间（ISO 8601）"),
+  updatedAt: z.string().describe("最近更新（ISO 8601）"),
 });
 export type NovelListItem = z.infer<typeof novelListItemSchema>;
+
+/** 详情侧的小说条目字段：写作偏好（小说级覆盖；生成正文按「小说级 > 系统设置 > 内置默认」解析生效值） */
+const novelWritingPrefsFields = {
+  chapterLengthMin: chapterLengthBoundSchema.nullable()
+    .describe("章节篇幅下限（字），小说级覆盖；未设置为 null（回落系统设置）")
+    .default(null),
+  chapterLengthMax: chapterLengthBoundSchema.nullable()
+    .describe("章节篇幅上限（字），小说级覆盖；未设置为 null（回落系统设置）")
+    .default(null),
+  stylePassScore: stylePassScoreSchema.nullable()
+    .describe("文风相似度合格线（0-100），小说级覆盖；未设置为 null（回落系统设置）")
+    .default(null),
+};
 
 /** 角色条目：角色卡 + 库表主键（客户端结构树节点 key 用）+ 版本号（编辑提交易主行递增，历史快照在 character_versions 表）
  *  + 最近更新时间（编辑提交刷新——章卡据此判断已生成正文是否早于角色设定更新） */
@@ -107,6 +124,7 @@ export const novelDetailSchema = z.object({
     genre: novelCreationParamsSchema.shape.genre.default(null),
     audience: novelCreationParamsSchema.shape.audience.default(null),
     coreConflict: novelCreationParamsSchema.shape.coreConflict.default(null),
+    ...novelWritingPrefsFields,
   }),
   worldview: worldviewSchema.nullable().describe("世界观，未确认为 null"),
   characters: z.array(characterEntrySchema).describe("全部角色（按入库顺序）"),

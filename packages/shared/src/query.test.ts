@@ -26,6 +26,19 @@ describe("小说详情的创作条件契约", () => {
     expect(novelDetailSchema.parse(emptyDetail).novel).toMatchObject({ genre: null, audience: null, coreConflict: null });
   });
 
+  test("写作偏好三字段：旧载荷缺省补 null（未设置覆盖），携带时透传，非法值拒绝", () => {
+    expect(novelDetailSchema.parse(emptyDetail).novel).toMatchObject({
+      chapterLengthMin: null,
+      chapterLengthMax: null,
+      stylePassScore: null,
+    });
+    const prefs = { chapterLengthMin: 3000, chapterLengthMax: 4500, stylePassScore: 85 };
+    expect(novelDetailSchema.parse({ ...emptyDetail, novel: { ...validListItem, ...prefs } }).novel).toMatchObject(prefs);
+    expect(() =>
+      novelDetailSchema.parse({ ...emptyDetail, novel: { ...validListItem, stylePassScore: 101 } }),
+    ).toThrow();
+  });
+
   test("详情保留结构化创作条件并允许空受众，非法形态拒绝", () => {
     const params = { genre: "科幻", audience: [], coreConflict: { origin: "资源枯竭", impact: "居民流离失所", idealResolution: "找到新的家园" } };
     expect(novelDetailSchema.parse({ ...emptyDetail, novel: { ...validListItem, ...params } }).novel).toMatchObject(params);

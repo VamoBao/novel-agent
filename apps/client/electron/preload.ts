@@ -13,6 +13,7 @@ import type {
   SaveCharacterMigration,
   NovelDetail,
   NovelListItem,
+  NovelWritingPrefs,
   StyleReferenceEntry,
 } from "@novel/shared";
 
@@ -48,6 +49,9 @@ contextBridge.exposeInMainWorld("agent", {
     ipcRenderer.invoke("library:setPinned", novelId, pinned),
   setNovelFavorite: (novelId: string, favorite: boolean): Promise<NovelListItem> =>
     ipcRenderer.invoke("library:setFavorite", novelId, favorite),
+  /** 写作偏好小说级覆盖（章节篇幅 + 文风合格线，null=清空回落系统设置） */
+  setWritingPrefs: (novelId: string, prefs: NovelWritingPrefs): Promise<NovelListItem> =>
+    ipcRenderer.invoke("library:setWritingPrefs", novelId, prefs),
   deleteNovel: (novelId: string): Promise<{ deleted: string }> =>
     ipcRenderer.invoke("library:delete", novelId),
   /** 角色管理（新增）：返回带 version 的角色条目（version=1 即固定基准） */

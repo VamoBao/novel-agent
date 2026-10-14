@@ -11,6 +11,7 @@ import {
   novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
+  novelWritingPrefsSchema,
   styleReferenceSchema,
   type Character,
   type CharacterEntry,
@@ -61,6 +62,8 @@ import {
  * - 管理：`rename <novelId> <name>`（连带迁移按小说名落盘的正文文件）/ `pin|unpin <novelId>`
  *   / `favorite|unfavorite <novelId>` / `delete <novelId>`（级联删除关联数据并清理
  *   output 产物——大纲 JSON 与正文文件）
+ *   / `set-writing-prefs <novelId> <偏好JSON>`（写作偏好小说级覆盖：篇幅 min/max +
+ *   文风合格线三项全量替换，null=清空回落系统设置）
  *   / `add-character <novelId> <角色卡JSON>`（新增角色，version=1）
  *   / `update-foreshadow <novelId> <foreshadowId> <伏笔JSON>`（patch 语义编辑伏笔）
  *   / `add-migration <novelId> <characterId> <迁移JSON>`（新建角色迁移草案，旧值服务端派生）
@@ -154,6 +157,9 @@ export function buildNovelDetail(
       genre: novel.genre,
       audience: novel.audience,
       coreConflict: novel.coreConflict,
+      chapterLengthMin: novel.chapterLengthMin,
+      chapterLengthMax: novel.chapterLengthMax,
+      stylePassScore: novel.stylePassScore,
     },
     worldview,
     characters,
@@ -199,6 +205,32 @@ export function renameNovel(
     documentStore.updateFilePaths(moves.map(({ id, to }) => ({ id, filePath: to })));
   }
   return toListItem(updated);
+}
+
+/** 写作偏好载荷：全量替换小说级覆盖（三项 null=清空，回落系统设置；篇幅成对校验在
+ *  schema 与 store 内双层把关），返回更新后列表项 */
+export function setWritingPrefs(
+  db: ReturnType<typeof openDatabase>,
+  novelId: string,
+  prefsJson: string,
+): NovelListItem {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(prefsJson);
+  } catch (error) {
+    throw new Error(
+      `写作偏好 JSON 解析失败：${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  const result = novelWritingPrefsSchema.safeParse(raw);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new Error(
+      `写作偏好不合法（${issue?.path.join(".") || "根"}）：${issue?.message ?? "未知问题"}`,
+    );
+  }
+  return toListItem(new NovelStore(db).updateWritingPrefs(novelId, result.data));
 }
 
 /** 置顶 / 收藏载荷：置位后返回更新后列表项 */
@@ -505,6 +537,10 @@ function main(argv: string[]): number {
         if (!novelId) break;
         process.stdout.write(`${JSON.stringify(deleteNovel(db, novelId))}\n`);
         return 0;
+      case "set-writing-prefs":
+        if (!novelId || rest.length !== 1 || !rest[0]) break;
+        process.stdout.write(`${JSON.stringify(setWritingPrefs(db, novelId, rest[0]))}\n`);
+        return 0;
       case "add-character":
         if (!novelId || rest.length !== 1 || !rest[0]) break;
         process.stdout.write(`${JSON.stringify(addCharacterEntry(db, novelId, rest[0]))}\n`);
@@ -558,7 +594,7 @@ function main(argv: string[]): number {
     db.close();
   }
   process.stderr.write(
-    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id> | add-character <novelId> <角色卡JSON> | update-foreshadow <novelId> <foreshadowId> <伏笔JSON> | save-migration <novelId> <characterId> <提交JSON> | add-migration <novelId> <characterId> <迁移JSON> | update-migration <novelId> <migrationId> <patchJSON> | confirm-migration <novelId> <migrationId> | cancel-migration <novelId> <migrationId> | add-style <novelId> <文风JSON> | update-style <novelId> <styleId> <文风JSON> | delete-style <styleId>>\n",
+    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id> | set-writing-prefs <novelId> <偏好JSON> | add-character <novelId> <角色卡JSON> | update-foreshadow <novelId> <foreshadowId> <伏笔JSON> | save-migration <novelId> <characterId> <提交JSON> | add-migration <novelId> <characterId> <迁移JSON> | update-migration <novelId> <migrationId> <patchJSON> | confirm-migration <novelId> <migrationId> | cancel-migration <novelId> <migrationId> | add-style <novelId> <文风JSON> | update-style <novelId> <styleId> <文风JSON> | delete-style <styleId>>\n",
   );
   return 1;
 }

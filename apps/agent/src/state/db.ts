@@ -14,7 +14,7 @@ export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 19;
+const SCHEMA_VERSION = 20;
 
 /** character_migrations 建表（18→19 迁移段与基线 DDL 共用，保证两处形态一致） */
 const CREATE_CHARACTER_MIGRATIONS_SQL = `
@@ -222,7 +222,9 @@ function migrateCharactersToMigrations(db: Database): void {
  * 打开（必要时创建）数据库并完成建表。
  * 主键均为应用层生成的 UUIDv7（时间有序，索引友好）：
  * - novels：小说信息（pinned / favorite 为书库管理标记；name 在大纲确认后回填；
- *   genre / audience JSON / core_conflict JSON 为分阶段采集的创作条件，历史 NULL），
+ *   genre / audience JSON / core_conflict JSON 为分阶段采集的创作条件，历史 NULL；
+ *   chapter_length_min / chapter_length_max / style_pass_score 为写作偏好的小说级覆盖，
+ *   NULL=未设置——正文生成按「小说级 > 系统设置 > 内置默认」解析生效值），
  *   其余业务表经 novel_id 外键关联
  * - characters：角色卡，1:N（novel_id 索引），version 为当前版本号（编辑提交递增），
  *   updated_at 为最近更新时间（编辑提交刷新——章卡据此判断已生成正文是否早于角色设定更新）
@@ -504,8 +506,24 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
         }
         db.exec("PRAGMA user_version = 19;");
       }).immediate();
+      // 19→20：novels 增列写作偏好（章节篇幅 min/max 与文风合格线的**小说级覆盖**；
+      // NULL=未设置——生成正文时按「小说级 > 系统设置 > 内置默认」解析生效值，
+      // 历史 NULL 不回填即「跟随系统设置」语义）。补列与版本同事务提交、锁内复查
+      // 版本防并发；表缺失（非完整形态库）或列已存在时只写版本标记，由下方
+      // CREATE TABLE IF NOT EXISTS 直建目标形态。段内显式写 20（非 SCHEMA_VERSION）
+      db.transaction(() => {
+        const lockedVersion = db.query("PRAGMA user_version").get() as { user_version: number };
+        if (lockedVersion.user_version >= 20) return;
+        const novelCols = db.query("PRAGMA table_info(novels)").all() as Array<{ name: string }>;
+        if (novelCols.length > 0 && !novelCols.some((col) => col.name === "chapter_length_min")) {
+          db.exec("ALTER TABLE novels ADD COLUMN chapter_length_min INTEGER;");
+          db.exec("ALTER TABLE novels ADD COLUMN chapter_length_max INTEGER;");
+          db.exec("ALTER TABLE novels ADD COLUMN style_pass_score INTEGER;");
+        }
+        db.exec("PRAGMA user_version = 20;");
+      }).immediate();
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>19 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>20 的库被旧代码打开）：重建兜底
       db.exec("DROP TABLE IF EXISTS documents;");
       db.exec("DROP TABLE IF EXISTS outlines;");
       db.exec("DROP TABLE IF EXISTS locations;");
@@ -528,6 +546,9 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       genre TEXT,
       audience TEXT,
       core_conflict TEXT,
+      chapter_length_min INTEGER,
+      chapter_length_max INTEGER,
+      style_pass_score INTEGER,
       pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
       favorite INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0, 1)),
       created_at TEXT NOT NULL,

@@ -14,6 +14,7 @@ import { OutlineRegenFlow } from "./components/OutlineRegenFlow";
 import { PreviewPane } from "./components/PreviewPane";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { StructureTreePanel, type Selection } from "./components/StructureTreePanel";
+import { WritingPrefsDialog } from "./components/WritingPrefsDialog";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -51,6 +52,8 @@ export function App() {
   const [outlineRegen, setOutlineRegen] = useState<OutlineRegenTarget | null>(null);
   /** 模型设置弹窗（非 null 时渲染 SettingsDialog） */
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** 写作偏好弹窗目标（书库右键「📏 写作偏好」，非 null 时渲染 WritingPrefsDialog） */
+  const [writingPrefs, setWritingPrefs] = useState<{ novelId: string; novelName: string } | null>(null);
 
   /** null = 列表加载中 */
   const [novels, setNovels] = useState<NovelListItem[] | null>(null);
@@ -248,6 +251,19 @@ export function App() {
   };
 
   /** 书库管理操作：失败回显到书库错误区，成功后刷新列表保持选中 */
+  const handleOpenWritingPrefs = (id: string): void => {
+    const novel = novels?.find((item) => item.id === id);
+    setWritingPrefs({ novelId: id, novelName: novel?.name ?? "未命名小说" });
+  };
+
+  /** 写作偏好保存成功：关弹窗并刷新详情（生效值随下次生成）与书库列表（updated_at） */
+  const handleWritingPrefsSaved = (): void => {
+    const id = writingPrefs?.novelId;
+    setWritingPrefs(null);
+    if (id) void reloadDetail(id);
+    void refreshList();
+  };
+
   const handleRename = async (id: string, name: string): Promise<void> => {
     try {
       await window.agent.renameNovel(id, name);
@@ -354,6 +370,7 @@ export function App() {
             onRename={(id, name) => void handleRename(id, name)}
             onSetPinned={(id, pinned) => void handleSetPinned(id, pinned)}
             onSetFavorite={(id, favorite) => void handleSetFavorite(id, favorite)}
+            onSetWritingPrefs={handleOpenWritingPrefs}
             onDelete={(id) => void handleDelete(id)}
           />
         </aside>
@@ -400,6 +417,15 @@ export function App() {
       ) : null}
 
       {settingsOpen ? <SettingsDialog onClose={() => setSettingsOpen(false)} /> : null}
+
+      {writingPrefs ? (
+        <WritingPrefsDialog
+          novelId={writingPrefs.novelId}
+          novelName={writingPrefs.novelName}
+          onClose={() => setWritingPrefs(null)}
+          onSaved={handleWritingPrefsSaved}
+        />
+      ) : null}
     </div>
   );
 }

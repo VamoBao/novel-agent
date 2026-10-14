@@ -26,6 +26,7 @@ import {
   cancelMigrationEntry,
   confirmMigrationEntry,
   setNovelPinned,
+  setWritingPrefs,
   saveMigrationEntry,
   updateForeshadowEntry,
   updateMigrationEntry,
@@ -343,6 +344,78 @@ describe("query CLI 管理命令（rename / pin / favorite / delete）", () => {
       "aaaaaaaa-0000-7000-8000-000000000014",
     );
     db.close();
+  });
+});
+
+describe("query CLI 写作偏好（set-writing-prefs + 详情契约）", () => {
+  test("设置与清空全量替换，详情携带三字段，非法 JSON 与半设拒绝且零写入", async () => {
+    const { db } = await newFixture();
+    try {
+      const id = "aaaaaaaa-0000-7000-8000-000000000021";
+      new NovelStore(db).createNovel({ id, name: "偏好之书" });
+      expect(buildNovelDetail(db, id).novel).toMatchObject({
+        chapterLengthMin: null,
+        chapterLengthMax: null,
+        stylePassScore: null,
+      });
+      setWritingPrefs(db, id, JSON.stringify({ chapterLengthMin: 3000, chapterLengthMax: 4500, stylePassScore: 85 }));
+      expect(buildNovelDetail(db, id).novel).toMatchObject({
+        chapterLengthMin: 3000,
+        chapterLengthMax: 4500,
+        stylePassScore: 85,
+      });
+      // 只改阈值：全量替换语义（未携带的篇幅被清空）
+      setWritingPrefs(db, id, JSON.stringify({ chapterLengthMin: null, chapterLengthMax: null, stylePassScore: 95 }));
+      expect(buildNovelDetail(db, id).novel).toMatchObject({
+        chapterLengthMin: null,
+        chapterLengthMax: null,
+        stylePassScore: 95,
+      });
+      // 非法载荷：JSON 损坏 / 半设 / 越界——抛可读错误且库中值不变
+      expect(() => setWritingPrefs(db, id, "{ 不是 JSON")).toThrow("解析失败");
+      expect(() =>
+        setWritingPrefs(db, id, JSON.stringify({ chapterLengthMin: 3000, chapterLengthMax: null, stylePassScore: null })),
+      ).toThrow("同时");
+      expect(() =>
+        setWritingPrefs(db, id, JSON.stringify({ chapterLengthMin: null, chapterLengthMax: null, stylePassScore: 101 })),
+      ).toThrow();
+      expect(buildNovelDetail(db, id).novel).toMatchObject({ stylePassScore: 95, chapterLengthMin: null });
+      // 不存在的小说抛可读错误
+      expect(() =>
+        setWritingPrefs(db, "ffffffff-0000-7000-8000-0000000000ff", JSON.stringify({ chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null })),
+      ).toThrow("不存在");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("set-writing-prefs 真实 CLI 往返：落库并回读详情", async () => {
+    const { db, dir } = await newFixture();
+    const id = "aaaaaaaa-0000-7000-8000-000000000022";
+    new NovelStore(db).createNovel({ id, name: "CLI 往返" });
+    const dbPath = db.filename;
+    db.close();
+    const run = (prefs: unknown) =>
+      execFileSync("bun", [join(import.meta.dir, "query.ts"), "set-writing-prefs", id, JSON.stringify(prefs)], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, NOVEL_DB_PATH: dbPath },
+      });
+    const listed = JSON.parse(run({ chapterLengthMin: 2500, chapterLengthMax: 4000, stylePassScore: 75 }));
+    expect(listed).toMatchObject({ id, name: "CLI 往返" });
+    // 非法载荷非零退出（stderr 可读错误）
+    expect(() => run({ chapterLengthMin: 4000, chapterLengthMax: 2500, stylePassScore: null })).toThrow();
+    const reopened = openDatabase(dbPath);
+    try {
+      expect(buildNovelDetail(reopened, id).novel).toMatchObject({
+        chapterLengthMin: 2500,
+        chapterLengthMax: 4000,
+        stylePassScore: 75,
+      });
+    } finally {
+      reopened.close();
+    }
+    await rm(dir, { recursive: true, force: true });
   });
 });
 

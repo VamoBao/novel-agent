@@ -7,6 +7,7 @@ import {
   normalizeSettings,
   readSettingsFile,
   resolveModelEnv,
+  resolveWritingEnv,
   writeSettingsFile,
 } from "./settings";
 
@@ -60,6 +61,7 @@ describe("settings 文件读写", () => {
       theme: "system",
       agentModel: { apiKey: " sk-main ", modelName: "", baseUrl: "" },
       writingModel: { modelName: "m", apiKey: "k", baseUrl: "https://x/v1" },
+      writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
     });
     expect(saved.agentModel.apiKey).toBe("sk-main");
     expect(existsSync(filePath)).toBe(true);
@@ -107,6 +109,7 @@ describe("resolveModelEnv 三级优先级", () => {
         theme: "system",
         agentModel: { apiKey: "sk-settings", modelName: "", baseUrl: "" },
         writingModel: { modelName: "", apiKey: "", baseUrl: "" },
+        writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
       },
       { DEEPSEEK_API_KEY: "sk-dotenv", DEEPSEEK_MODEL_NAME: "from-dotenv", WRITING_MODEL_NAME: "wm-dotenv" },
       { DEEPSEEK_API_KEY: "sk-inherited", WRITING_MODEL_NAME: "wm-inherited", WRITING_MODEL_API_KEY: "wm-key-inherited" },
@@ -154,7 +157,66 @@ describe("normalizeSettings theme", () => {
       theme: "dark",
       agentModel: { apiKey: "", modelName: "", baseUrl: "" },
       writingModel: { modelName: "", apiKey: "", baseUrl: "" },
+      writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
     });
     expect(readSettingsFile(filePath).theme).toBe("dark");
+  });
+});
+
+describe("normalizeSettings writing（写作偏好系统级默认）", () => {
+  test("合法值透传；缺省 / 非法值（非数字 / 越界）逐字段归 null", () => {
+    expect(
+      normalizeSettings({ writing: { chapterLengthMin: 3000, chapterLengthMax: 4500, stylePassScore: 85 } }).writing,
+    ).toEqual({ chapterLengthMin: 3000, chapterLengthMax: 4500, stylePassScore: 85 });
+    expect(normalizeSettings(null).writing).toEqual({ chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null });
+    expect(
+      normalizeSettings({ writing: { chapterLengthMin: "3000", chapterLengthMax: 999999, stylePassScore: 101 } }).writing,
+    ).toEqual({ chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null });
+    // 半设形态原样保留（成对与否交给 agent 侧解析层的防御性规则）
+    expect(normalizeSettings({ writing: { chapterLengthMin: 3000 } }).writing).toEqual({
+      chapterLengthMin: 3000,
+      chapterLengthMax: null,
+      stylePassScore: null,
+    });
+  });
+
+  test("写后读往返保留写作偏好", () => {
+    const dir = mkdtempSync(join(tmpdir(), "novel-settings-writing-"));
+    tempDirs.push(dir);
+    const filePath = join(dir, "settings.json");
+    const saved = writeSettingsFile(filePath, {
+      theme: "system",
+      agentModel: { apiKey: "", modelName: "", baseUrl: "" },
+      writingModel: { modelName: "", apiKey: "", baseUrl: "" },
+      writing: { chapterLengthMin: 2500, chapterLengthMax: 4000, stylePassScore: 90 },
+    });
+    expect(saved.writing).toEqual({ chapterLengthMin: 2500, chapterLengthMax: 4000, stylePassScore: 90 });
+    expect(readSettingsFile(filePath).writing).toEqual(saved.writing);
+  });
+});
+
+describe("resolveWritingEnv 三级优先级", () => {
+  test("设置文件 > .env > 继承环境变量；设置 null 时向下下探；全空不输出键", () => {
+    const settings = normalizeSettings({ writing: { chapterLengthMin: 3000, stylePassScore: 85 } });
+    const env = resolveWritingEnv(settings, {
+      NOVEL_CHAPTER_LENGTH_MIN: "1500",
+      NOVEL_CHAPTER_LENGTH_MAX: "2500",
+    }, {
+      NOVEL_CHAPTER_LENGTH_MAX: "1800",
+      NOVEL_STYLE_PASS_SCORE: "60",
+    });
+    // 设置非空胜出（下限 / 合格线）；设置 null → .env 胜出（上限，压过继承的 1800）
+    expect(env).toEqual({
+      NOVEL_CHAPTER_LENGTH_MIN: "3000",
+      NOVEL_CHAPTER_LENGTH_MAX: "2500",
+      NOVEL_STYLE_PASS_SCORE: "85",
+    });
+
+    const allEmpty = resolveWritingEnv(
+      { ...DEFAULT_SETTINGS, writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null } },
+      {},
+      {},
+    );
+    expect(Object.keys(allEmpty)).toHaveLength(0);
   });
 });

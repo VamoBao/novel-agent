@@ -12,13 +12,15 @@ interface NovelListPanelProps {
   onRename: (id: string, name: string) => void;
   onSetPinned: (id: string, pinned: boolean) => void;
   onSetFavorite: (id: string, favorite: boolean) => void;
+  /** 打开「📏 写作偏好」弹窗（App 接线到 WritingPrefsDialog） */
+  onSetWritingPrefs: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
 /** 右键菜单定位（clientX/Y + fixed） */
 type MenuState = { novelId: string; x: number; y: number } | null;
 
-/** 左栏书库：小说列表（名称 + 置顶/收藏标识），右键菜单管理（重命名 / 置顶 / 收藏 / 删除） */
+/** 左栏书库：小说列表（名称 + 置顶/收藏标识），右键菜单管理（重命名 / 置顶 / 收藏 / 写作偏好 / 删除） */
 export function NovelListPanel({
   novels,
   error,
@@ -28,6 +30,7 @@ export function NovelListPanel({
   onRename,
   onSetPinned,
   onSetFavorite,
+  onSetWritingPrefs,
   onDelete,
 }: NovelListPanelProps) {
   const [menu, setMenu] = useState<MenuState>(null);
@@ -145,6 +148,14 @@ export function NovelListPanel({
           </button>
           <button onClick={() => onSetFavorite(menuNovel.id, !menuNovel.favorite)}>
             {menuNovel.favorite ? "取消收藏" : "⭐ 收藏"}
+          </button>
+          <button
+            onClick={() => {
+              setMenu(null);
+              onSetWritingPrefs(menuNovel.id);
+            }}
+          >
+            📏 写作偏好
           </button>
           <button
             className="danger"

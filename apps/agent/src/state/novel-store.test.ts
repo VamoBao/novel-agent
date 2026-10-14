@@ -21,6 +21,49 @@ const creationParams = {
 };
 
 describe("小说创作条件持久化", () => {
+  test("写作偏好覆盖：全量替换 / null 清空回落 / 成对校验拒绝 / 与创作条件更新互不干扰", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-writing-prefs-"));
+    const path = join(dir, "test.db");
+    let store = NovelStore.open(path);
+    let novelId: string;
+    try {
+      const { id } = store.createNovel({ name: "偏好之书" });
+      novelId = id;
+      // 新建即未设置（null = 跟随系统设置）
+      expect(store.getNovel(id)).toMatchObject({ chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null });
+      // 全量设置
+      store.updateWritingPrefs(id, { chapterLengthMin: 3000, chapterLengthMax: 4500, stylePassScore: 85 });
+      expect(store.getNovel(id)).toMatchObject({ chapterLengthMin: 3000, chapterLengthMax: 4500, stylePassScore: 85 });
+      // 只设阈值（篇幅整体留空）合法；随后全清空
+      store.updateWritingPrefs(id, { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: 95 });
+      expect(store.getNovel(id)).toMatchObject({ chapterLengthMin: null, chapterLengthMax: null, stylePassScore: 95 });
+      store.updateWritingPrefs(id, { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null });
+      expect(store.getNovel(id)).toMatchObject({ chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null });
+      // 成对校验：只设一半 / min>max 拒绝且不落库
+      expect(() => store.updateWritingPrefs(id, { chapterLengthMin: 3000, chapterLengthMax: null, stylePassScore: null })).toThrow("同时");
+      expect(() => store.updateWritingPrefs(id, { chapterLengthMin: 5000, chapterLengthMax: 4000, stylePassScore: null })).toThrow("不能大于");
+      expect(() => store.updateWritingPrefs(id, { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: 101 })).toThrow();
+      expect(store.getNovel(id)).toMatchObject({ chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null });
+      // 创作条件更新不触碰偏好，偏好更新不触碰创作条件
+      store.updateNovel(id, { genre: "仙侠" });
+      expect(store.getNovel(id)).toMatchObject({ genre: "仙侠", chapterLengthMin: null });
+      store.updateWritingPrefs(id, { chapterLengthMin: 2000, chapterLengthMax: 4000, stylePassScore: 70 });
+      expect(store.getNovel(id)).toMatchObject({ genre: "仙侠", chapterLengthMin: 2000 });
+      // 不存在的小说拒绝
+      expect(() => store.updateWritingPrefs("ffffffff-0000-7000-8000-0000000000ff", { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null })).toThrow("不存在");
+    } finally {
+      store.close();
+    }
+    // 重开往返
+    store = NovelStore.open(path);
+    try {
+      expect(store.getNovel(novelId!)).toMatchObject({ chapterLengthMin: 2000, chapterLengthMax: 4000, stylePassScore: 70 });
+    } finally {
+      store.close();
+    }
+    await rm(dir, { recursive: true, force: true });
+  });
+
   test("两连接穿插：改名不会覆盖另一连接刚保存的创作条件，null 可显式清空", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-params-race-"));
     const path = join(dir, "test.db");
@@ -360,7 +403,7 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     ).toEqual({ updated_at: "2026-01-01T00:00:00Z" });
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(19);
+    ).toBe(20);
     db.close();
     await rm(dir, { recursive: true, force: true });
   });

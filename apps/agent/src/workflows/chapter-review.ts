@@ -2,6 +2,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
 import {
+  DEFAULT_STYLE_PASS_SCORE,
   reviewIssueSchema,
   type ReviewIssue,
   type ReviewReport,
@@ -15,12 +16,12 @@ import {
  * 独立校验——① 内容约束（世界观 / 章节概述 / 本章伏笔 / **本章角色状态与迁移计划**）、
  * ② 文风相似度评分、③ 前后自洽。三段各自单轮 generateObject、上下文互不继承（也不继承生成轮
  * 对话），结果并入一份 ReviewReport 供 write-chapter 循环判定与修订。
+ * 文风合格线经 input.stylePassScore 注入（write-chapter 按「小说级 > 系统级 >
+ * 内置默认 80」解析后传入），评分 prompt、通过判定与修订块文案同用一条线。
  * 校验模型独立注入（缺省由调用方传 Agent 会话模型——配置了独立写作
  * 模型时天然「他评」）；调用异常直接抛错，由编排层终止会话，零残留。
  */
 
-/** 文风相似度合格线（用户指定 90 分制） */
-export const STYLE_PASS_SCORE = 90;
 /** 生成-校验-修订循环轮数上限（初稿 + 最多 2 轮修订；仍未达标由编排层保底保存） */
 export const MAX_REVIEW_ROUNDS = 3;
 
@@ -43,6 +44,8 @@ export interface ChapterReviewInput {
   styleSamples: StyleSample[];
   /** 待审正文全文 */
   content: string;
+  /** 文风相似度合格线（write-chapter 按小说级 > 系统级 > 内置默认解析后传入） */
+  stylePassScore: number;
   /** 产生本报告的生成轮次（1 起始），随报告透传 */
   round: number;
 }
@@ -130,13 +133,15 @@ export async function reviewChapter(
     const styleScoreSchema = z.object({
       score: z.number().int().min(0).max(100).describe("与参考文风的相似度评分（0-100 整数）"),
       rationale: z.string().describe("评分依据"),
-      suggestions: z.array(z.string()).describe("未达标（<90 分）时的具体改进建议，达标可为空数组"),
+      suggestions: z
+        .array(z.string())
+        .describe(`未达标（<${input.stylePassScore} 分）时的具体改进建议，达标可为空数组`),
     });
     const { object: styleResult } = await generateObject({
       model: reviewModel,
       schema: styleScoreSchema,
       prompt: [
-        "你是一位文风比对评审。请评估待审正文与参考文风样本的文风相似度（0-100 整数评分，90 分及以上为合格）。",
+        `你是一位文风比对评审。请评估待审正文与参考文风样本的文风相似度（0-100 整数评分，${input.stylePassScore} 分及以上为合格）。`,
         "",
         "【参考文风样本】",
         input.styleSamples
@@ -146,7 +151,7 @@ export async function reviewChapter(
         "【待审正文】",
         input.content,
         "",
-        "从叙事语言、句式节奏、描写风格等维度综合评分，给出评分依据 rationale；未达 90 分必须给出具体可操作的修改建议 suggestions，达标可为空数组。",
+        `从叙事语言、句式节奏、描写风格等维度综合评分，给出评分依据 rationale；未达 ${input.stylePassScore} 分必须给出具体可操作的修改建议 suggestions，达标可为空数组。`,
       ].join("\n"),
     });
     style = { skipped: false, ...styleResult };
@@ -189,13 +194,16 @@ export async function reviewChapter(
 
   const report: ReviewReport = {
     round: input.round,
-    passed: isReportPassing({
-      round: input.round,
-      passed: false,
-      content: contentResult,
-      style,
-      consistency: { issues: consistencyIssues },
-    }),
+    passed: isReportPassing(
+      {
+        round: input.round,
+        passed: false,
+        content: contentResult,
+        style,
+        consistency: { issues: consistencyIssues },
+      },
+      input.stylePassScore,
+    ),
     content: contentResult,
     style,
     consistency: { issues: consistencyIssues },
@@ -203,17 +211,21 @@ export async function reviewChapter(
   return report;
 }
 
-/** 通过判定：①③ 无问题，且文风段 skipped 或评分达到合格线 */
-export function isReportPassing(report: ReviewReport): boolean {
+/** 通过判定：①③ 无问题，且文风段 skipped 或评分达到合格线（缺省内置默认 80） */
+export function isReportPassing(report: ReviewReport, stylePassScore: number = DEFAULT_STYLE_PASS_SCORE): boolean {
   return (
     report.content.issues.length === 0 &&
     report.consistency.issues.length === 0 &&
-    (report.style.skipped || (report.style.score ?? 0) >= STYLE_PASS_SCORE)
+    (report.style.skipped || (report.style.score ?? 0) >= stylePassScore)
   );
 }
 
-/** 报告 → 修订 prompt 块（write-chapter 修订轮注入【整改报告】用；问题逐条带类别与建议） */
-export function formatRevisionBlock(report: ReviewReport): string {
+/** 报告 → 修订 prompt 块（write-chapter 修订轮注入【整改报告】用；问题逐条带类别与建议，
+ *  文风段合格线用本次会话解析出的生效阈值——缺省内置默认） */
+export function formatRevisionBlock(
+  report: ReviewReport,
+  stylePassScore: number = DEFAULT_STYLE_PASS_SCORE,
+): string {
   const lines: string[] = [];
   let index = 1;
   for (const issue of report.content.issues) {
@@ -230,7 +242,7 @@ export function formatRevisionBlock(report: ReviewReport): string {
     lines.push("文风：本次无参考文风要求，无需调整文风。");
   } else {
     lines.push(
-      `文风相似度 ${report.style.score} 分（合格线 ${STYLE_PASS_SCORE}）：${report.style.rationale}`,
+      `文风相似度 ${report.style.score} 分（合格线 ${stylePassScore}）：${report.style.rationale}`,
     );
     for (const suggestion of report.style.suggestions) {
       lines.push(`  → 建议：${suggestion}`);

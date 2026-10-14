@@ -13,6 +13,7 @@ import type {
   SaveCharacterMigration,
   NovelDetail,
   NovelListItem,
+  NovelWritingPrefs,
   StyleReferenceEntry,
 } from "@novel/shared";
 
@@ -29,6 +30,7 @@ declare global {
       renameNovel: (novelId: string, name: string) => Promise<NovelListItem>;
       setNovelPinned: (novelId: string, pinned: boolean) => Promise<NovelListItem>;
       setNovelFavorite: (novelId: string, favorite: boolean) => Promise<NovelListItem>;
+      setWritingPrefs: (novelId: string, prefs: NovelWritingPrefs) => Promise<NovelListItem>;
       deleteNovel: (novelId: string) => Promise<{ deleted: string }>;
       addCharacter: (novelId: string, character: Character) => Promise<CharacterEntry>;
       addMigration: (

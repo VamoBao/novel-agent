@@ -70,6 +70,23 @@ export {
   type ReviewStageResult,
 } from "./review";
 export { styleReferenceSchema, type StyleReference } from "./style-reference";
+export {
+  CHAPTER_LENGTH_BOUND_MIN,
+  CHAPTER_LENGTH_BOUND_MAX,
+  DEFAULT_CHAPTER_LENGTH_MIN,
+  DEFAULT_CHAPTER_LENGTH_MAX,
+  DEFAULT_STYLE_PASS_SCORE,
+  chapterLengthBoundSchema,
+  stylePassScoreSchema,
+  novelWritingPrefsSchema,
+  resolveChapterLength,
+  resolveStylePassScore,
+  type ChapterLengthBound,
+  type StylePassScore,
+  type WritingPrefsOverride,
+  type NovelWritingPrefs,
+  type ChapterLength,
+} from "./writing-prefs";
 export { audienceSuggestionSchema, type AudienceSuggestion } from "./audience";
 export {
   fieldSummaryViewSchema,

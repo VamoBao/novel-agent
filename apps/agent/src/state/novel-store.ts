@@ -1,14 +1,23 @@
 import type { Database } from "bun:sqlite";
-import { novelCreationParamsSchema, type NovelCreationParams } from "@novel/shared";
+import {
+  novelCreationParamsSchema,
+  novelWritingPrefsSchema,
+  type NovelCreationParams,
+  type NovelWritingPrefs,
+} from "@novel/shared";
 import { DEFAULT_DB_PATH, getDefaultDatabase, openDatabase } from "./db";
 import { generateNovelId } from "./id";
 
-/** novels 表记录：小说基本信息（name 在大纲确认后回填；pinned / favorite 为书库管理标记） */
+/** novels 表记录：小说基本信息（name 在大纲确认后回填；pinned / favorite 为书库管理标记；
+ *  写作偏好三字段为小说级覆盖，null=未设置——正文生成按「小说级 > 系统设置 > 内置默认」解析） */
 export interface NovelRecord extends NovelCreationParams {
   id: string;
   name: string | null;
   author: string | null;
   description: string | null;
+  chapterLengthMin: number | null;
+  chapterLengthMax: number | null;
+  stylePassScore: number | null;
   pinned: boolean;
   favorite: boolean;
   createdAt: string;
@@ -31,12 +40,14 @@ const INSERT_SQL = `
 `;
 
 const SELECT_SQL = `
-  SELECT id, name, author, description, genre, audience, core_conflict, pinned, favorite, created_at, updated_at
+  SELECT id, name, author, description, genre, audience, core_conflict,
+         chapter_length_min, chapter_length_max, style_pass_score, pinned, favorite, created_at, updated_at
   FROM novels WHERE id = ?;
 `;
 
 const LIST_SQL = `
-  SELECT id, name, author, description, genre, audience, core_conflict, pinned, favorite, created_at, updated_at
+  SELECT id, name, author, description, genre, audience, core_conflict,
+         chapter_length_min, chapter_length_max, style_pass_score, pinned, favorite, created_at, updated_at
   FROM novels ORDER BY pinned DESC, created_at DESC, id DESC;
 `;
 
@@ -151,6 +162,28 @@ export class NovelStore {
     return this.getNovelOrThrow(id);
   }
 
+  /** 写作偏好的小说级覆盖：全量替换三项（null=清空该级覆盖，回落系统设置）。
+   *  schema 层强校验篇幅 min/max 同设或同空且 min ≤ max；返回更新后记录 */
+  updateWritingPrefs(id: string, prefs: NovelWritingPrefs): NovelRecord {
+    if (!this.getNovel(id)) {
+      throw new Error(`小说不存在，无法更新写作偏好：${id}`);
+    }
+    const parsed = novelWritingPrefsSchema.parse(prefs);
+    this.db
+      .prepare(
+        `UPDATE novels SET chapter_length_min = ?, chapter_length_max = ?, style_pass_score = ?,
+         updated_at = ? WHERE id = ?;`,
+      )
+      .run(
+        parsed.chapterLengthMin,
+        parsed.chapterLengthMax,
+        parsed.stylePassScore,
+        new Date().toISOString(),
+        id,
+      );
+    return this.getNovelOrThrow(id);
+  }
+
   close(): void {
     this.db.close();
   }
@@ -181,6 +214,9 @@ interface NovelRow {
   genre: string | null;
   audience: string | null;
   core_conflict: string | null;
+  chapter_length_min: number | null;
+  chapter_length_max: number | null;
+  style_pass_score: number | null;
   pinned: number;
   favorite: number;
   created_at: string;
@@ -203,6 +239,9 @@ function rowToNovel(row: NovelRow): NovelRecord {
     name: row.name,
     author: row.author,
     description: row.description,
+    chapterLengthMin: row.chapter_length_min,
+    chapterLengthMax: row.chapter_length_max,
+    stylePassScore: row.style_pass_score,
     pinned: row.pinned === 1,
     favorite: row.favorite === 1,
     createdAt: row.created_at,

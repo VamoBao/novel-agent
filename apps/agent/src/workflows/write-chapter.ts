@@ -1,9 +1,17 @@
 import { generateText } from "ai";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
-import type { ReviewReport, ReviewStageResult, WriteProgressPhase, Document } from "@novel/shared";
+import type {
+  ReviewReport,
+  ReviewStageResult,
+  WriteProgressPhase,
+  Document,
+  WritingPrefsOverride,
+} from "@novel/shared";
+import { resolveChapterLength, resolveStylePassScore } from "@novel/shared";
 import type { UiChannel } from "../ui/channel";
 import { getWritingModel } from "../providers/writing-model";
 import { model as agentSessionModel } from "../providers/agent-model";
+import { resolveSystemWritingPrefs } from "../providers/writing-prefs";
 import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
 import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
 import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
@@ -58,6 +66,9 @@ export interface WriteChapterOptions {
   onProgress?: (event: WriteProgressEvent) => void;
   /** 正文产物根目录；缺省 output（NOVEL_OUTPUT_DIR，协议模式下宿主传绝对路径），测试注入临时目录 */
   outputDir?: string;
+  /** 系统级写作偏好（章节篇幅 + 文风合格线的系统设置）；缺省读环境变量
+   *  NOVEL_CHAPTER_LENGTH_MIN/MAX + NOVEL_STYLE_PASS_SCORE（客户端 childEnv 注入），测试注入替身 */
+  systemWritingPrefs?: WritingPrefsOverride;
   novelStore?: NovelStore;
   outlineStore?: OutlineStore;
   worldviewStore?: WorldviewStore;
@@ -96,7 +107,7 @@ function describeReport(report: ReviewReport): string {
  * 兼容端点，与 Agent 会话模型解耦；WRITING_MODEL_* 未配置时回落 Agent
  * 会话模型）生成正文；生成后、落盘前经校验 subAgent（chapter-review，
  * Agent 模型三段独立调用——内容约束 / 文风相似度 / 前后自洽）产出结构化整改
- * 报告：通过（内容与自洽零问题且文风 skipped 或 ≥90 分）才落盘入库；未达标
+ * 报告：通过（内容与自洽零问题且文风 skipped 或达到合格线）才落盘入库；未达标
  * 按报告修订式重写（原上下文 + 上一版正文 + 整改报告），最多 MAX_REVIEW_ROUNDS
  * 轮，第 3 轮仍未达标保存最后一版并警告（产物优先，用户确认的决策）。
  * 该章已有正文时为**重新生成**：流程完全一致，落库走覆盖替换
@@ -126,6 +137,12 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   if (!novel) {
     throw new Error(`小说不存在，无法生成正文：${novelId}`);
   }
+
+  // 写作偏好生效值：小说级（novels 行）> 系统级（环境变量，客户端设置注入）> 内置默认
+  //（篇幅 2000~3000 / 文风合格线 80）；篇幅 min/max 为整体覆盖，半设/乱序的级防御性跳过
+  const systemWritingPrefs = options.systemWritingPrefs ?? resolveSystemWritingPrefs();
+  const chapterLength = resolveChapterLength(novel, systemWritingPrefs);
+  const stylePassScore = resolveStylePassScore(novel, systemWritingPrefs);
 
   const chapter = outlineStore.getOutlineNode(chapterNodeId);
   if (!chapter || chapter.novelId !== novelId) {
@@ -222,6 +239,13 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   channel.notify(
     `${isRegen ? "🔄 重新生成中（将覆盖现有正文）" : "✍️ 正文生成中"}（《${novel.name ?? "未命名小说"}》· ${chapter.node.name}，写作模型）…`,
   );
+  // 小说级偏好已生效时通报（确认覆盖确实生效；未设置时零通知，默认路径无噪音）
+  if (novel.chapterLengthMin !== null && novel.chapterLengthMax !== null) {
+    channel.notify(`📏 本小说篇幅偏好：约 ${chapterLength.min}~${chapterLength.max} 字（覆盖系统设置）`);
+  }
+  if (novel.stylePassScore !== null) {
+    channel.notify(`📏 本小说文风合格线：${stylePassScore} 分（覆盖系统设置）`);
+  }
   if (characterContext.planCount > 0) {
     channel.notify(
       `🎭 本章角色变化计划：${characterContext.planCount} 条（进行中 / 本章完成，共 ${characterContext.characterCount} 名登场角色）`,
@@ -309,7 +333,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       "2. 承接上一章结尾（如有），并为下一章留出衔接空间（如有）；",
       "3. 场景化叙述、张弛有度，对话自然贴合各角色性格；",
       "4. 严格遵守世界观禁忌（taboos）；",
-      "5. 篇幅约 2000~3000 字；",
+      `5. 篇幅约 ${chapterLength.min}~${chapterLength.max} 字；`,
       ...extraRequirements.map((text, i) => `${6 + i}. ${text}`),
       revision
         ? `${6 + extraRequirements.length}. 按整改报告逐条修订上一版正文（只修正报告指出的问题，报告未涉及的情节与表达尽量保持原样），只输出修订后的正文文本：不要章节标题、不要任何说明或元信息。`
@@ -343,7 +367,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       model,
       prompt: buildPrompt(
         isRevision && report
-          ? { previousContent: content, revisionBlock: formatRevisionBlock(report) }
+          ? { previousContent: content, revisionBlock: formatRevisionBlock(report, stylePassScore) }
           : null,
       ),
     });
@@ -366,6 +390,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
           name: stored.styleReference.name,
           content: stored.styleReference.content,
         })),
+        stylePassScore,
         content,
         round,
       },

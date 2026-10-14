@@ -23,11 +23,13 @@ import {
   type SaveCharacterMigration,
   type NovelDetail,
   type NovelListItem,
+  type NovelWritingPrefs,
   type StyleReferenceEntry,
 } from "@novel/shared";
 import {
   readSettingsFile,
   resolveModelEnv,
+  resolveWritingEnv,
   writeSettingsFile,
   type AppSettings,
 } from "./settings";
@@ -79,8 +81,9 @@ function loadEnvFile(file: string): Record<string, string> {
 }
 
 /** agent / 查询 CLI 子进程共用环境：数据路径传绝对路径（相对路径会随 spawn cwd 漂移）。
- *  模型配置经 resolveModelEnv 三级优先级注入（设置文件 > .env > 继承环境变量），
- *  空串键删除——provider 侧据此走「未配置回落」与默认值逻辑 */
+ *  模型配置经 resolveModelEnv、写作偏好经 resolveWritingEnv 各自三级优先级注入
+ *  （设置文件 > .env > 继承环境变量）；模型空串键删除——provider 侧据此走
+ *  「未配置回落」与默认值逻辑；写作偏好只输出已解析到值的键 */
 function childEnv(): NodeJS.ProcessEnv {
   const repoRoot = resolveRepoRoot();
   const dotenv = loadEnvFile(path.join(repoRoot, ".env"));
@@ -90,7 +93,8 @@ function childEnv(): NodeJS.ProcessEnv {
     NOVEL_DB_PATH: path.join(repoRoot, "data", "novel.db"),
     NOVEL_OUTPUT_DIR: path.join(repoRoot, "output"),
   };
-  const resolved = resolveModelEnv(readSettingsFile(settingsFilePath()), dotenv, process.env);
+  const settings = readSettingsFile(settingsFilePath());
+  const resolved = resolveModelEnv(settings, dotenv, process.env);
   for (const [key, value] of Object.entries(resolved)) {
     if (value.length > 0) {
       env[key] = value;
@@ -98,6 +102,7 @@ function childEnv(): NodeJS.ProcessEnv {
       delete env[key];
     }
   }
+  Object.assign(env, resolveWritingEnv(settings, dotenv, process.env));
   return env;
 }
 
@@ -378,6 +383,13 @@ ipcMain.handle("library:setPinned", (_event, novelId: string, pinned: boolean) =
 
 ipcMain.handle("library:setFavorite", (_event, novelId: string, favorite: boolean) =>
   handleItemMutation([favorite ? "favorite" : "unfavorite", novelId]),
+);
+
+/** 写作偏好小说级覆盖（书库右键「📏 写作偏好」）：全量替换三项，返回更新后列表项 */
+ipcMain.handle(
+  "library:setWritingPrefs",
+  (_event, novelId: string, prefs: NovelWritingPrefs): Promise<NovelListItem> =>
+    handleItemMutation(["set-writing-prefs", novelId, JSON.stringify(prefs)]),
 );
 
 ipcMain.handle("library:delete", async (_event, novelId: string) => {

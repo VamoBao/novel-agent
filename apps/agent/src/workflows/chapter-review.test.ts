@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
+import { DEFAULT_STYLE_PASS_SCORE } from "@novel/shared";
 import type { ReviewIssue, Worldview } from "@novel/shared";
 
 /**
@@ -35,7 +36,7 @@ mock.module("ai", () => ({
   },
 }));
 
-const { reviewChapter, isReportPassing, formatRevisionBlock, STYLE_PASS_SCORE } =
+const { reviewChapter, isReportPassing, formatRevisionBlock } =
   await import("./chapter-review");
 
 const DUMMY_MODEL = { modelId: "dummy-review-model" } as unknown as LanguageModelV4;
@@ -63,6 +64,7 @@ function baseInput(overrides: Partial<Parameters<typeof reviewChapter>[0]> = {})
     foreshadowLines: [],
     characterLines: [],
     styleSamples: [{ name: "江南式打斗", content: "刀光一闪。" }],
+    stylePassScore: DEFAULT_STYLE_PASS_SCORE,
     content: "　　正文全文。",
     round: 1,
     ...overrides,
@@ -175,6 +177,18 @@ describe("reviewChapter", () => {
     expect(bare.prompt).not.toContain("【本章角色状态与变化计划（正文应遵守）】");
   });
 
+  test("② 文风段合格线随入参走：prompt 与 schema 描述使用注入阈值", async () => {
+    generateObjectCalls = [];
+    scriptedResults = { content: { issues: [] }, style: STYLE_SCORED, consistency: { issues: [] } };
+
+    await reviewChapter(baseInput({ stylePassScore: 85 }), baseDeps());
+
+    expect(generateObjectCalls).toHaveLength(3);
+    const style = generateObjectCalls[1]!;
+    expect(style.prompt).toContain("85 分及以上为合格");
+    expect(style.prompt).toContain("未达 85 分必须给出具体可操作的修改建议");
+  });
+
   test("无文风样本：② 跳过零调用，报告 style.skipped=true 且计为通过", async () => {
     generateObjectCalls = [];
     scriptedResults = { content: { issues: [] }, consistency: { issues: [] } };
@@ -224,16 +238,19 @@ describe("reviewChapter", () => {
 });
 
 describe("isReportPassing", () => {
-  const pass = (style: Parameters<typeof isReportPassing>[0]["style"]) =>
-    isReportPassing({
-      round: 1,
-      passed: false,
-      content: { issues: [] },
-      style,
-      consistency: { issues: [] },
-    });
+  const pass = (style: Parameters<typeof isReportPassing>[0]["style"], threshold?: number) =>
+    isReportPassing(
+      {
+        round: 1,
+        passed: false,
+        content: { issues: [] },
+        style,
+        consistency: { issues: [] },
+      },
+      threshold,
+    );
 
-  test("①③ 有 issue 不通过；文风低于合格线不通过", () => {
+  test("①③ 有 issue 不通过；文风低于合格线不通过（缺省合格线 = 内置默认 80）", () => {
     expect(
       isReportPassing({
         round: 1,
@@ -252,18 +269,23 @@ describe("isReportPassing", () => {
         consistency: { issues: [CONSISTENCY_ISSUES.issues[0] as never] },
       }),
     ).toBeFalse();
-    expect(pass({ skipped: false, score: STYLE_PASS_SCORE - 1, rationale: "x", suggestions: [] })).toBeFalse();
+    expect(pass({ skipped: false, score: DEFAULT_STYLE_PASS_SCORE - 1, rationale: "x", suggestions: [] })).toBeFalse();
   });
 
-  test("文风恰达合格线通过；skipped 视为通过；全绿通过", () => {
-    expect(pass({ skipped: false, score: STYLE_PASS_SCORE, rationale: "x", suggestions: [] })).toBeTrue();
+  test("文风恰达合格线通过；skipped 视为通过；阈值可注入抬高或放低", () => {
+    expect(pass({ skipped: false, score: DEFAULT_STYLE_PASS_SCORE, rationale: "x", suggestions: [] })).toBeTrue();
     expect(pass({ skipped: true })).toBeTrue();
+    // 阈值 90（历史硬编码值经入参注入）：85 不通过、90 恰达通过
+    expect(pass({ skipped: false, score: 85, rationale: "x", suggestions: [] }, 90)).toBeFalse();
+    expect(pass({ skipped: false, score: 90, rationale: "x", suggestions: [] }, 90)).toBeTrue();
+    // 阈值 60：85 也通过
+    expect(pass({ skipped: false, score: 85, rationale: "x", suggestions: [] }, 60)).toBeTrue();
   });
 });
 
 describe("formatRevisionBlock", () => {
-  test("问题逐条带类别与建议，文风段含分数与合格线", () => {
-    const block = formatRevisionBlock({
+  test("问题逐条带类别与建议，文风段含分数与合格线（缺省内置默认，可注入覆盖）", () => {
+    const report = {
       round: 2,
       passed: false,
       content: {
@@ -276,13 +298,16 @@ describe("formatRevisionBlock", () => {
       consistency: {
         issues: [{ kind: "consistency", description: "五个字vs四个字", suggestion: "统一" }],
       },
-    });
+    } as Parameters<typeof formatRevisionBlock>[0];
+    const block = formatRevisionBlock(report);
     expect(block).toContain("问题 1（世界观）：正文出现高铁");
     expect(block).toContain("问题 2（剧情概述）：缺失拾取情节");
     expect(block).toContain("→ 建议：改为马车");
     expect(block).toContain("问题 3（前后矛盾）：五个字vs四个字");
-    expect(block).toContain("文风相似度 82 分（合格线 90）");
+    expect(block).toContain(`文风相似度 82 分（合格线 ${DEFAULT_STYLE_PASS_SCORE}）`);
     expect(block).toContain("→ 建议：增加环境描写");
+    // 注入阈值（如小说级覆盖 90）时合格线随行
+    expect(formatRevisionBlock(report, 90)).toContain("文风相似度 82 分（合格线 90）");
     // 空问题段不渲染占位行
     const clean = formatRevisionBlock({
       round: 1,

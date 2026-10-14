@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-14 [feat] 写作偏好两级配置（章节篇幅 + 文风合格线）：writeChapter 在组上下文前解析生效值——`providers/writing-prefs.ts` 的 resolveSystemWritingPrefs 读 NOVEL_CHAPTER_LENGTH_MIN/MAX + NOVEL_STYLE_PASS_SCORE（非法值静默归 null），shared resolveChapterLength / resolveStylePassScore 按「小说级 novels 行 > 系统级 > 内置默认 2000~3000 字 / 80 分」解析（篇幅 min/max 整体覆盖、半设乱序防御性跳过）；写作 prompt 篇幅条用生效值、chapter-review 文风合格线参数化（input.stylePassScore → 评分 prompt / isReportPassing / formatRevisionBlock，内置默认由 90 改为 80）、Options 增 systemWritingPrefs 注入（缺省读环境变量）、小说级覆盖生效时 notify 通报。AC：typecheck 3 工程 / lint / 全量 529 用例通过（本模块净增 writing-prefs 单测 3 + chapter-review 阈值用例 + write-chapter 偏好两态）；真实模型文学效果待人工验收。数据层 19→20 迁移、query CLI set-writing-prefs 与客户端设置入口见根 PROGRESS 与 DECISIONS 当日条目。
+
 - 2026-10-14 [feat] 伏笔最终回收判断与 eval：复用 resolveChapterTreePosition 的目标树版本全书章序，去重回收点取最大者为最终收尾章（不依赖数组顺序、幕内 sort 或 recoveryStatus）；前段标阶段回收保留核心真相，最终章要求完整揭露真相、解释表面行为联系并收尾，同源注入初稿/修订/内容审校；缺失或跨版回收点不猜测最终点。同章种收、登场资料缺失及归档目标仍有正确阶段要求。最终收尾优先于概述中的延后揭露描述，summary 不得仅因此报偏离；未收尾返回 foreshadow 整改项并进入既有三轮修订，保底保存/警告策略保持。AC：新增 8 项回归先红后绿，覆盖无序重复、跨部跨幕、版本隔离、异常降级及未收尾→整改→修订稿入库；typecheck / lint / 全量 507 项通过，独立审查提出的优先级冲突修复后复审关闭。未调用真实模型验证文学效果；中间章持续约束与本章位置展示仍在待办。
 
 - 2026-10-14 [feat] 正文角色上下文补全（主记录见根 PROGRESS）：完整角色字段、作者指导独立、同版本已确认的全部已结束历史与本章计划同源注入写作和审校；未来/草案/取消不注入，区间结束不代表正文兑现。新增纯函数全字段/作者阶段/前段历史/连续两段历史与请求集成测试。AC：全量 499 项、typecheck、lint 通过；姓名限制见根记录。

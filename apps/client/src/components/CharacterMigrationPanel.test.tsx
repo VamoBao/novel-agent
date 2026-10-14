@@ -62,6 +62,7 @@ const detail: NovelDetail = {
     id: NOVEL_ID, name: "灵脉拾遗", pinned: false, favorite: false,
     createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z",
     genre: null, audience: null, coreConflict: null,
+    chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null,
   },
   worldview: null,
   characters: [character],

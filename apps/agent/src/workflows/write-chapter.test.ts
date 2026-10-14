@@ -104,8 +104,15 @@ const characterFixture = {
 
 const PROSE = "　　灵脉断绝的第九十九年，少年在市集的角落里睁开了眼。\n\n　　他掌心里那枚碎片微微发烫。";
 
-/** 写作模型环境变量备份（未配置路径用例需要清空） */
-const WRITING_ENV_KEYS = ["WRITING_MODEL_NAME", "WRITING_MODEL_API_KEY", "WRITING_MODEL_BASE_URL"] as const;
+/** 写作模型与系统级写作偏好环境变量备份（未配置路径用例需要清空） */
+const WRITING_ENV_KEYS = [
+  "WRITING_MODEL_NAME",
+  "WRITING_MODEL_API_KEY",
+  "WRITING_MODEL_BASE_URL",
+  "NOVEL_CHAPTER_LENGTH_MIN",
+  "NOVEL_CHAPTER_LENGTH_MAX",
+  "NOVEL_STYLE_PASS_SCORE",
+] as const;
 let savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -161,6 +168,7 @@ async function setupDb(options: { withWorldview?: boolean } = {}) {
     { name: "第三章", summary: "碎片来历初现" },
   ]);
   return {
+    db,
     novelStore,
     outlineStore,
     worldviewStore,
@@ -364,6 +372,100 @@ describe("writeChapter", () => {
     expect(prompt).not.toContain("【本章角色变化计划");
     expect(prompt).not.toContain("本章角色变化按【本章角色变化计划】推进");
     expect(channel.notifies.some((line) => line.includes("本章角色变化计划"))).toBe(false);
+  });
+
+  test("写作偏好小说级覆盖：篇幅进 prompt、合格线进校验与通过判定、通报覆盖生效", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    // 小说级：篇幅 3000~4500 + 合格线 85；系统级（注入）：1500~2500 + 60
+    ctx.novelStore.updateWritingPrefs(NOVEL_ID, {
+      chapterLengthMin: 3000,
+      chapterLengthMax: 4500,
+      stylePassScore: 85,
+    });
+    ctx.styleReferenceStore.addStyleReference(NOVEL_ID, { name: "样本", content: "文风文本。" });
+    generateTextCalls = [];
+    generateObjectCalls = [];
+    generateTextQueue = [PROSE, "　　按 85 分合格线修订后的第二版正文。"];
+    // 文风首轮 82（高于系统 60、低于小说级 85 → 不通过），修订轮 90（达标）
+    reviewScript = {
+      style: [
+        { score: 82, rationale: "句式偏短促", suggestions: ["增加环境描写"] },
+        { score: 90, rationale: "贴合样本", suggestions: [] },
+      ],
+    };
+
+    const channel = new FakeChannel([]);
+    await writeChapter({
+      channel,
+      novelId: NOVEL_ID,
+      model: DUMMY_MODEL,
+      systemWritingPrefs: { chapterLengthMin: 1500, chapterLengthMax: 2500, stylePassScore: 60 },
+      ...ctx,
+    });
+
+    // 篇幅：小说级胜出，系统级不出现
+    const prompt = generateTextCalls[0]!.prompt;
+    expect(prompt).toContain("篇幅约 3000~4500 字");
+    expect(prompt).not.toContain("1500~2500");
+    // 合格线：文风校验 prompt 使用小说级 85；82 分判不通过 → 进入第 2 轮修订
+    const stylePrompt = generateObjectCalls.find((call) => call.prompt.includes("文风比对评审"))!.prompt;
+    expect(stylePrompt).toContain("85 分及以上为合格");
+    expect(generateTextCalls).toHaveLength(2);
+    // 修订块的合格线同源（85）
+    const revisionPrompt = generateTextCalls[1]!.prompt;
+    expect(revisionPrompt).toContain("文风相似度 82 分（合格线 85）");
+    // 覆盖生效通报（篇幅与合格线各一条）
+    expect(channel.notifies.some((n) => n.includes("📏 本小说篇幅偏好：约 3000~4500 字（覆盖系统设置）"))).toBeTrue();
+    expect(channel.notifies.some((n) => n.includes("📏 本小说文风合格线：85 分（覆盖系统设置）"))).toBeTrue();
+    expect(channel.notifies.some((n) => n.includes("♻️ 第 2 轮：上一版未达标准（内容 0 处、文风 82 分、自洽 0 处）"))).toBeTrue();
+  });
+
+  test("写作偏好系统级回落：小说未设置时用系统值，无覆盖通报；小说级半设篇幅防御性忽略", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    // 小说级只设了阈值（篇幅未设）→ 篇幅走系统级，阈值走小说级
+    ctx.novelStore.updateWritingPrefs(NOVEL_ID, {
+      chapterLengthMin: null,
+      chapterLengthMax: null,
+      stylePassScore: 90,
+    });
+    ctx.styleReferenceStore.addStyleReference(NOVEL_ID, { name: "样本", content: "文风文本。" });
+    generateTextCalls = [];
+    generateObjectCalls = [];
+    generateTextResult = PROSE;
+
+    const channel = new FakeChannel([]);
+    await writeChapter({
+      channel,
+      novelId: NOVEL_ID,
+      model: DUMMY_MODEL,
+      systemWritingPrefs: { chapterLengthMin: 1200, chapterLengthMax: 1800, stylePassScore: 60 },
+      ...ctx,
+    });
+
+    const prompt = generateTextCalls[0]!.prompt;
+    expect(prompt).toContain("篇幅约 1200~1800 字");
+    // 阈值 90 生效：默认脚本 95 分照常通过；文风 prompt 带 90
+    const stylePrompt = generateObjectCalls.find((call) => call.prompt.includes("文风比对评审"))!.prompt;
+    expect(stylePrompt).toContain("90 分及以上为合格");
+    // 篇幅未设小说级 → 只有阈值覆盖通报，无篇幅通报
+    expect(channel.notifies.some((n) => n.includes("本小说篇幅偏好"))).toBeFalse();
+    expect(channel.notifies.some((n) => n.includes("📏 本小说文风合格线：90 分（覆盖系统设置）"))).toBeTrue();
+
+    // 库内半设篇幅（绕过 store 校验的手改形态）：该级篇幅整体忽略，回落系统级
+    ctx.db
+      .prepare(`UPDATE novels SET chapter_length_min = 9999 WHERE id = ?`)
+      .run(NOVEL_ID);
+    generateTextCalls = [];
+    await writeChapter({
+      channel: new FakeChannel([]),
+      novelId: NOVEL_ID,
+      model: DUMMY_MODEL,
+      systemWritingPrefs: { chapterLengthMin: 1200, chapterLengthMax: 1800, stylePassScore: 60 },
+      ...ctx,
+    });
+    expect(generateTextCalls[0]!.prompt).toContain("篇幅约 1200~1800 字");
   });
 
   test("跨幕上一章衔接：前章正文可用时注入 prompt，超预算回退概述", async () => {

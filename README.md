@@ -90,6 +90,9 @@ bun run dev:client
 | `WRITING_MODEL_NAME` | 否 | 独立写作模型名（正文生成专用） | — |
 | `WRITING_MODEL_API_KEY` | 否 | 独立写作模型 API Key | — |
 | `WRITING_MODEL_BASE_URL` | 否 | 独立写作模型接口 Base URL | — |
+| `NOVEL_CHAPTER_LENGTH_MIN` | 否 | 章节篇幅下限（字，系统级默认） | `2000` |
+| `NOVEL_CHAPTER_LENGTH_MAX` | 否 | 章节篇幅上限（字，系统级默认） | `3000` |
+| `NOVEL_STYLE_PASS_SCORE` | 否 | 文风相似度合格线（系统级默认） | `80` |
 | `NOVEL_DB_PATH` | 否 | SQLite 库文件路径 | `data/novel.db` |
 | `NOVEL_OUTPUT_DIR` | 否 | 产物输出目录 | `output` |
 
@@ -98,6 +101,8 @@ bun run dev:client
 旧 `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL_NAME` 仍可使用；同一来源内优先使用 `AGENT_MODEL_*`，不同来源仍按上述优先级逐字段解析。历史客户端 `deepseek` 设置组读取时迁移为 `agentModel`，新组已存在时以新组为准。
 
 写作模型三项需同时配置才启用；任一未配置时正文生成回落到 Agent 模型。即使配置了独立写作模型，正文校验仍使用 Agent 模型。
+
+写作偏好（章节篇幅范围与文风合格线）按「小说级 > 系统级 > 内置默认」解析：系统级在客户端「⚙️ 设置 → 写作偏好（默认）」维护（亦可经上述三个 `NOVEL_*` 变量配置，优先级同模型配置），内置默认为篇幅 2000~3000 字、合格线 80 分；单本小说在书库右键「📏 写作偏好」单独覆盖，留空项回落系统设置。
 
 ## 数据存储
 

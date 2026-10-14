@@ -1,17 +1,24 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import {
+  chapterLengthBoundSchema,
+  stylePassScoreSchema,
+} from "@novel/shared";
 
 /**
- * 客户端模型配置（主进程持有，agent 子进程经环境变量注入读取）：
+ * 客户端应用配置（主进程持有，agent 子进程经环境变量注入读取）：
  * VS Code 式**明文 JSON**（用户决策）存于 Electron userData 目录
- * （settings.json，不进仓库、不入 git），外观主题 + 两族模型字段——
- * 外观主题（system / light / dark，main 侧 applyTheme 设 nativeTheme.themeSource）、
- * Agent 会话模型（OpenAI 接口兼容：Key + 模型名 + Base URL）与写作模型（OpenAI 接口兼容：
- * 模型名 + Key + Base URL，三项需同时配置，留空回落 Agent 模型）。
+ * （settings.json，不进仓库、不入 git）——外观主题（system / light / dark，
+ * main 侧 applyTheme 设 nativeTheme.themeSource）、Agent 会话模型（OpenAI 接口
+ * 兼容：Key + 模型名 + Base URL）、写作模型（OpenAI 接口兼容：模型名 + Key +
+ * Base URL，三项需同时配置，留空回落 Agent 模型）与**写作偏好系统级默认**
+ * （章节篇幅 min/max + 文风合格线，null=未设置回落内置默认 2000~3000 / 80；
+ * 单本小说可在书库右键「写作偏好」单独覆盖，优先级更高）。
  *
- * 优先级（resolveModelEnv）：设置文件 > 根目录 `.env` > 继承的环境变量；
- * 解析结果仍以 `AGENT_MODEL_*` / `WRITING_MODEL_*` 环境变量注入子进程
- * （childEnv），providers 层（apps/agent）统一读取通用配置。
+ * 优先级（resolveModelEnv / resolveWritingEnv）：设置文件 > 根目录 `.env` >
+ * 继承的环境变量；模型解析结果仍以 `AGENT_MODEL_*` / `WRITING_MODEL_*` 注入
+ * 子进程（childEnv），写作偏好以 `NOVEL_CHAPTER_LENGTH_MIN/MAX` /
+ * `NOVEL_STYLE_PASS_SCORE` 注入，providers 层（apps/agent）统一读取。
  *
  * 本模块刻意不 import electron（app.getPath 由调用方传入），保持可在
  * bun:test 下直接导入测试。
@@ -20,6 +27,13 @@ import { dirname } from "node:path";
 /** 主题三态：与 Electron nativeTheme.themeSource 原生枚举一一对应，零转换 */
 export const THEMES = ["system", "light", "dark"] as const;
 export type ThemeSetting = (typeof THEMES)[number];
+
+/** 写作偏好（系统级默认）：null = 未设置（正文生成回落内置默认，或被小说级覆盖之外的部分回落至此） */
+export interface WritingPrefsSettings {
+  chapterLengthMin: number | null;
+  chapterLengthMax: number | null;
+  stylePassScore: number | null;
+}
 
 export interface AppSettings {
   /** 外观主题：跟随系统（默认）/ 浅色 / 深色；main 侧经 applyTheme 设 nativeTheme.themeSource */
@@ -36,12 +50,15 @@ export interface AppSettings {
     apiKey: string;
     baseUrl: string;
   };
+  /** 写作偏好（章节正文生成）的系统级默认；单本小说的「写作偏好」覆盖优先级更高 */
+  writing: WritingPrefsSettings;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "system",
   agentModel: { apiKey: "", modelName: "", baseUrl: "" },
   writingModel: { modelName: "", apiKey: "", baseUrl: "" },
+  writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
 };
 
 /** 单字段还原：非字符串一律空串，字符串 trim（粘贴的换行/空白无效化） */
@@ -66,7 +83,25 @@ function normalizeTheme(value: unknown): ThemeSetting {
     : "system";
 }
 
-/** 还原为合法设置对象：未知字段忽略（前向兼容手工编辑）、字符串 trim / 非字符串归空串、theme 枚举非法归 system */
+/** 写作偏好单字段还原：整数且在边界内保留，其余（缺省 / 非数字 / 越界）归 null（未设置） */
+function normalizeWritingValue(
+  value: unknown,
+  bounds: typeof chapterLengthBoundSchema | typeof stylePassScoreSchema,
+): number | null {
+  return typeof value === "number" && bounds.safeParse(value).success ? value : null;
+}
+
+/** 写作偏好组还原：逐字段独立校验（篇幅成对与否交给解析层的防御性规则） */
+function normalizeWritingGroup(raw: unknown): WritingPrefsSettings {
+  const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return {
+    chapterLengthMin: normalizeWritingValue(source.chapterLengthMin, chapterLengthBoundSchema),
+    chapterLengthMax: normalizeWritingValue(source.chapterLengthMax, chapterLengthBoundSchema),
+    stylePassScore: normalizeWritingValue(source.stylePassScore, stylePassScoreSchema),
+  };
+}
+
+/** 还原为合法设置对象：未知字段忽略（前向兼容手工编辑）、字符串 trim / 非字符串归空串、theme 枚举非法归 system、写作偏好非法值归 null */
 export function normalizeSettings(raw: unknown): AppSettings {
   const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return {
@@ -76,6 +111,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
       ["apiKey", "modelName", "baseUrl"],
     ),
     writingModel: normalizeGroup(source.writingModel, ["modelName", "apiKey", "baseUrl"]),
+    writing: normalizeWritingGroup(source.writing),
   };
 }
 
@@ -127,7 +163,7 @@ function firstNonEmpty(...candidates: Array<string | undefined>): string {
 export function resolveModelEnv(
   settings: AppSettings,
   dotenv: Readonly<Record<string, string>>,
-  inherited: Readonly<NodeJS.ProcessEnv>,
+  inherited: NodeJS.ProcessEnv,
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [group, field, envKey, legacyKey] of MODEL_ENV_ENTRIES) {
@@ -139,6 +175,37 @@ export function resolveModelEnv(
       inherited[envKey],
       legacyKey ? inherited[legacyKey] : undefined,
     );
+  }
+  return env;
+}
+
+/** 写作偏好环境变量清单（settings.json 字段 → 注入子进程的变量名） */
+const WRITING_ENV_ENTRIES = [
+  ["chapterLengthMin", "NOVEL_CHAPTER_LENGTH_MIN"],
+  ["chapterLengthMax", "NOVEL_CHAPTER_LENGTH_MAX"],
+  ["stylePassScore", "NOVEL_STYLE_PASS_SCORE"],
+] as const;
+
+/**
+ * 写作偏好的三级优先级解析（设置文件 > `.env` > 继承的环境变量）：
+ * 只输出**已解析到值**的键（调用方直接覆盖注入）；三层均未配置时不输出——
+ * agent 侧读取缺省即「系统级未设置」，正文生成回落内置默认。
+ */
+export function resolveWritingEnv(
+  settings: AppSettings,
+  dotenv: Readonly<Record<string, string>>,
+  inherited: Readonly<NodeJS.ProcessEnv>,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [field, envKey] of WRITING_ENV_ENTRIES) {
+    const fromSettings = settings.writing[field];
+    const value =
+      fromSettings !== null
+        ? String(fromSettings)
+        : firstNonEmpty(dotenv[envKey], inherited[envKey]);
+    if (value.length > 0) {
+      env[envKey] = value;
+    }
   }
   return env;
 }
