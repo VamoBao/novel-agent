@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  CHARACTER_FIELD_PATHS,
+  CHARACTER_MIGRATION_FIELD_PATHS,
   CHARACTER_FIELD_SPECS,
   type CharacterEntry,
   type CharacterFieldPath,
@@ -130,6 +130,7 @@ function MigrationForm({
         action: "update", migrationId: entry.id, patch: values, confirm,
       });
     }
+    if (form.migrateField === "basicInfo.name") throw new Error("姓名为固定项，不允许迁移修改");
     return window.agent.saveMigration(novelId, characterId, {
       action: "create", input: { migrateField: form.migrateField, ...values }, confirm,
     });
@@ -163,7 +164,7 @@ function MigrationForm({
               disabled={busy}
               onChange={(e) => setField("migrateField", e.target.value as CharacterFieldPath)}
             >
-              {CHARACTER_FIELD_PATHS.map((path) => (
+              {CHARACTER_MIGRATION_FIELD_PATHS.map((path) => (
                 <option key={path} value={path}>
                   {CHARACTER_FIELD_SPECS[path].label}
                   {CHARACTER_FIELD_SPECS[path].required ? "（必填）" : ""}
@@ -361,7 +362,8 @@ export function CharacterMigrationPanel({
                 <p className="outline-summary">过渡：{migration.transitionGuidance}</p>
               ) : null}
               <div className="migration-actions">
-                {migration.status === "draft" ? (
+                {migration.migrateField === "basicInfo.name" ? <p className="hint">姓名为固定项，历史迁移仅供查看或取消。</p> : null}
+                {migration.status === "draft" && migration.migrateField !== "basicInfo.name" ? (
                   <>
                     <button
                       disabled={busyId === migration.id}
@@ -380,7 +382,7 @@ export function CharacterMigrationPanel({
                     </button>
                   </>
                 ) : null}
-                {migration.status === "confirmed" ? (
+                {migration.status === "confirmed" && migration.migrateField !== "basicInfo.name" ? (
                   <button
                     disabled={busyId === migration.id}
                     onClick={() => setEditing({ mode: "edit", entry: migration })}
@@ -398,7 +400,7 @@ export function CharacterMigrationPanel({
                     🗑 取消
                   </button>
                 ) : null}
-                {migration.status !== "draft" ? (
+                {migration.status !== "draft" && migration.migrateField !== "basicInfo.name" ? (
                   <button
                     disabled={busyId === migration.id}
                     title="以该方案新建一条草案（章节与状态重新填写）"

@@ -31,6 +31,9 @@ export type CharacterFieldPath = z.infer<typeof characterFieldPathSchema>;
 /** 字段路径全集（按 characterSchema 声明顺序，导入草案时保证确定性） */
 export const CHARACTER_FIELD_PATHS = characterFieldPathSchema.options;
 
+/** 姓名保持固定；历史记录仍使用完整字段枚举读取。 */
+export const CHARACTER_MIGRATION_FIELD_PATHS = CHARACTER_FIELD_PATHS.filter((field) => field !== "basicInfo.name");
+
 /** 字段元信息：中文标签 + 是否必填（必填字段的迁移目标值不可为空） */
 export const CHARACTER_FIELD_SPECS: Record<
   CharacterFieldPath,
@@ -99,7 +102,7 @@ export type CharacterMigration = z.infer<typeof characterMigrationSchema>;
 
 /** 新增迁移（草案）入参：字段 + 目标值必填，其余可空（确认时补齐） */
 export const newCharacterMigrationSchema = z.object({
-  migrateField: characterFieldPathSchema,
+  migrateField: characterFieldPathSchema.refine((field) => field !== "basicInfo.name", "姓名为固定项，不允许迁移修改"),
   newValue: z.string().nullable(),
   outlineVersion: z.number().int().min(1).nullable().optional(),
   startChapterId: z.string().min(1).nullable().optional(),

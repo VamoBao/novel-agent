@@ -31,6 +31,9 @@ function makeCharacter(name: string): Character {
     core: { desire: "打破垄断", fear: "辜负同伴", narrativeRole: "主角" },
     background: "青云市集的散修少年",
     personality: "热情",
+    characterGoal: "建立散修联盟",
+    trajectory: "杂役走向联盟开创者",
+    relationships: "与旧友是亲兄弟",
     creationPurpose: "承载打破垄断的主线",
     endingDirection: "打破宗门垄断",
   });
@@ -152,6 +155,62 @@ describe("migrationPhaseAt（纯函数四阶段与开放区间）", () => {
 });
 
 describe("buildCharacterStateContext 阶段解析", () => {
+  test("基准角色的全部已设定字段进入上下文，作者指导单独标明", async () => {
+    const f = await fixture();
+    const text = contextFor(f, 0).lines.join("\n");
+    expect(text).toContain("性别：男");
+    expect(text).toContain("背景：青云市集的散修少年");
+    expect(text).toContain("角色目的：建立散修联盟");
+    expect(text).toContain("轨迹：杂役走向联盟开创者");
+    expect(text).toContain("关系：与旧友是亲兄弟");
+    expect(text).toContain("【作者创作指导");
+    expect(text).toContain("创作目的：承载打破垄断的主线");
+    expect(text).toContain("结局方向：打破宗门垄断");
+    expect(text).toContain("不是角色已知信息");
+  });
+
+  test("后段迁移进行中时仍注入此前完整历史，不把未开始变化或草案当历史", async () => {
+    const f = await fixture();
+    const first = plantConfirmed(f, { migrateField: "personality", newValue: "谨慎", startIndex: 0, endIndex: 1 });
+    f.migrationStore.updateMigration(NOVEL_ID, first.id, { trigger: "历史独有诱因", transitionGuidance: "历史独有过渡" });
+    plantConfirmed(f, { migrateField: "personality", newValue: "沉稳", startIndex: 3, endIndex: 4 });
+    plantConfirmed(f, { migrateField: "relationships", newValue: "未来关系目标", startIndex: 5, endIndex: 5 });
+    f.migrationStore.addMigration(NOVEL_ID, f.character.id, { migrateField: "background", newValue: "草案秘密" });
+    const text = contextFor(f, 3).lines.join("\n");
+    expect(text).toContain("【已结束角色迁移历史");
+    expect(text).toContain("陈默 · 性格（计划区间已结束，第 1 章起至第 2 章");
+    expect(text).toContain("旧值「热情」→ 目标「谨慎」");
+    expect(text).toContain("诱因：历史独有诱因");
+    expect(text).toContain("过渡描述：历史独有过渡");
+    expect(text).toContain("旧值「谨慎」→ 目标「沉稳」");
+    expect(text).not.toContain("未来关系目标");
+    expect(text).not.toContain("草案秘密");
+    expect(text).toContain("不代表正文已兑现");
+  });
+
+  test("作者指导在基准、进行中、结束章与结束后都不能被当作角色事实", async () => {
+    const f = await fixture();
+    plantConfirmed(f, { migrateField: "endingDirection", newValue: "未来为同伴牺牲", startIndex: 1, endIndex: 2 });
+    for (const index of [0, 1, 2, 3]) {
+      const text = contextFor(f, index).lines.join("\n");
+      expect(text).toContain("【作者创作指导");
+      expect(text).toContain("不是角色已知信息");
+      expect(text).toContain("不代表结局事件已经发生");
+      expect(text).not.toContain("结局方向「未来为同伴牺牲」为已结束迁移");
+    }
+    expect(contextFor(f, 3).lines.join("\n")).toContain("结局方向：未来为同伴牺牲");
+  });
+
+  test("同字段连续两条已结束迁移完整保留各自修订和变化依据", async () => {
+    const f = await fixture();
+    const first = plantConfirmed(f, { migrateField: "personality", newValue: "谨慎", startIndex: 0, endIndex: 1 });
+    f.migrationStore.updateMigration(NOVEL_ID, first.id, { trigger: "第一段诱因", transitionGuidance: "第一段过渡" });
+    const second = plantConfirmed(f, { migrateField: "personality", newValue: "沉稳", startIndex: 3, endIndex: 4 });
+    f.migrationStore.updateMigration(NOVEL_ID, second.id, { trigger: "第二段诱因", transitionGuidance: "第二段过渡" });
+    const text = contextFor(f, 5).lines.join("\n");
+    for (const expected of ["旧值「热情」→ 目标「谨慎」", "旧值「谨慎」→ 目标「沉稳」", "序号 1 · 修订 v3", "序号 2 · 修订 v3", "诱因：第一段诱因", "过渡描述：第一段过渡", "诱因：第二段诱因", "过渡描述：第二段过渡"]) expect(text).toContain(expected);
+    expect(contextFor(f, 5).lines[1]).toContain("性格：沉稳");
+  });
   test("同章两个角色同字段迁移的计划各自标明角色，目标不会混在匿名清单", async () => {
     const f = await fixture();
     const second = f.characterStore.addCharacter(NOVEL_ID, makeCharacter("柳三"));

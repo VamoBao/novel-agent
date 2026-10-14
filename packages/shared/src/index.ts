@@ -3,6 +3,7 @@ export { characterSchema, type Character } from "./character";
 export {
   characterFieldPathSchema,
   CHARACTER_FIELD_PATHS,
+  CHARACTER_MIGRATION_FIELD_PATHS,
   CHARACTER_FIELD_SPECS,
   characterMigrationStatusSchema,
   characterMigrationSchema,

@@ -287,6 +287,7 @@ export class CharacterMigrationStore {
       if (m.status === "cancelled") {
         throw new Error("已取消的迁移不能编辑");
       }
+      this.assertMutableField(m.migrateField);
 
       const newValue =
         validated.newValue === undefined ? m.newValue : normalizeMigrationValue(validated.newValue);
@@ -362,6 +363,7 @@ export class CharacterMigrationStore {
       const m = current.migration;
       if (m.status === "confirmed") throw new Error("迁移已确认，无需重复确认");
       if (m.status === "cancelled") throw new Error("已取消的迁移不能确认");
+      this.assertMutableField(m.migrateField);
       this.assertConfirmationFields(m.startChapterId, m.trigger, m.transitionGuidance);
       this.assertFieldValue(m.migrateField, m.newValue);
 
@@ -465,6 +467,10 @@ export class CharacterMigrationStore {
   private assertFieldValue(field: CharacterFieldPath, value: string | null): void {
     const error = migrationValueError(field, value);
     if (error) throw new Error(error);
+  }
+
+  private assertMutableField(field: CharacterFieldPath): void {
+    if (field === "basicInfo.name") throw new Error("姓名为固定项，不允许迁移修改");
   }
 
   private assertConfirmationFields(

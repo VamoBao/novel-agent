@@ -205,7 +205,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   const extraRequirements: string[] = [];
   if (characterContext.planCount > 0) {
     extraRequirements.push(
-      "本章角色变化按【本章角色变化计划】推进：进行中的变化呈现渐变过程、标「本章完成」的在本章内完成转变，不得提前呈现目标状态的全部特征，也不得让角色凭空声称此前未发生的事；",
+      "本章角色变化按【本章角色变化计划】推进：进行中的人物属性变化呈现渐变过程、标「本章完成」的人物属性在本章内完成转变，不得提前呈现目标状态的全部特征，也不得让角色凭空声称此前未发生的事；作者创作指导仅约束创作方向，方案调整完成不表示结局事件已经发生；",
     );
   }
   if (hasForeshadows) {

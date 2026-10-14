@@ -86,6 +86,15 @@ function render(migrations: CharacterMigrationEntry[]): string {
 }
 
 describe("CharacterMigrationPanel 迁移清单", () => {
+  test("历史姓名迁移只读与取消，不能编辑、确认或复制", () => {
+    const html = render([migration({ migrateField: "basicInfo.name", oldValue: "林恒", newValue: "陆隐" })]);
+    expect(html).toContain("林恒 → 陆隐");
+    expect(html).toContain("姓名为固定项");
+    expect(html).not.toContain("✏️ 编辑");
+    expect(html).not.toContain("✅ 确认生效");
+    expect(html).not.toContain("复制为新草案");
+    expect(html).toContain("🗑 取消");
+  });
   test("空清单：给出占位提示与新增入口", () => {
     const html = render([]);
     expect(html).toContain("🧬 角色迁移（0）");

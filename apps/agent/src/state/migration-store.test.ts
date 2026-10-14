@@ -66,6 +66,29 @@ async function setup(options: { chapterCount?: number } = {}) {
 }
 
 describe("CharacterMigrationStore 草案创建", () => {
+  test("新建姓名迁移拒绝且不分配序号", async () => {
+    const { store, character } = await setup();
+    // 模拟绕过 TypeScript 的旧客户端 / 外部 JSON 请求，运行期仍必须拒绝。
+    const legacyInput = { migrateField: "basicInfo.name", newValue: "陆隐" } as unknown as Parameters<CharacterMigrationStore["addMigration"]>[2];
+    expect(() => store.addMigration(NOVEL_ID, character.id, legacyInput)).toThrow("姓名");
+    expect(store.listMigrations(NOVEL_ID)).toEqual([]);
+  });
+
+  test("历史姓名迁移可读可取消，编辑与确认拒绝且零副作用", async () => {
+    const { store, character, chapters, db } = await setup();
+    const draft = store.addMigration(NOVEL_ID, character.id, {
+      migrateField: "personality", newValue: "陆隐", startChapterId: chapters[0]!.id,
+      endChapterId: chapters[1]!.id, trigger: "化名", transitionGuidance: "换名",
+    });
+    db.prepare("UPDATE character_migrations SET migrate_field = 'basicInfo.name', old_value = ? WHERE id = ?").run("陈默", draft.id);
+    const before = store.getMigration(draft.id);
+    expect(() => store.confirmMigration(NOVEL_ID, draft.id)).toThrow("姓名");
+    expect(store.getMigration(draft.id)).toEqual(before);
+    expect(() => store.updateMigration(NOVEL_ID, draft.id, { newValue: "新名" })).toThrow("姓名");
+    expect(store.getMigration(draft.id)).toEqual(before);
+    expect(store.listMigrationVersions(draft.id)).toEqual([]);
+    expect(store.cancelMigration(NOVEL_ID, draft.id).migration.status).toBe("cancelled");
+  });
   test("草案未绑起始章：旧值留空、sequence=1、status=draft", async () => {
     const { store, character } = await setup();
     const created = store.addMigration(NOVEL_ID, character.id, {

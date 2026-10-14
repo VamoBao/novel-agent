@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-14 [feat] 正文角色上下文补全（主记录见根 PROGRESS）：完整角色字段、作者指导独立、同版本已确认的全部已结束历史与本章计划同源注入写作和审校；未来/草案/取消不注入，区间结束不代表正文兑现。新增纯函数全字段/作者阶段/前段历史/连续两段历史与请求集成测试。AC：全量 499 项、typecheck、lint 通过；姓名限制见根记录。
+
 - 2026-10-14 [feat] Agent 模型 OpenAI 兼容接入（主记录与配置规则见根 PROGRESS）：create-novel / polish-character / write-chapter 统一引用 providers/agent-model，正文审校与写作回落均使用通用 Agent 模型；现有模型注入接口与业务流程保留。相关注释和架构文档同步。AC：typecheck / lint / 全量 489 项通过，独立审查无必须修复问题；真实服务未调用验证。
 
 - 2026-10-14 [fix] 角色迁移审查修复（完整范围见根 PROGRESS）：每条进行中/结束章计划标明角色归属；写作与内容审校同源请求集成测试扩展为两角色、同字段、相同旧值、不同目标；纯函数回归覆盖计划归属。库层原子确认/链一致性与客户端真实表单/陈旧范围回归见根记录。AC：定向 177 / 全量 477 通过，typecheck / lint 通过，独立复审无必须修复问题；测试流程见 docs/character-migration-testing.md。
@@ -16,9 +18,9 @@
 
 - 2026-10-13 [feat] 角色编辑陈旧可见性（跨模块需求，方案 2 经用户选定，完整决策与 AC 见根 PROGRESS / DECISIONS）：**本模块**——CharacterStore 补 updatedAt 全链路（add 即 created_at、update 刷新且与快照 created_at 同刻）；迁移 17→18 补 characters.updated_at 并按末次编辑快照时间回填（另修正 16→17 段写 SCHEMA_VERSION 导致链式直升短路后续段的隐患）；write-chapter / plan-act-chapters 等消费链路零改动（陈旧判定在客户端按时间戳比对，不进生成上下文）。净增 character-store 2 条单测 + 迁移 1 条
 
-- 2026-10-13 [feat] 章节登场人物 ID 绑定（跨模块需求，计划经用户确认，完整决策与 AC 见根 PROGRESS / DECISIONS）：**本模块**——chapter-agent 角色梳理改逐章 characters 清单（顶层 newCharacters 取消、确认视图派生填充）+ auto-character-agent 增 collectChapterCharacters；新建 `chapter-cast-intake.ts`（bindChapterCasts：逐章清单 index 对齐 resolveCharacterIds→setChapterCharacters 单事务回填，未匹配逐章剔除警告、空解析章保持 null）；plan-act-chapters 编排顺序 saveChapters→地点→派生建卡（extraContext 带登场名单）→绑定回填→伏笔；write-chapter【登场角色参考】按 character_ids 收窄注入（未绑定旧章回退全库+notify）。净增 chapter-cast-intake 3 条单测，plan-act-chapters / write-chapter / chapter-agent 测试随新契约改写扩展
-
 ## 历史归档
+
+- 2026-10-14 历史滚动摘要：2026-10-13 章节登场人物 ID 绑定（chapter-cast-intake 与上下文按阵容收窄），原验收见根记录与 Git 历史。
 
 - 2026-10-12 历史滚动摘要：2026-10-12 [feat] 正文校验阶段结束即时回传单项结果；主任务清单、验证结果与全量测试环境限制见仓库根目录 `PROGRESS.md`。；小说创作条件入库与复用（完整实现与验收见对应提交。）
 

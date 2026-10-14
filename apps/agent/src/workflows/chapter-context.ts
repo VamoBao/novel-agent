@@ -6,6 +6,7 @@ import {
   type Character,
   type CharacterFieldPath,
   type CharacterMigration,
+  readCharacterField,
 } from "@novel/shared";
 import type { CharacterStore, StoredCharacter } from "../state/character-store";
 import type { CharacterMigrationStore } from "../state/migration-store";
@@ -120,8 +121,24 @@ function characterDigestLine(character: Character): string {
 /** 创作指导字段：迁移作用于这些字段时须标明「作者规划，不是角色已知信息」 */
 const AUTHORING_FIELDS: ReadonlySet<CharacterFieldPath> = new Set([
   "creationPurpose",
+  "trajectory",
   "endingDirection",
 ]);
+
+/** 补齐摘要省略的设定；作者指导始终独立展示，包括尚无迁移的基准值。 */
+function characterSupplementLines(character: Character): string[] {
+  const lines: string[] = [];
+  for (const field of ["basicInfo.gender", "background", "characterGoal", "relationships"] as const) {
+    const value = readCharacterField(character, field);
+    if (value !== null) lines.push(`  ${CHARACTER_FIELD_SPECS[field].label}：${value}`);
+  }
+  lines.push(`【作者创作指导 · ${character.basicInfo.name}（不是角色已知信息，也不代表结局事件已经发生）】`);
+  for (const field of AUTHORING_FIELDS) {
+    const value = readCharacterField(character, field);
+    if (value !== null) lines.push(`  ${CHARACTER_FIELD_SPECS[field].label}：${value}`);
+  }
+  return lines;
+}
 
 export interface CharacterStateContextOptions {
   novelId: string;
@@ -188,6 +205,7 @@ export function buildCharacterStateContext(
 
   const lines: string[] = ["【登场角色状态（角色基准卡 + 已结束迁移后的状态）】"];
   const planLines: string[] = [];
+  const historyLines: string[] = [];
   let planCount = 0;
   let completedCount = 0;
 
@@ -218,6 +236,12 @@ export function buildCharacterStateContext(
           }))
           .sort((a, b) => a.start - b.start);
 
+        // 当前链上的前段历史也要保留：后段进行中时不能把前段的变化依据丢掉。
+        const completed = entries.filter((entry) => entry.end !== null && entry.end < position.order);
+        for (const entry of completed) {
+          historyLines.push(describePlan(stored.character.basicInfo.name, entry.migration, "completed", entry.start, entry.end, field));
+        }
+
         // 覆盖 / 起始于本章（进行中或本章完成）→ 参考沿用旧值，变化进计划块
         const current = entries.find(
           (entry) => entry.start <= position.order && (entry.end === null || entry.end >= position.order),
@@ -239,29 +263,37 @@ export function buildCharacterStateContext(
         }
 
         // 完全结束于本章之前 → 参考沿用链上最后一条的新值（该标签不宣称已通过独立兑现验证）
-        const completed = entries.filter((entry) => entry.end !== null && entry.end < position.order);
         const last = completed[completed.length - 1];
         if (last) {
           effective = applyCharacterField(effective, field, last.migration.newValue);
           const label = CHARACTER_FIELD_SPECS[field].label;
-          notes.push(
-            `${label}${last.migration.newValue === null ? "已清空" : `「${last.migration.newValue}」`}为已结束迁移（第 ${last.start} 章起至第 ${last.end} 章）后的状态`,
-          );
+          if (!AUTHORING_FIELDS.has(field)) {
+            notes.push(
+              `${label}${last.migration.newValue === null ? "已清空" : `「${last.migration.newValue}」`}为已结束迁移（第 ${last.start} 章起至第 ${last.end} 章）后的状态`,
+            );
+          }
           completedCount += 1;
         }
       }
     }
 
     lines.push(characterDigestLine(effective));
+    lines.push(...characterSupplementLines(effective));
     for (const note of notes) lines.push(`  说明：${note}`);
     for (const plan of plans) planLines.push(plan);
+  }
+
+  if (historyLines.length > 0) {
+    lines.push("", "【已结束角色迁移历史（计划区间已结束，不代表正文已兑现）】",
+      "这些是作者已确认的变化安排，可作为人物沿革与本章状态的依据；诱因和过渡描述不证明前章已写出相应事件，不得凭空声称未提供的事件已经发生。作者指导字段只表示创作方案调整，不表示结局事件已经发生。",
+      ...historyLines);
   }
 
   if (planLines.length > 0) {
     lines.push(
       "",
       "【本章角色变化计划（创作计划，不是已经发生的事实）】",
-      "进行中的变化须呈现渐变过程（不用百分比机械插值，也不得提前呈现目标状态的全部特征）；标「本章完成」的在本章内完成该变化并呈现诱因与转变。",
+      "进行中的人物属性变化须呈现渐变过程（不用百分比机械插值，也不得提前呈现目标状态的全部特征）；标「本章完成」的人物属性在本章内完成该变化并呈现诱因与转变。作者指导字段仅约束创作方向，方案调整完成不代表结局事件已经发生。",
       "诱因与过渡描述是作者的写作依据，不得让角色凭空声称此前发生过未提供的事件，本章呈现须与现有概述相容。",
       ...planLines,
     );
@@ -286,13 +318,18 @@ function describePlan(
       : phase === "ending"
         ? `第 ${startOrder} 章起至第 ${endOrder} 章（本章完成）`
         : `第 ${startOrder} 章起至第 ${endOrder} 章`;
-  const phaseLabel = phase === "ending" ? "本章完成变化" : "进行中";
-  const head = `- ${characterName} · ${spec.label}（${phaseLabel}，${range}）：旧值「${migration.oldValue ?? "（未设定）"}」→ 目标「${migration.newValue ?? "（未设定）"}」`;
+  const authoring = AUTHORING_FIELDS.has(field);
+  const phaseLabel = phase === "completed"
+    ? (authoring ? "指导方案调整区间已结束" : "计划区间已结束")
+    : phase === "ending"
+      ? (authoring ? "本章完成指导方案调整" : "本章完成变化")
+      : (authoring ? "指导方案调整进行中" : "进行中");
+  const head = `- ${characterName} · ${spec.label}（${phaseLabel}，${range}；序号 ${migration.sequence} · 修订 v${migration.revision}）：旧值「${migration.oldValue ?? "（未设定）"}」→ 目标「${migration.newValue ?? "（未设定）"}」`;
   const body = [
     migration.trigger ? `  诱因：${migration.trigger}` : null,
     migration.transitionGuidance ? `  过渡描述：${migration.transitionGuidance}` : null,
-    AUTHORING_FIELDS.has(field)
-      ? "  注意：该字段是作者的创作指导，不是角色本人已知的信息，不得让角色直接说出或意识到。"
+    authoring
+      ? "  注意：该字段是作者的创作指导，不是角色本人已知的信息，不得让角色直接说出或意识到；方案调整不代表结局事件已经发生。"
       : null,
   ].filter((line): line is string => line !== null);
   return [head, ...body].join("\n");

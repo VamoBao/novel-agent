@@ -5,6 +5,7 @@ import {
   CHARACTER_FIELD_SPECS,
   applyCharacterField,
   characterMigrationSchema,
+  newCharacterMigrationSchema,
   migrationValueError,
   normalizeMigrationValue,
   readCharacterField,
@@ -25,6 +26,9 @@ function fullCharacter(): Character {
 }
 
 describe("character-migration schema", () => {
+  test("姓名迁移只允许历史读取，新建请求拒绝", () => {
+    expect(newCharacterMigrationSchema.safeParse({ migrateField: "basicInfo.name", newValue: "陆隐" }).success).toBe(false);
+  });
   test("字段路径覆盖角色卡全部叶子字段，且与 spec 一一对应", () => {
     // 全部 13 个叶子字段：3（basicInfo）+ 3（core）+ 7（顶层）
     expect(CHARACTER_FIELD_PATHS).toHaveLength(13);

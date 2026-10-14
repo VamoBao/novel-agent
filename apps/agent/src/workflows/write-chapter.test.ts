@@ -328,6 +328,28 @@ describe("writeChapter", () => {
     expect(channel.notifies.some((line) => line.includes("本章角色变化计划：2 条"))).toBe(true);
   });
 
+  test("补全角色字段与已结束历史同时进入写作和内容审校", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    const character = ctx.characterStore.listCharacters(NOVEL_ID)[0]!;
+    ctx.migrationStore.saveMigration(NOVEL_ID, character.id, {
+      action: "create", confirm: true, input: {
+        migrateField: "core.desire", newValue: "守护同伴", startChapterId: ctx.chapterNodeId,
+        endChapterId: ctx.chapterNodeId, trigger: "历史独有诱因", transitionGuidance: "历史独有过渡",
+      },
+    });
+    generateTextCalls = [];
+    generateObjectCalls = [];
+    generateTextResult = PROSE;
+    await writeChapter({ channel: new FakeChannel([]), novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx, chapterNodeId: ctx.secondChapterNodeId });
+    const prompt = generateTextCalls[0]!.prompt;
+    const review = generateObjectCalls.find(call => call.prompt.includes("设定审校编辑"))!.prompt;
+    for (const expected of ["背景：青云市集的散修少年", "创作目的：承载打破宗门垄断的主线", "结局方向：打破垄断后归隐", "【已结束角色迁移历史", "林恒 · 渴望（计划区间已结束", "旧值「夺回灵脉」→ 目标「守护同伴」", "诱因：历史独有诱因", "过渡描述：历史独有过渡", "不代表正文已兑现"]) {
+      expect(prompt).toContain(expected);
+      expect(review).toContain(expected);
+    }
+  });
+
   test("无迁移时角色块只含基准卡与已结束状态（无计划块、无附加要求）", async () => {
     const ctx = await setupDb();
     cleanupAll.push(ctx.cleanup);

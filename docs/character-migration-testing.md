@@ -20,12 +20,13 @@ bun run test
 
 | 边界 | 必须验证的行为 | 测试位置 |
 | --- | --- | --- |
+| 姓名固定 | 新建 schema 拒绝姓名，历史姓名记录编辑/确认拒绝且主行与快照不变，历史可读可取消，真实新建下拉不提供姓名 | shared/store 与 CharacterMigrationPanel 测试 |
 | 固定基准与历史升级 | v18 恢复 v1、逐差异导入草案、重开幂等；缺失或损坏 v1，或历史表缺失且角色已编辑时，版本/表/角色一并回滚；只有首版角色的缺表库可以升级 | `apps/agent/src/state/db.test.ts` |
 | 已确认记录不变量 | 起始章、诱因、过渡描述不能清空；拒绝后主行、revision、快照数不变 | `apps/agent/src/state/migration-store.test.ts` |
 | 故事顺序与同字段链 | 正序建立链；倒序补入、移动前置迁移、同时改目标、跨大纲版本移动不能改变下游旧值依据；合法缩放区间仍成功；不同字段并行 | `apps/agent/src/state/migration-store.test.ts` |
 | 原子表单提交 | 新建/编辑并确认作为一个事务；必填/重叠/归属校验失败不残留主行或快照；重试不重复草案、不消耗序号；已确认编辑不重复确认 | `apps/agent/src/query.test.ts` |
 | 命令行契约 | 临时库下真实 `save-migration` 子进程往返，返回 JSON 与落库结果一致；失败返回非零且库无残留；旧角色编辑命令拒绝 | `apps/agent/src/query.test.ts` |
-| 角色阶段 | 未开始、进行中、结束章、已结束及开放区间；倒序生成不使用未来状态；两个角色同字段、相同旧值时仍可明确匹配各自计划 | `apps/agent/src/workflows/chapter-context.test.ts` |
+| 角色阶段 | 未开始、进行中、结束章、已结束及开放区间；倒序生成不使用未来状态；两个角色同字段、相同旧值时仍可明确匹配各自计划；所有已设定字段进入参考；前段及连续两段已结束历史完整保留；作者指导在全部阶段独立，不等于角色知情或已发生结局 | `apps/agent/src/workflows/chapter-context.test.ts` |
 | 写作与审校 | 写作请求与内容审校请求同时携带带角色归属的同一计划；前后章跨幕衔接、预算回退与修订循环 | `apps/agent/src/workflows/write-chapter.test.ts`、`chapter-review.test.ts` |
 | 表单交互 | 实际点击复制已确认/已取消记录，创建新 ID 和序号且源行与快照不变；编辑、确认失败、重复提交、取消表单、成功刷新 | `apps/client/src/components/CharacterMigrationPanel.interaction.test.tsx` |
 | 已写正文陈旧提示 | 当前计划与修改前已确认快照的影响范围并集；取消、起始章后移仍提示旧范围；更早章节、未确认草案、归档版本、修改后重生成的正文不误报；同一迁移只提示一次 | `apps/client/src/character-staleness.test.ts` |

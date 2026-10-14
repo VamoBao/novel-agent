@@ -94,6 +94,18 @@ async function submitPrimary() {
 }
 
 describe("角色迁移表单交互与真实数据库副作用", () => {
+  test("新增迁移的实际字段下拉不提供姓名，其他字段仍可选择", async () => {
+    const f = await fixture();
+    await click("＋");
+    const select = dom!.document.querySelector<DomSelect>(".migration-form select")!;
+    const values = [...select.options].map(option => option.value);
+    expect(values).not.toContain("basicInfo.name");
+    expect(values).toHaveLength(12);
+    expect(values).toContain("background");
+    await click("取消");
+    expect(f.store.listMigrations(novelId)).toHaveLength(1);
+    expect(f.refreshes()).toBe(0);
+  });
   test.each(["confirmed", "cancelled"] as const)("复制 %s 为草案：生成新 ID，源行和源快照保持不变", async (status) => {
     const f = await fixture(status);
     const historyBefore = f.store.listMigrationVersions(f.source.id);
