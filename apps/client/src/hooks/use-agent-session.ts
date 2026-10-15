@@ -6,7 +6,7 @@ type Phase = "running" | "error";
 export type FlowItem = { kind: "notify"; text: string } | { kind: "view"; view: View };
 
 interface UseAgentSessionOptions {
-  /** 会话启动参数（重启时复用）；缺省为新建小说会话 */
+  /** 首次会话启动参数；收到流程标识后以恢复模式继续 */
   startOptions?: AgentStartOptions;
   /** run_finished 后上报：父级据此关闭页面并刷新（经 ref 持有，始终调用最新闭包） */
   onFinished: (novelId: string) => void;
@@ -27,20 +27,47 @@ export function useAgentSession({ startOptions, onFinished }: UseAgentSessionOpt
   const [exitCode, setExitCode] = useState<number | null>(null);
   const finishedRef = useRef(onFinished);
   finishedRef.current = onFinished;
+  const initialOptionsRef = useRef(startOptions);
+  const runIdRef = useRef(startOptions?.mode === "resume" ? startOptions.runId : null);
+  const startingRef = useRef(false);
+  const generationRef = useRef(0);
+  const completedRef = useRef(false);
 
   const start = (): void => {
+    if (startingRef.current) return;
+    startingRef.current = true;
+    completedRef.current = false;
+    const generation = ++generationRef.current;
     setPhase("running");
     setFlow([]);
     setStage(null);
     setRequests([]);
     setError(null);
     setExitCode(null);
-    void window.agent.start(startOptions);
+    void (async () => {
+      try {
+        // 旧进程退出后再恢复；该次 stop 的 exit 不属于新会话。
+        await window.agent.stop();
+        if (generation !== generationRef.current) return;
+        startingRef.current = false;
+        await window.agent.start(
+          runIdRef.current
+            ? { mode: "resume", runId: runIdRef.current }
+            : initialOptionsRef.current,
+        );
+      } catch (error) {
+        if (generation !== generationRef.current) return;
+        setError(error instanceof Error ? error.message : String(error));
+        setPhase("error");
+      } finally {
+        if (generation === generationRef.current) startingRef.current = false;
+      }
+    })();
   };
 
   useEffect(() => {
-    start();
     const offMessage = window.agent.onMessage((message) => {
+      if (startingRef.current) return;
       switch (message.type) {
         case "hello":
           setPhase("running");
@@ -54,10 +81,14 @@ export function useAgentSession({ startOptions, onFinished }: UseAgentSessionOpt
         case "stage":
           setStage(message.stage);
           break;
+        case "workflow-run":
+          runIdRef.current = message.runId;
+          break;
         case "request":
           setRequests((queue) => [...queue, message]);
           break;
         case "run_finished":
+          completedRef.current = true;
           finishedRef.current(message.novelId);
           break;
         case "error":
@@ -70,6 +101,7 @@ export function useAgentSession({ startOptions, onFinished }: UseAgentSessionOpt
       }
     });
     const offExit = window.agent.onExit((code) => {
+      if (startingRef.current || completedRef.current) return;
       setExitCode(code);
       // agent 结束但流程未完成（异常退出 / 被中断 / 用户关闭）：错误视图提供重启；
       // run_finished 先于 exit 到达，完成路径由父级卸载页面，不走这里
@@ -81,11 +113,14 @@ export function useAgentSession({ startOptions, onFinished }: UseAgentSessionOpt
       setRequests([]);
       setPhase((current) => (current === "running" ? "error" : current));
     });
+    start();
     return () => {
+      generationRef.current++;
+      startingRef.current = false;
       offMessage();
       offExit();
     };
-    // 挂载时启动一次；重启经 start() 显式触发（startOptions 在页面生命周期内不变）
+    // 订阅后启动；重试始终复用首次参数或收到的流程标识。
   }, []);
 
   const answer = (id: number, value: string | string[] | boolean | number): void => {

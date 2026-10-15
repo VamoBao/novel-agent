@@ -14,7 +14,44 @@ export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 21;
+const SCHEMA_VERSION = 22;
+
+/** 工作流执行、完成步骤与原生 SDK 消息日志：业务写入和步骤标记共用同一连接。 */
+const CREATE_WORKFLOW_CACHE_SQL = `
+  CREATE TABLE IF NOT EXISTS workflow_runs (
+    id TEXT PRIMARY KEY,
+    novel_id TEXT NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('create', 'plan-chapters', 'regen-outline')),
+    target_id TEXT,
+    status TEXT NOT NULL CHECK (status IN ('running', 'failed', 'completed')),
+    error TEXT,
+    owner_pid INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_workflow_runs_pending ON workflow_runs(novel_id, status);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_pending_target
+    ON workflow_runs(novel_id, kind, COALESCE(target_id, '')) WHERE status != 'completed';
+  CREATE TABLE IF NOT EXISTS workflow_steps (
+    run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    result TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, key)
+  );
+  CREATE TABLE IF NOT EXISTS agent_message_traces (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+    agent_name TEXT NOT NULL,
+    system TEXT NOT NULL,
+    messages TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('running', 'failed', 'completed')),
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_agent_message_traces_run ON agent_message_traces(run_id);
+`;
 
 /** character_migrations 建表（18→19 迁移段与基线 DDL 共用，保证两处形态一致） */
 const CREATE_CHARACTER_MIGRATIONS_SQL = `
@@ -535,8 +572,18 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
         }
         db.exec("PRAGMA user_version = 21;");
       }).immediate();
+      // 21→22：只新增缓存表，DDL 与版本标记同事务、锁内复查防并发。
+      db.transaction(() => {
+        const lockedVersion = db.query("PRAGMA user_version").get() as { user_version: number };
+        if (lockedVersion.user_version >= 22) return;
+        db.exec(CREATE_WORKFLOW_CACHE_SQL);
+        db.exec("PRAGMA user_version = 22;");
+      }).immediate();
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>21 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>22 的库被旧代码打开）：重建兜底
+      db.exec("DROP TABLE IF EXISTS agent_message_traces;");
+      db.exec("DROP TABLE IF EXISTS workflow_steps;");
+      db.exec("DROP TABLE IF EXISTS workflow_runs;");
       db.exec("DROP TABLE IF EXISTS documents;");
       db.exec("DROP TABLE IF EXISTS outlines;");
       db.exec("DROP TABLE IF EXISTS locations;");
@@ -734,6 +781,7 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_character_migration_versions_migration_id ON character_migration_versions(migration_id);",
   );
+  db.exec(CREATE_WORKFLOW_CACHE_SQL);
   return db;
 }
 

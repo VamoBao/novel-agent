@@ -1,5 +1,6 @@
 // 工作流编排：多步骤流程、模型与工具组合所在层
 export { createNovel, type CreateNovelOptions } from "./create-novel";
+export { resumeWorkflow } from "./resume-workflow";
 export {
   planActChapters,
   type PlanActChaptersOptions,

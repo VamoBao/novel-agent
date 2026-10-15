@@ -296,3 +296,71 @@ describe("伏笔回收链路", () => {
     db.close();
   });
 });
+
+test("恢复绑定按原序号查最新记录：删除和已编辑项跳过，其余项照常处理", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "novel-intake-fresh-"));
+  const db = openDatabase(join(dir, "t.db"));
+  try {
+    new NovelStore(db).createNovel({ id: NOVEL });
+    const store = new ForeshadowStore(db);
+    const deleted = store.addForeshadow(NOVEL, { ...baseItem, recoveryStatus: "unrecovered" });
+    const untouched = store.addForeshadow(NOVEL, { ...baseItem, surfaceAction: "保留序号的线索", recoveryStatus: "unrecovered" });
+    const editedRecovery = store.addForeshadow(NOVEL, {
+      ...baseItem, surfaceAction: "改过登场章的回收线索", appearChapterId: "c0", recoveryStatus: "unrecovered",
+    });
+    store.deleteForeshadow(deleted.id);
+    store.updateForeshadow(editedRecovery.id, { appearChapterId: "c2" });
+    const channel = new FakeChannel([]);
+    const result = plantChapterForeshadows({
+      novelId: NOVEL, actNodeId: "a", newForeshadows: [], characters: [],
+      unbound: [deleted, untouched], recoverable: [editedRecovery],
+      bindings: [{ index: 1, chapterName: "第一章" }, { index: 2, chapterName: "第一章" }],
+      recoverBindings: [{ index: 1, chapterName: "第一章" }],
+      chapterNodes: [{ id: "c1", name: "第一章" }, { id: "c2", name: "第二章" }],
+      allChapterNodes: [
+        { id: "a", parentId: null, type: "act", sort: 1 },
+        ...["c0", "c1", "c2"].map((id, index) => ({ id, parentId: "a", type: "chapter" as const, sort: index + 1 })),
+      ],
+      channel, foreshadowStore: store,
+    });
+    expect(result).toEqual({ created: 0, skipped: 2, bound: 1, recoverBound: 0 });
+    expect(store.getForeshadow(untouched.id)?.foreshadow.appearChapterId).toBe("c1");
+    expect(store.getForeshadow(editedRecovery.id)?.foreshadow).toMatchObject({ appearChapterId: "c2" });
+    expect(store.getForeshadow(editedRecovery.id)?.foreshadow.recoverChapterIds).toBeUndefined();
+    expect(channel.notifies.some((line) => line.includes("已被删除"))).toBe(true);
+    expect(channel.notifies.some((line) => line.includes("已被编辑"))).toBe(true);
+  } finally {
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("同批先绑定登场再绑定回收：按本批最新登场章校验，合法回收不被误判为外部编辑", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "novel-intake-own-binding-"));
+  const db = openDatabase(join(dir, "t.db"));
+  try {
+    new NovelStore(db).createNovel({ id: NOVEL });
+    const store = new ForeshadowStore(db);
+    const target = store.addForeshadow(NOVEL, { ...baseItem, recoveryStatus: "unrecovered" });
+    const channel = new FakeChannel([]);
+    const result = plantChapterForeshadows({
+      novelId: NOVEL, actNodeId: "a", newForeshadows: [], characters: [],
+      unbound: [target], recoverable: [target],
+      bindings: [{ index: 1, chapterName: "第一章" }],
+      recoverBindings: [{ index: 1, chapterName: "第一章" }, { index: 1, chapterName: "第二章" }],
+      chapterNodes: [{ id: "c1", name: "第一章" }, { id: "c2", name: "第二章" }],
+      allChapterNodes: [
+        { id: "a", parentId: null, type: "act", sort: 1 },
+        { id: "c1", parentId: "a", type: "chapter", sort: 1 },
+        { id: "c2", parentId: "a", type: "chapter", sort: 2 },
+      ], channel, foreshadowStore: store,
+    });
+    expect(result).toEqual({ created: 0, skipped: 1, bound: 1, recoverBound: 1 });
+    expect(store.getForeshadow(target.id)?.foreshadow).toMatchObject({ appearChapterId: "c1", recoverChapterIds: ["c2"] });
+    expect(channel.notifies.some((line) => line.includes("回收章须晚于登场章"))).toBe(true);
+    expect(channel.notifies.some((line) => line.includes("已被编辑"))).toBe(false);
+  } finally {
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

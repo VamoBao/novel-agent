@@ -1,4 +1,4 @@
-import { createNovel } from "./workflows";
+import { createNovel, resumeWorkflow } from "./workflows";
 import { UserAbortedError } from "./ui/aborted";
 import { CliChannel } from "./ui/cli-channel";
 import { resolveAgentModelConfig } from "./providers/agent-model";
@@ -13,7 +13,15 @@ async function main(): Promise<void> {
 
   const channel = new CliChannel();
   try {
-    await createNovel({ channel });
+    const [mode, runId] = process.argv.slice(2);
+    if (mode === "resume" && runId && process.argv.length === 4) {
+      await resumeWorkflow(runId, { channel });
+      channel.notify("✅ 恢复流程已完成");
+    } else if (mode === undefined) {
+      await createNovel({ channel, onRun: (run) => channel.notify(`恢复标识：${run.id}（失败后执行 bun run dev resume ${run.id}）`) });
+    } else {
+      throw new Error("用法：bun run dev [resume <runId>]；查询未完成流程：bun run apps/agent/src/query.ts list-runs");
+    }
   } catch (error) {
     if (error instanceof UserAbortedError) {
       console.log("\n👋 输入已关闭，本次创作未完成，已安全退出。");

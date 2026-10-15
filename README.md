@@ -13,14 +13,15 @@
 ## 功能特性
 
 - **多阶段创作工作流**：类型选择 → 叙事视角选择 → 受众推断（LLM 生成候选 + 用户多选）→ 世界观（ReAct Agent 多轮追问）→ 角色卡（逐字段「发散丰富 → 确认 → 保存」）→ 核心冲突 → 两级大纲（部→幕，结构强校验 + 确认循环）；叙事视角作为创作条件随大纲、章节规划与正文生成全程注入（正文要求叙述人称与信息范围不漂移）
+- **主流程恢复**：新建小说、单幕章节规划、大纲重生成保留主步骤和确认产物；断连、超时或额度耗尽后可继续未完成流程，已建章节与角色不重复创建。客户端会话页与书库提供继续入口；失败子 Agent 从保存输入重跑，内部问答不续接
 - **人机确认门**：世界观提交、角色卡整卡确认、大纲确认、章节规划确认均设用户确认环节，拒绝后按反馈修订重提
 - **章节规划**：大纲确认入库后会话即收尾，章节规划由客户端幕节点「规划本幕章节」入口逐幕手动发起（推荐章节数量与概述，确认后幕下入库）
 - **章节正文生成**：章节点「✍️ 生成本章正文」入口，由**写作模型**（OpenAI 接口兼容端点，与 Agent 会话模型解耦、可配置为任意第三方服务）结合世界观 / 角色 / 所属部幕梗概 / 同幕前后章概述单轮生成正文（无确认门，生成后即入库展示）
 - **正文文件存储**：正文内容不进数据库，按层级落盘 `output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`（可直接阅读编辑；同名小说经 ID 段去重不共享文件夹），SQLite `documents` 表只留 `file_path` 元数据与字数，章节点经 `document_id` 绑定；小说改名/删除联动迁移/清理文件
 - **大纲重生成**：「📖 大纲」组头刷新入口——幕数/部数表单 → 新版本大纲预览确认 → 版本切换入库（旧版与旧章归档为历史版本）
 - **角色管理**：浏览页编辑 / 新增角色（13 字段表单 + 必填校验 + AI 润色回填），编辑经版本化更新（旧卡快照归档 `character_versions`，主行 ID 稳定）
-- **SQLite 持久化**：novels / characters / character_versions / worldviews / outlines / documents / locations / foreshadows 八表外键关联，主键均为应用层生成的 UUIDv7；schema 以 `PRAGMA user_version` 版本化增量迁移（当前 11，4→5 起仅保数据增量迁移）
-- **双运行模式**：终端交互模式（CLI）与 stdio JSON 行协议模式（`headless`，五种会话模式：新建小说全流程 / 单幕章节规划 / 大纲重生成 / 角色润色 / 章节正文生成）
+- **SQLite 持久化**：小说、世界观、角色基准与迁移、大纲、正文元数据、地点、伏笔、文风及流程缓存按外键关联；领域主键为应用层生成的 UUIDv7；schema 以 `PRAGMA user_version` 版本化增量迁移（当前 22，包含工作流缓存与原生 SDK 消息日志）
+- **双运行模式**：终端交互模式（CLI）与 stdio JSON 行协议模式（`headless`，支持新建小说 / 单幕章节规划 / 大纲重生成 / 角色润色 / 章节正文生成，以及按运行标识恢复）
 - **库查询与管理**：一次性查询 CLI（`query.ts`）：`list` / `get`（含世界观 + 角色 + 大纲节点 + 章节正文）查询 + `rename` / `pin` / `unpin` / `favorite` / `unfavorite` / `delete` / `add-character` / `update-character` 管理
 - **Electron 客户端**：三栏浏览主页（书库 / 结构树 / 预览，右键菜单管理，删除需输入小说名强确认）↔ 独立创作页 / 章节规划页 / 大纲重生成页，正文与润色走内联会话；「⚙️ 模型设置」弹窗配置两族模型（Agent / 写作模型），存 userData 明文 JSON、优先级高于 `.env`，保存后下一次会话生效（agent 子进程仍经环境变量注入读取，零协议改动）
 - **产物落盘**：大纲按创作 ID 保存为 `output/<id>.json`（留存与 theme 读取）；章节正文为上述 Markdown 层级文件（人类可直接阅读编辑）
@@ -71,6 +72,8 @@ bun run dev:client
 | --- | --- |
 | 安装依赖 | `bun install` |
 | 运行入口（CLI） | `bun run dev` |
+| 恢复主流程 | `bun run dev resume <runId>` |
+| 查询未完成流程 | `bun run apps/agent/src/query.ts list-runs [novelId]` |
 | 协议模式运行 | `bun run headless` |
 | Electron 客户端 | `bun run dev:client` |
 | 类型检查 | `bun run typecheck` |
@@ -106,7 +109,8 @@ bun run dev:client
 
 ## 数据存储
 
-- **SQLite**（默认 `data/novel.db`）：八张表按 UUIDv7 创作 ID 外键关联——`novels`（小说信息与置顶/收藏标记）、`worldviews`（1:1）、`characters`（1:N，版本化编辑）、`character_versions`（角色历史快照）、`outlines`（大纲树，部/幕/章三级、多版本、内容随节点入库，`document_id` 绑定正文）、`documents`（章节正文元数据：`file_path` + 字数，一章一份）、`locations`（层级位置，数据层先行）、`foreshadows`（伏笔，完整 CRUD 与回收状态流转，数据层先行）
+- **SQLite**（默认 `data/novel.db`）：领域数据按 UUIDv7 创作 ID 外键关联——`novels`（小说信息与置顶/收藏标记）、`worldviews`（1:1）、`characters`（1:N，版本化编辑）、`character_versions`（角色历史快照）、`outlines`（大纲树，部/幕/章三级、多版本、内容随节点入库，`document_id` 绑定正文）、`documents`（章节正文元数据：`file_path` + 字数，一章一份）、`locations`（层级位置，数据层先行）、`foreshadows`（伏笔，完整 CRUD 与回收状态流转，数据层先行）
+- **流程缓存**：同一 SQLite 库内的 `workflow_runs` / `workflow_steps` / `agent_message_traces` 保存运行状态、主步骤结果及 AI SDK 原生 `ModelMessage[]`（含工具调用/结果，system 单独保存）。删除小说同步清理缓存；正文生成与角色润色暂不支持恢复
 - **正文文件**：`output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`——人类可直接阅读编辑，客户端预览即读此文件；数据库经章节点 `document_id` → `documents.file_path` 与文件绑定
 - **大纲产物**：`output/<id>.json`（仅供留存与主题读取，浏览已切换为读 outlines 表）
 - **本地查库辅助**：`docker-compose.yaml` 提供 sqlite-web 网页查看 `data/novel.db`（宿主 8081 端口，非应用运行时依赖）：

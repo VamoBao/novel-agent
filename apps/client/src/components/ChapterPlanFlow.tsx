@@ -73,10 +73,10 @@ export function ChapterPlanFlow({
         {phase === "error" ? (
           <div className="error-panel">
             <p>❌ {error ?? (exitCode !== null ? `agent 已退出（exit ${exitCode}）` : "发生错误")}</p>
-            <p className="hint">v1 无会话恢复；重启即重新开始本幕规划（章节一旦确认入库即保留，重复规划会被拒绝）。</p>
+            <p className="hint">已确认的结果已保存。继续后会从未完成的阶段重新开始问答。</p>
             <div className="row center">
               <button className="primary" onClick={start}>
-                重启 agent
+                继续未完成流程
               </button>
               <button onClick={close}>返回浏览页</button>
             </div>

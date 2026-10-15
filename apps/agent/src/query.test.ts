@@ -13,6 +13,7 @@ import { openDatabase } from "./state/db";
 import { NovelStore } from "./state/novel-store";
 import { OutlineStore } from "./state/outline-store";
 import { WorldviewStore } from "./state/worldview-store";
+import { WorkflowRunStore } from "./state/workflow-run-store";
 import { writeDocumentArtifact } from "./output/document-writer";
 import {
   addMigrationEntry,
@@ -34,6 +35,27 @@ import {
 } from "./query";
 
 const tempDirs: string[] = [];
+
+test("详情只暴露本小说未完成流程摘要，完成或删除后移除恢复入口", () => {
+  const db = openDatabase(":memory:");
+  try {
+    const novels = new NovelStore(db);
+    const one = novels.createNovel({});
+    const two = novels.createNovel({});
+    const runs = new WorkflowRunStore(db);
+    const pending = runs.create({ kind: "create", novelId: one.id });
+    runs.finish(pending.id, "failed", "额度耗尽");
+    runs.create({ kind: "create", novelId: two.id });
+    expect(buildNovelDetail(db, one.id).pendingRuns).toEqual([{
+      id: pending.id, kind: "create", targetId: null, status: "failed", error: "额度耗尽",
+      updatedAt: runs.get(pending.id)!.updatedAt,
+    }]);
+    runs.finish(pending.id, "completed");
+    expect(buildNovelDetail(db, one.id).pendingRuns).toEqual([]);
+    deleteNovel(db, two.id);
+    expect(runs.listPending()).toEqual([]);
+  } finally { db.close(); }
+});
 
 afterAll(async () => {
   await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));

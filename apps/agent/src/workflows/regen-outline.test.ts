@@ -1,3 +1,4 @@
+import { modelMessageSchema } from "ai";
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -28,7 +29,10 @@ let agentPrompts: string[] = [];
 
 type MockTool = { execute: (input: never, options: unknown) => Promise<unknown> };
 
+const sdkModelMessageSchema = modelMessageSchema;
+
 mock.module("ai", () => ({
+  modelMessageSchema: sdkModelMessageSchema,
   tool: (spec: unknown) => spec,
   generateText: async ({ tools, messages }: { tools: Record<string, MockTool>; messages: { content: string }[] }) => {
     agentPrompts.push(messages[0]?.content ?? "");
@@ -308,4 +312,49 @@ describe("regenerateOutline（FakeChannel + mock LLM 集成）", () => {
     await expect(regenerateOutline(optionsFor(noWv, new FakeChannel([])))).rejects.toThrow("世界观未确认");
     await expect(regenerateOutline(optionsFor(noChar, new FakeChannel([])))).rejects.toThrow("没有已入库的角色");
   });
+});
+
+
+test("新版确认后建卡失败：恢复只生成一个版本并补完伏笔", async () => {
+  const world = await seed();
+  const fixture = newOutlineFixture(1, 3, "新版", [{ name: "萧无咎", role: "反派" }], [{
+    surfaceAction: "新版本线索", hiddenTruth: "隐藏真相", attentionLevel: 4,
+    characterNames: ["萧无咎"], actName: "新1部·第1幕",
+  }]);
+  textScript = [
+    [[{ tool: "save_outline", args: fixture }]],
+    [[{ tool: "模拟中断", args: {} }]],
+  ];
+  let runId = "";
+  const options = { ...optionsFor(world, new FakeChannel([3, 1, true])), onRun: (run: { id: string }) => { runId = run.id; } };
+  await expect(regenerateOutline(options)).rejects.toThrow("模拟中断");
+  const nodesBefore = world.outlineStore.listOutlineNodes(NOVEL_ID, { currentOnly: true });
+  expect(new Set(nodesBefore.map((n) => n.node.version))).toEqual(new Set([2]));
+  textScript = [[[{ tool: "save_character", args: autoCard }]]];
+  const channel = new FakeChannel([]);
+  const result = await regenerateOutline({ ...options, resumeRunId: runId, channel });
+  expect(result.version).toBe(2);
+  expect(world.outlineStore.listOutlineNodes(NOVEL_ID, { currentOnly: true }).map((n) => n.id)).toEqual(nodesBefore.map((n) => n.id));
+  expect(world.foreshadowStore.listForeshadows(NOVEL_ID)).toHaveLength(1);
+  expect(channel.calls).toEqual([]);
+  expect(await regenerateOutline({ ...options, resumeRunId: runId, channel })).toEqual(result);
+});
+
+
+test("旧重生成任务中断后其他流程已更新版本：恢复拒绝写入", async () => {
+  const world = await seed();
+  textScript = [
+    [[{ tool: "save_outline", args: newOutlineFixture(1, 3, "新版", [{ name: "萧无咎", role: "反派" }]) }]],
+    [[{ tool: "模拟中断", args: {} }]],
+  ];
+  let runId = "";
+  await expect(regenerateOutline({ ...optionsFor(world, new FakeChannel([3, 1, true])),
+    onRun: (run) => { runId = run.id; },
+  })).rejects.toThrow("模拟中断");
+  const newest = world.outlineStore.saveOutlineTreeNewVersion(NOVEL_ID, oldTree);
+  const channel = new FakeChannel([]);
+  await expect(regenerateOutline({ ...optionsFor(world, channel), resumeRunId: runId })).rejects.toThrow("大纲版本已变更");
+  expect(channel.calls).toEqual([]);
+  expect(world.outlineStore.listOutlineNodes(NOVEL_ID, { currentOnly: true }).map((n) => n.id)).toEqual(newest.map((n) => n.id));
+  expect(world.characterStore.listCharacters(NOVEL_ID)).toHaveLength(1);
 });

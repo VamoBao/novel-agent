@@ -1,3 +1,4 @@
+import { modelMessageSchema } from "ai";
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
 import { DEFAULT_STYLE_PASS_SCORE } from "@novel/shared";
@@ -14,7 +15,9 @@ let generateObjectCalls: GenerateObjectArgs[] = [];
 /** 按 prompt 段落标识脚本化返回（键为段落开场标识） */
 let scriptedResults: Record<string, unknown> = {};
 
+const sdkModelMessageSchema = modelMessageSchema;
 mock.module("ai", () => ({
+  modelMessageSchema: sdkModelMessageSchema,
   tool: (spec: unknown) => spec,
   generateText: async () => {
     throw new Error("校验模块不应调用 generateText");

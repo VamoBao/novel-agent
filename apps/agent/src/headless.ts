@@ -1,7 +1,8 @@
 import { resolveAgentModelConfig } from "./providers/agent-model";
 import * as path from "node:path";
 import { characterSchema, PROTOCOL_VERSION, type AgentMessage, type Character } from "@novel/shared";
-import { createNovel, planActChapters, polishCharacter, regenerateOutline, writeChapter } from "./workflows";
+import { createNovel, planActChapters, polishCharacter, regenerateOutline, writeChapter, resumeWorkflow } from "./workflows";
+import type { WorkflowRun } from "./state/workflow-run-store";
 import { UserAbortedError } from "./ui/aborted";
 import { ProtocolChannel } from "./ui/protocol-channel";
 import { OUTPUT_DIR } from "./output/outline-writer";
@@ -10,9 +11,10 @@ import { OUTPUT_DIR } from "./output/outline-writer";
  * 协议模式入口：不触碰 TTY，stdin/stdout 按行收发 JSON 消息（协议见 @novel/shared protocol.ts）。
  * 由宿主进程（Electron main）spawn，生命周期随 stdin 关闭或 SIGTERM 结束；
  * 数据路径由宿主经环境变量传入绝对路径（NOVEL_DB_PATH / NOVEL_OUTPUT_DIR），hello 回显校验。
- * 会话模式经 argv 选择（对齐 query CLI 传参先例，协议消息 schema 不动）：
+ * 会话模式经 argv 选择；三条创作主流程经 workflow-run 消息回传恢复标识：
  * 无参 = 新建小说全流程；`plan-chapters <novelId> <actNodeId>` = 既有小说单幕章节规划；
  * `regen-outline <novelId>` = 既有小说大纲重新生成（新版本入库，旧版本归档）；
+ * `resume <runId>` = 按已保存的模式、小说与目标继续未完成主流程；
  * `polish-character <novelId> [characterId] <formJson>` = 角色 AI 润色（编辑流传角色 ID，
  * 新建流缺省；formJson 为表单当前值 JSON——argv 传参，结果经 polish-result 消息回传）；
  * `write-chapter <novelId> <chapterNodeId>` = 章节正文生成（写作模型单轮生成，
@@ -23,6 +25,7 @@ import { OUTPUT_DIR } from "./output/outline-writer";
 /** 会话模式：与 client 侧 AgentStartOptions（@novel/shared）一一对应 */
 type Session =
   | { kind: "create" }
+  | { kind: "resume"; runId: string }
   | { kind: "plan-chapters"; novelId: string; actNodeId: string }
   | { kind: "regen-outline"; novelId: string }
   | { kind: "polish-character"; novelId: string; characterId?: string; formJson: string }
@@ -31,6 +34,7 @@ type Session =
 function parseSession(argv: string[]): Session {
   if (argv.length === 0) return { kind: "create" };
   const [mode, novelId, arg3, arg4] = argv;
+  if (mode === "resume" && argv.length === 2 && novelId) return { kind: "resume", runId: novelId };
   if (mode === "plan-chapters" && argv.length === 3 && novelId && arg3) {
     return { kind: "plan-chapters", novelId, actNodeId: arg3 };
   }
@@ -50,22 +54,24 @@ function parseSession(argv: string[]): Session {
     return { kind: "write-chapter", novelId, chapterNodeId: arg3 };
   }
   process.stderr.write(
-    `NOVEL_AGENT_FATAL: 无法识别的启动参数：${argv.join(" ")}（用法：headless.ts [plan-chapters <novelId> <actNodeId>] [regen-outline <novelId>] [polish-character <novelId> [characterId] <formJson>] [write-chapter <novelId> <chapterNodeId>]）\n`,
+    `NOVEL_AGENT_FATAL: 无法识别的启动参数：${argv.join(" ")}（用法：headless.ts [resume <runId>] [plan-chapters <novelId> <actNodeId>] [regen-outline <novelId>] [polish-character <novelId> [characterId] <formJson>] [write-chapter <novelId> <chapterNodeId>]）\n`,
   );
   process.exit(1);
 }
 
-/** 执行会话并返回小说 ID（五种会话共用 run_finished 收尾） */
+/** 执行会话并返回小说 ID（含恢复在内的全部会话共用 run_finished 收尾） */
 async function runSession(session: Session, channel: ProtocolChannel, send: (message: AgentMessage) => void): Promise<string> {
+  const onRun = (run: WorkflowRun): void => send({ type: "workflow-run", runId: run.id, novelId: run.novelId });
   switch (session.kind) {
     case "create":
-      return (await createNovel({ channel })).id;
+      return (await createNovel({ channel, onRun })).id;
+    case "resume": return resumeWorkflow(session.runId, { channel, onRun });
     case "plan-chapters":
       return (
-        await planActChapters({ channel, novelId: session.novelId, actNodeId: session.actNodeId })
+        await planActChapters({ channel, onRun, novelId: session.novelId, actNodeId: session.actNodeId })
       ).novelId;
     case "regen-outline":
-      return (await regenerateOutline({ channel, novelId: session.novelId })).novelId;
+      return (await regenerateOutline({ channel, onRun, novelId: session.novelId })).novelId;
     case "polish-character": {
       let form: Character;
       try {

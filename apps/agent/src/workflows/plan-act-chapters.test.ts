@@ -1,3 +1,4 @@
+import { modelMessageSchema } from "ai";
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -28,7 +29,10 @@ let agentPrompts: string[] = [];
 
 type MockTool = { execute: (input: never, options: unknown) => Promise<unknown> };
 
+const sdkModelMessageSchema = modelMessageSchema;
+
 mock.module("ai", () => ({
+  modelMessageSchema: sdkModelMessageSchema,
   tool: (spec: unknown) => spec,
   generateText: async ({
     tools,
@@ -508,4 +512,141 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
       }),
     ).rejects.toBeInstanceOf(UserAbortedError);
   });
+});
+
+
+test("确认后部分建卡失败：重开库恢复复用规划、节点与原始伏笔绑定清单", async () => {
+  const world = await seed();
+  const actNodeId = world.actNodes[0]!.id;
+  const first = world.foreshadowStore.addForeshadow(NOVEL_ID, {
+    surfaceAction: "旧线索", hiddenTruth: "旧真相", attentionLevel: 3, recoveryStatus: "unrecovered",
+  }, actNodeId);
+  const fixture = {
+    ...chapterPlanFixture,
+    chapters: chapterPlanFixture.chapters.map((chapter, index) => index === 1 ? {
+      ...chapter, characters: [...chapter.characters, { name: "苏晚", role: "盟友" }],
+    } : chapter),
+    newForeshadows: [{ surfaceAction: "新线索", hiddenTruth: "新真相", attentionLevel: 4,
+      characterNames: ["苏晚"], chapterName: "第二章·来客" }],
+    foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }],
+  };
+  textScript = [
+    [[{ tool: "save_chapters", args: fixture }]],
+    [[{ tool: "save_character", args: autoCard }, { tool: "模拟中断", args: {} }]],
+  ];
+  let runId = "";
+  const options = { ...world, novelId: NOVEL_ID, actNodeId, onRun: (run: { id: string }) => { runId = run.id; } };
+  await expect(planActChapters({ ...options, channel: new FakeChannel([true]) })).rejects.toThrow("模拟中断");
+  const chapterIds = world.outlineStore.listOutlineNodes(NOVEL_ID).filter((n) => n.node.type === "chapter").map((n) => n.id);
+  expect(chapterIds).toHaveLength(3);
+  expect(world.characterStore.listCharacters(NOVEL_ID)).toHaveLength(2);
+  closeDb();
+  const db = openDatabase(join(tempDir, "test.db"));
+  closeDb = () => db.close();
+  const channel = new FakeChannel([]);
+  textScript = [[[{ tool: "save_character", args: { ...autoCard, basicInfo: { name: "苏晚" } } }]]];
+  const result = await planActChapters({
+    novelId: NOVEL_ID, actNodeId, resumeRunId: runId, channel,
+    novelStore: new NovelStore(db), outlineStore: new OutlineStore(db), worldviewStore: new WorldviewStore(db),
+    characterStore: new CharacterStore(db), foreshadowStore: new ForeshadowStore(db), locationStore: new LocationStore(db),
+  });
+  expect(result.chapterCount).toBe(3);
+  expect(channel.calls).toEqual([]);
+  const chapters = new OutlineStore(db).listOutlineNodes(NOVEL_ID).filter((n) => n.node.type === "chapter");
+  expect(chapters.map((n) => n.id)).toEqual(chapterIds);
+  expect(chapters.every((n) => n.node.characterIds !== null)).toBe(true);
+  expect(new CharacterStore(db).listCharacters(NOVEL_ID).map((c) => c.character.basicInfo.name)).toEqual(["林恒", "萧无咎", "苏晚"]);
+  const fs = new ForeshadowStore(db).listForeshadows(NOVEL_ID);
+  expect(fs).toHaveLength(2);
+  expect(fs.find((f) => f.id === first.id)?.foreshadow.appearChapterId).toBe(chapterIds[0]);
+  expect(fs.find((f) => f.foreshadow.surfaceAction === "新线索")?.foreshadow.appearChapterId).toBe(chapterIds[1]);
+  expect(textScript).toHaveLength(0);
+});
+
+test("伏笔块中断整体回滚，恢复后只创建一次且完成运行可重复读取", async () => {
+  const world = await seed();
+  const actNodeId = world.actNodes[0]!.id;
+  const fixture = { ...noNewCastFixture, newForeshadows: ["甲", "乙"].map((label) => ({
+    surfaceAction: label, hiddenTruth: `${label}真相`, attentionLevel: 4,
+    characterNames: ["林恒"], chapterName: "第一章·雨夜",
+  })) };
+  textScript = [[[{ tool: "save_chapters", args: fixture }]]];
+  const original = world.foreshadowStore.addForeshadow.bind(world.foreshadowStore);
+  let count = 0;
+  world.foreshadowStore.addForeshadow = (...args: Parameters<typeof original>) => {
+    if (++count === 2) throw new Error("伏笔写入失败");
+    return original(...args);
+  };
+  let runId = "";
+  const options = { ...world, novelId: NOVEL_ID, actNodeId, onRun: (run: { id: string }) => { runId = run.id; } };
+  await expect(planActChapters({ ...options, channel: new FakeChannel([true]) })).rejects.toThrow("伏笔写入失败");
+  expect(world.foreshadowStore.listForeshadows(NOVEL_ID)).toHaveLength(0);
+  world.foreshadowStore.addForeshadow = original;
+  const channel = new FakeChannel([]);
+  const result = await planActChapters({ ...options, resumeRunId: runId, channel });
+  expect(world.foreshadowStore.listForeshadows(NOVEL_ID)).toHaveLength(2);
+  expect(await planActChapters({ ...options, resumeRunId: runId, channel })).toEqual(result);
+  expect(world.outlineStore.listOutlineNodes(NOVEL_ID).filter((n) => n.node.type === "chapter")).toHaveLength(3);
+  expect(channel.calls).toEqual([]);
+});
+
+
+test("恢复时大纲已换版本：拒绝把旧规划及伏笔挂到新版", async () => {
+  const world = await seed();
+  const options = { ...world, novelId: NOVEL_ID, actNodeId: world.actNodes[0]!.id };
+  let runId = "";
+  textScript = [
+    [[{ tool: "save_chapters", args: chapterPlanFixture }]],
+    [[{ tool: "模拟中断", args: {} }]],
+  ];
+  await expect(planActChapters({ ...options, channel: new FakeChannel([true]),
+    onRun: (run) => { runId = run.id; },
+  })).rejects.toThrow("模拟中断");
+  const newTree = world.outlineStore.saveOutlineTreeNewVersion(NOVEL_ID, partsFixture);
+  const channel = new FakeChannel([]);
+  await expect(planActChapters({ ...options, channel, resumeRunId: runId })).rejects.toThrow("大纲版本已变更");
+  expect(channel.calls).toEqual([]);
+  expect(world.outlineStore.listOutlineNodes(NOVEL_ID, { currentOnly: true }).map((n) => n.id)).toEqual(newTree.map((n) => n.id));
+  expect(world.characterStore.listCharacters(NOVEL_ID)).toHaveLength(1);
+});
+
+test("恢复保留用户在中断期间编辑的伏笔绑定，原序号仍绑定原伏笔", async () => {
+  const world = await seed();
+  const actNodeId = world.actNodes[1]!.id;
+  const prologue = world.outlineStore.saveChapters(NOVEL_ID, world.actNodes[0]!.id, [
+    { name: "序章", summary: "故事开场" },
+  ])[0]!;
+  const edited = world.foreshadowStore.addForeshadow(NOVEL_ID, {
+    surfaceAction: "用户维护的线索", hiddenTruth: "旧真相", attentionLevel: 3, recoveryStatus: "unrecovered",
+  }, actNodeId, actNodeId);
+  const untouched = world.foreshadowStore.addForeshadow(NOVEL_ID, {
+    surfaceAction: "另一条未绑线索", hiddenTruth: "另一真相", attentionLevel: 3, recoveryStatus: "unrecovered",
+  }, actNodeId);
+  textScript = [
+    [[{ tool: "save_chapters", args: {
+      ...chapterPlanFixture,
+      foreshadowBindings: [
+        { index: 1, chapterName: "第二章·来客" },
+        { index: 2, chapterName: "第一章·雨夜" },
+      ],
+      foreshadowRecoverBindings: [{ index: 1, chapterName: "第三章·破晓" }],
+    } }]],
+    [[{ tool: "模拟中断", args: {} }]],
+  ];
+  let runId = "";
+  const options = { ...world, novelId: NOVEL_ID, actNodeId, onRun: (run: { id: string }) => { runId = run.id; } };
+  await expect(planActChapters({ ...options, channel: new FakeChannel([true]) })).rejects.toThrow("模拟中断");
+  const firstChapter = world.outlineStore.listOutlineNodes(NOVEL_ID).find((n) => n.node.name === "第一章·雨夜")!;
+  world.foreshadowStore.updateForeshadow(edited.id, {
+    appearChapterId: prologue.id, recoverChapterIds: [firstChapter.id],
+  });
+  textScript = [[[{ tool: "save_character", args: autoCard }]]];
+  const channel = new FakeChannel([]);
+  await planActChapters({ ...options, resumeRunId: runId, channel });
+  expect(world.foreshadowStore.getForeshadow(edited.id)?.foreshadow).toMatchObject({
+    appearChapterId: prologue.id, recoverChapterIds: [firstChapter.id],
+  });
+  expect(world.foreshadowStore.getForeshadow(untouched.id)?.foreshadow.appearChapterId).toBe(firstChapter.id);
+  expect(channel.calls).toEqual([]);
+  expect(channel.notifies.some((line) => line.includes("已被编辑") && line.includes("用户维护的线索"))).toBe(true);
 });

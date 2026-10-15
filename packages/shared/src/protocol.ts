@@ -84,6 +84,7 @@ export const agentMessageSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("stage"), stage: stageSchema }),
   z.object({ type: z.literal("notify"), text: z.string() }),
+  z.object({ type: z.literal("workflow-run"), runId: z.string().min(1), novelId: z.string().min(1) }),
   z.object({ type: z.literal("view"), view: viewSchema }),
   z.object({ type: z.literal("request"), id: z.number().int(), ask: askSchema }),
   z.object({
@@ -135,6 +136,7 @@ export type ClientMessage = z.infer<typeof clientMessageSchema>;
  */
 export type AgentStartOptions =
   | { mode: "create" }
+  | { mode: "resume"; runId: string }
   | { mode: "plan-chapters"; novelId: string; actNodeId: string }
   | { mode: "regen-outline"; novelId: string }
   | { mode: "polish-character"; novelId: string; characterId?: string; formJson: string }

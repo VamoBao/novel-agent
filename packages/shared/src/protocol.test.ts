@@ -156,6 +156,12 @@ describe("protocol schemas", () => {
     }
   });
 
+  test("主流程恢复标识保留，缺少运行 ID 的消息被拒绝", () => {
+    expect(agentMessageSchema.parse({ type: "workflow-run", runId: "run1", novelId: "novel1" }))
+      .toEqual({ type: "workflow-run", runId: "run1", novelId: "novel1" });
+    expect(agentMessageSchema.safeParse({ type: "workflow-run", novelId: "novel1" }).success).toBe(false);
+  });
+
   test("client 消息：response 四种 answer 类型", () => {
     for (const answer of ["文本", ["甲", "乙"], true, 5]) {
       expect(clientMessageSchema.parse({ type: "response", id: 1, answer })).toMatchObject({

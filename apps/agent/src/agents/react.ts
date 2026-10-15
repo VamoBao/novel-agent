@@ -6,6 +6,7 @@ import {
   type ToolSet,
 } from "ai";
 import { model } from "../providers/agent-model";
+import { getAgentMessageCache } from "./session-context";
 
 export interface ReactAgentOptions {
   system: string;
@@ -60,24 +61,52 @@ export async function runReactAgent(options: ReactAgentOptions): Promise<ReactAg
   let stepCount = 0;
   let finishReason: string | undefined;
   let continuations = 0;
+  const cache = getAgentMessageCache();
+  const traceId = cache?.store.beginTrace(cache.runId, cache.agentName, system, messages);
+  let persistedMessages = messages;
 
-  for (;;) {
-    const result = await generateText({
-      model,
-      system,
-      messages,
-      tools,
-      stopWhen: [...(stopTool ? [hasToolCall(stopTool)] : []), stepCountIs(maxSteps)],
-    });
+  try {
+    for (;;) {
+      const initialMessages = messages;
+      const responseMessages: ModelMessage[] = [];
+      // 请求尚未完成也要保留已发送的上下文（含续跑提醒），便于追溯首步失败。
+      persistedMessages = [...initialMessages];
+      if (cache && traceId) cache.store.saveTrace(traceId, persistedMessages, "running");
+      const result = await generateText({
+        model,
+        system,
+        messages,
+        tools,
+        stopWhen: [
+          ...(stopTool ? [hasToolCall(stopTool)] : []),
+          ...(isDone ? [() => isDone()] : []),
+          stepCountIs(maxSteps),
+        ],
+        onStepEnd: (step) => {
+          responseMessages.push(...step.response.messages);
+          persistedMessages = [...initialMessages, ...responseMessages];
+          if (cache && traceId) cache.store.saveTrace(traceId, persistedMessages, "running");
+        },
+      });
+      if (responseMessages.length === 0) {
+        persistedMessages = [...initialMessages, ...(result.response?.messages ?? [])];
+      }
 
-    text = result.text;
-    stepCount += result.steps.length;
-    finishReason = result.finishReason;
+      text = result.text;
+      stepCount += result.steps.length;
+      finishReason = result.finishReason;
 
-    if (isDone?.() ?? true) break;
-    if (continuations >= continuationMax) break;
-    continuations += 1;
-    messages = [...messages, ...result.response.messages, { role: "user", content: hint }];
+      if (isDone?.() ?? true) break;
+      if (continuations >= continuationMax) break;
+      continuations += 1;
+      messages = [...persistedMessages, { role: "user", content: hint }];
+    }
+    if (cache && traceId) cache.store.saveTrace(traceId, persistedMessages, "completed");
+  } catch (error) {
+    if (cache && traceId) {
+      cache.store.saveTrace(traceId, persistedMessages, "failed", error instanceof Error ? error.message : String(error));
+    }
+    throw error;
   }
 
   return {

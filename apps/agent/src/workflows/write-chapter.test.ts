@@ -1,3 +1,4 @@
+import { modelMessageSchema } from "ai";
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -67,7 +68,9 @@ function nextReviewObject(key: "content" | "style" | "consistency"): unknown {
   return DEFAULT_REVIEW[key];
 }
 
+const sdkModelMessageSchema = modelMessageSchema;
 mock.module("ai", () => ({
+  modelMessageSchema: sdkModelMessageSchema,
   tool: (spec: unknown) => spec,
   generateObject: async (args: GenerateObjectArgs) => {
     if (reviewScript.error) throw reviewScript.error;

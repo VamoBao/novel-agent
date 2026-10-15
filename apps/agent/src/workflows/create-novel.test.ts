@@ -1,3 +1,4 @@
+import { modelMessageSchema } from "ai";
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -21,7 +22,10 @@ let objectScript: unknown[] = [];
 
 type MockTool = { execute: (input: never, options: unknown) => Promise<unknown> };
 
+const sdkModelMessageSchema = modelMessageSchema;
+
 mock.module("ai", () => ({
+  modelMessageSchema: sdkModelMessageSchema,
   tool: (spec: unknown) => spec,
   generateText: async ({ tools }: { tools: Record<string, MockTool> }) => {
     // 脚本耗尽即抛错：任何计划外的 LLM 调用都会炸测试（「零 LLM 调用」断言的硬证明）
@@ -374,5 +378,93 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
         await rm(dir, { recursive: true, force: true });
       }
     });
+  }
+});
+
+
+test("世界观确认后重开库恢复：已确认主输入与世界观不重问", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "novel-create-resume-"));
+  process.chdir(dir);
+  const path = join(dir, "test.db");
+  let db = openDatabase(path);
+  let runId = "";
+  const { MemoryNovelStateStore } = await import("../state/memory-store");
+  const options = () => ({
+    store: new MemoryNovelStateStore(), novelStore: new NovelStore(db), characterStore: new CharacterStore(db),
+    worldviewStore: new WorldviewStore(db), outlineStore: new OutlineStore(db),
+    foreshadowStore: new ForeshadowStore(db), locationStore: new LocationStore(db),
+    onRun: (run: { id: string }) => { runId = run.id; },
+  });
+  objectScript = [{ options: [{ label: "青年", description: "成长" }] }];
+  textScript = [[[{ tool: "submit_worldview", args: worldviewFixture }]]];
+  try {
+    await expect(createNovel({ ...options(), id: "create-resume-worldview", channel: new FakeChannel([
+      "", "仙侠", "第三人称限知", ["青年——成长"], "", "九州大陆", null,
+    ]) })).rejects.toBeInstanceOf((await import("../ui/aborted")).UserAbortedError);
+    db.close();
+    db = openDatabase(path);
+    objectScript = [{ origin: "垄断", impact: "压迫", idealResolution: "自由" }];
+    textScript = [
+      [characterFields.map((f) => ({ tool: "save_field", args: f })), [{ tool: "submit_character", args: {} }]],
+      [[{ tool: "save_outline", args: { ...outlineFixture, newCharacters: [], newForeshadows: [] } }]],
+    ];
+    const channel = new FakeChannel(["林恒", ...characterFields.map(() => true), true, "", "垄断灵脉", 5, 1, true]);
+    const state = await createNovel({ ...options(), resumeRunId: runId, channel });
+    expect(state.id).toBe("create-resume-worldview");
+    expect(state.status).toBe("outlined");
+    expect(state.params?.worldview).toEqual(worldviewFixture);
+    expect(channel.calls[0]?.prompt).toContain("首个角色");
+    expect(new CharacterStore(db).listCharacters(state.id)).toHaveLength(1);
+    expect(textScript).toHaveLength(0);
+    expect(objectScript).toHaveLength(0);
+  } finally {
+    db.close();
+    process.chdir(originalCwd);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("大纲确认后建卡失败：outlined 内存态仍可补完，完成后按 ID 返回完整结果", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "novel-create-outline-resume-"));
+  process.chdir(dir);
+  const db = openDatabase(join(dir, "test.db"));
+  const { MemoryNovelStateStore } = await import("../state/memory-store");
+  const options = {
+    id: "create-resume-outline", store: new MemoryNovelStateStore(), novelStore: new NovelStore(db),
+    characterStore: new CharacterStore(db), worldviewStore: new WorldviewStore(db), outlineStore: new OutlineStore(db),
+    foreshadowStore: new ForeshadowStore(db), locationStore: new LocationStore(db),
+  };
+  let runId = "";
+  objectScript = [
+    { options: [{ label: "青年", description: "成长" }] },
+    { origin: "垄断", impact: "压迫", idealResolution: "自由" },
+  ];
+  textScript = [
+    [[{ tool: "submit_worldview", args: worldviewFixture }]],
+    [characterFields.map((f) => ({ tool: "save_field", args: f })), [{ tool: "submit_character", args: {} }]],
+    [[{ tool: "save_outline", args: outlineFixture }]],
+    [[{ tool: "模拟中断", args: {} }]],
+  ];
+  try {
+    await expect(createNovel({ ...options, onRun: (run: { id: string }) => { runId = run.id; }, channel: new FakeChannel([
+      "", "仙侠", "第三人称限知", ["青年——成长"], "", "九州大陆", "林恒",
+      ...characterFields.map(() => true), true, "", "垄断灵脉", 5, 1, true,
+    ]) })).rejects.toThrow("模拟中断");
+    const nodeIds = options.outlineStore.listOutlineNodes(options.id).map((n) => n.id);
+    textScript = [[[{ tool: "save_character", args: autoCard }]]];
+    const channel = new FakeChannel([]);
+    const state = await createNovel({ ...options, resumeRunId: runId, channel });
+    expect(textScript).toHaveLength(0);
+    expect(options.characterStore.listCharacters(options.id)).toHaveLength(2);
+    expect(options.foreshadowStore.listForeshadows(options.id)).toHaveLength(1);
+    expect(options.outlineStore.listOutlineNodes(options.id).map((n) => n.id)).toEqual(nodeIds);
+    expect(channel.calls).toEqual([]);
+    expect(await createNovel({ ...options, channel })).toEqual(state);
+    expect(await createNovel({ ...options, store: new MemoryNovelStateStore(), channel })).toEqual(state);
+    expect(await createNovel({ ...options, resumeRunId: runId, store: new MemoryNovelStateStore(), channel })).toEqual(state);
+  } finally {
+    db.close();
+    process.chdir(originalCwd);
+    await rm(dir, { recursive: true, force: true });
   }
 });

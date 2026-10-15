@@ -1,16 +1,15 @@
 import { app, BrowserWindow, ipcMain, nativeTheme } from "electron";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { AgentProcess } from "./agent-process";
 import {
-  agentMessageSchema,
   characterEntrySchema,
   characterMigrationEntrySchema,
   foreshadowEntrySchema,
   novelDeletedResultSchema,
   novelDetailSchema,
   novelListItemSchema,
-  PROTOCOL_VERSION,
   styleReferenceEntrySchema,
   type AgentStartOptions,
   type Character,
@@ -150,25 +149,16 @@ function runLibraryQuery(args: string[], timeoutMs = 8000): Promise<unknown> {
   });
 }
 
-/** agent 子进程宿主：spawn headless 入口、转发协议消息、退出回收 */
-class AgentProcess {
-  private child: ChildProcess | null = null;
-  private stdoutBuffer = "";
-  private win: BrowserWindow | null = null;
-
-  get running(): boolean {
-    return this.child !== null;
-  }
-
-  start(win: BrowserWindow, options: AgentStartOptions = { mode: "create" }): void {
-    if (this.child) return;
-    this.win = win;
+const agentProcess = new AgentProcess({
+  spawn: (options) => {
     const repoRoot = resolveRepoRoot();
     // 会话模式映射为 headless argv（create → 无参；plan-chapters / regen-outline → 传 ID；
     // polish-character → 表单 JSON 随 argv 传入，编辑流带角色 ID、新建流不带；
     // write-chapter → 章节点正文生成，写作模型配置随根 .env 注入）
     const sessionArgs =
-      options.mode === "plan-chapters"
+      options.mode === "resume"
+        ? ["resume", options.runId]
+        : options.mode === "plan-chapters"
         ? ["plan-chapters", options.novelId, options.actNodeId]
         : options.mode === "regen-outline"
           ? ["regen-outline", options.novelId]
@@ -179,76 +169,16 @@ class AgentProcess {
             : options.mode === "write-chapter"
               ? ["write-chapter", options.novelId, options.chapterNodeId]
               : [];
-    const child = spawn("bun", ["run", "apps/agent/src/headless.ts", ...sessionArgs], {
+    console.log(`[agent] spawn（cwd=${repoRoot}）`);
+    return spawn("bun", ["run", "apps/agent/src/headless.ts", ...sessionArgs], {
       cwd: repoRoot,
       env: childEnv(),
       stdio: ["pipe", "pipe", "inherit"],
     });
-    this.child = child;
-    console.log(`[agent] spawned（cwd=${repoRoot}）`);
-
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      this.stdoutBuffer += chunk;
-      const lines = this.stdoutBuffer.split("\n");
-      this.stdoutBuffer = lines.pop() ?? "";
-      for (const line of lines) this.dispatchAgentLine(line);
-    });
-    child.on("exit", (code) => {
-      console.log(`[agent] exited（code=${code ?? "null"}）`);
-      this.child = null;
-      this.win?.webContents.send("agent:exit", code ?? -1);
-    });
-    child.on("error", (error) => {
-      console.error("[agent] spawn 失败：", error);
-      this.child = null;
-      this.win?.webContents.send("agent:exit", -1);
-    });
-  }
-
-  /** agent → client 消息：zod 复验后转发渲染进程；未知消息向前兼容忽略并记日志 */
-  private dispatchAgentLine(line: string): void {
-    if (line.trim().length === 0) return;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      console.warn("[agent] 非 JSON 行：", line.slice(0, 200));
-      return;
-    }
-    const message = agentMessageSchema.safeParse(parsed);
-    if (!message.success) {
-      console.warn("[agent] 消息不合协议 schema，已忽略：", line.slice(0, 200));
-      return;
-    }
-    if (message.data.type === "hello") {
-      console.log(
-        `[agent] hello：protoVersion=${message.data.protoVersion}，db=${message.data.dbPath}，output=${message.data.outputDir}`,
-      );
-      if (message.data.protoVersion !== PROTOCOL_VERSION) {
-        this.win?.webContents.send("agent:message", {
-          type: "error",
-          message: `协议版本不匹配：agent=${message.data.protoVersion}，client=${PROTOCOL_VERSION}`,
-          fatal: true,
-        });
-        this.kill();
-        return;
-      }
-    }
-    this.win?.webContents.send("agent:message", message.data);
-  }
-
-  respond(id: number, answer: string | string[] | boolean | number): void {
-    this.child?.stdin?.write(`${JSON.stringify({ type: "response", id, answer })}\n`);
-  }
-
-  kill(): void {
-    this.child?.kill("SIGTERM");
-    this.child = null;
-  }
-}
-
-const agentProcess = new AgentProcess();
+  },
+  onMessage: (message) => BrowserWindow.getAllWindows()[0]?.webContents.send("agent:message", message),
+  onExit: (code) => BrowserWindow.getAllWindows()[0]?.webContents.send("agent:exit", code),
+});
 
 // WSL2 / 虚拟桌面环境下 GPU 进程与 sandbox 初始化失败会直接 FATAL，禁用后以软件渲染运行
 // （本地单机应用、渲染进程不加载远程内容，风险可控；打包分发时再评估恢复 sandbox）
@@ -320,9 +250,9 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
-ipcMain.handle("agent:start", (_event, options?: AgentStartOptions) => {
+ipcMain.handle("agent:start", async (_event, options?: AgentStartOptions) => {
   const win = BrowserWindow.getAllWindows()[0];
-  if (win) agentProcess.start(win, options ?? { mode: "create" });
+  if (win) await agentProcess.start(options ?? { mode: "create" });
 });
 
 ipcMain.handle("agent:respond", (_event, id: number, answer: string | string[] | boolean | number) => {
@@ -330,8 +260,8 @@ ipcMain.handle("agent:respond", (_event, id: number, answer: string | string[] |
 });
 
 // 中断 = 终止 agent 子进程（v1 无优雅取消协议；state 已增量落库）
-ipcMain.handle("agent:stop", () => {
-  agentProcess.kill();
+ipcMain.handle("agent:stop", async () => {
+  await agentProcess.kill();
 });
 
 /** 模型设置读写（设置弹窗）：明文 JSON 于 userData，保存结果原样回传（含规范化后的值） */

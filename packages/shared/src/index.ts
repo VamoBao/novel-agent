@@ -1,4 +1,5 @@
 export { worldviewSchema, type Worldview } from "./worldview";
+export { workflowRunSummarySchema, type WorkflowRunSummary } from "./workflow-run";
 export { characterSchema, type Character } from "./character";
 export {
   characterFieldPathSchema,

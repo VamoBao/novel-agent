@@ -137,6 +137,25 @@ export function plantChapterForeshadows(options: {
   const store = options.foreshadowStore ?? getDefaultForeshadowStore();
   const characters = options.characters.map((c) => ({ id: c.id, name: c.character.basicInfo.name }));
   const chapterOrder = buildChapterOrder(options.allChapterNodes);
+  // 清单序号固定指向确认时的 ID，不能重新查询未绑清单后按下标匹配。
+  // 业务数据则取执行时的最新记录；恢复前用户的编辑/删除应优先保留。
+  const initialTargets = new Map(
+    [...options.unbound, ...options.recoverable].map((target) => [target.id, store.getForeshadow(target.id)]),
+  );
+  const currentTargets = new Map(initialTargets);
+  const resolveTarget = (snapshot: StoredForeshadow, action: string): StoredForeshadow | undefined => {
+    const initial = initialTargets.get(snapshot.id);
+    if (!initial) {
+      options.channel.notify(`⚠️ 伏笔${action}跳过（已被删除）：${snapshot.foreshadow.surfaceAction}`);
+      return undefined;
+    }
+    // 同时比较数据和时间戳：同毫秒内的编辑不能漏检，值未变的显式编辑也不覆盖。
+    if (initial.novelId !== options.novelId || JSON.stringify(initial) !== JSON.stringify(snapshot)) {
+      options.channel.notify(`⚠️ 伏笔${action}跳过（已被编辑，保留最新设定）：${initial.foreshadow.surfaceAction}`);
+      return undefined;
+    }
+    return currentTargets.get(snapshot.id);
+  };
   let created = 0;
   let skipped = 0;
   let bound = 0;
@@ -173,9 +192,14 @@ export function plantChapterForeshadows(options: {
     created += 1;
   }
   for (const binding of options.bindings) {
-    const target = options.unbound[binding.index - 1];
-    if (!target) {
+    const snapshot = options.unbound[binding.index - 1];
+    if (!snapshot) {
       options.channel.notify(`⚠️ 伏笔绑定跳过（序号 ${binding.index} 越界，清单共 ${options.unbound.length} 条）`);
+      skipped += 1;
+      continue;
+    }
+    const target = resolveTarget(snapshot, "绑定");
+    if (!target) {
       skipped += 1;
       continue;
     }
@@ -199,7 +223,7 @@ export function plantChapterForeshadows(options: {
         continue;
       }
     }
-    store.updateForeshadow(target.id, { appearChapterId: chapter.id });
+    currentTargets.set(target.id, store.updateForeshadow(target.id, { appearChapterId: chapter.id }));
     options.channel.notify(`🔗 伏笔已绑定登场章：${target.foreshadow.surfaceAction}（${chapter.name}）`);
     bound += 1;
   }
@@ -207,9 +231,14 @@ export function plantChapterForeshadows(options: {
   // 回收绑定：同伏笔多条指令合并为一组回收章后一次 patch（多步回收）
   const recoverTargets = new Map<string, string[]>();
   for (const binding of options.recoverBindings) {
-    const target = options.recoverable[binding.index - 1];
-    if (!target) {
+    const snapshot = options.recoverable[binding.index - 1];
+    if (!snapshot) {
       options.channel.notify(`⚠️ 伏笔回收绑定跳过（序号 ${binding.index} 越界，清单共 ${options.recoverable.length} 条）`);
+      skipped += 1;
+      continue;
+    }
+    const target = resolveTarget(snapshot, "回收绑定");
+    if (!target) {
       skipped += 1;
       continue;
     }
@@ -238,12 +267,12 @@ export function plantChapterForeshadows(options: {
     recoverTargets.set(target.id, list);
   }
   for (const [foreshadowId, chapterIds] of recoverTargets) {
-    const target = options.recoverable.find((f) => f.id === foreshadowId);
+    const target = currentTargets.get(foreshadowId);
     if (!target) continue;
     const names = chapterIds
       .map((cid) => options.chapterNodes.find((c) => c.id === cid)?.name ?? cid)
       .join("、");
-    store.updateForeshadow(foreshadowId, { recoverChapterIds: chapterIds });
+    currentTargets.set(foreshadowId, store.updateForeshadow(foreshadowId, { recoverChapterIds: chapterIds }));
     options.channel.notify(`♻ 伏笔已绑定回收章：${target.foreshadow.surfaceAction}（${names}）`);
     recoverBound += chapterIds.length;
   }

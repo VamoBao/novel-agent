@@ -7,6 +7,7 @@ import { outlineNodeTypeSchema } from "./outline-node";
 import { styleReferenceSchema } from "./style-reference";
 import { worldviewSchema } from "./worldview";
 import { novelCreationParamsSchema } from "./novel";
+import { workflowRunSummarySchema } from "./workflow-run";
 import {
   chapterLengthBoundSchema,
   stylePassScoreSchema,
@@ -120,6 +121,7 @@ export type StyleReferenceEntry = z.infer<typeof styleReferenceEntrySchema>;
 
 /** 单本小说全量资料：结构数据（世界观 / 角色 / 大纲节点 / 正文 / 伏笔）均可缺失（对应创作中途尚未落库的部分） */
 export const novelDetailSchema = z.object({
+  pendingRuns: z.array(workflowRunSummarySchema).optional().describe("未完成的创作主流程；旧载荷缺省表示无恢复入口"),
   novel: novelListItemSchema.extend({
     genre: novelCreationParamsSchema.shape.genre.default(null),
     narrativePov: novelCreationParamsSchema.shape.narrativePov.default(null),

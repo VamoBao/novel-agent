@@ -1,3 +1,4 @@
+import { modelMessageSchema } from "ai";
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,7 +10,9 @@ let textScript: ScriptedTurn[][] = [];
 let lastPrompt = "";
 type MockTool = { execute: (input: never, options: unknown) => Promise<unknown> };
 
+const sdkModelMessageSchema = modelMessageSchema;
 mock.module("ai", () => ({
+  modelMessageSchema: sdkModelMessageSchema,
   tool: (spec: unknown) => spec,
   // runReactAgent 将 prompt 原文包在 messages[0].content 传入，记录之供断言
   generateText: async ({

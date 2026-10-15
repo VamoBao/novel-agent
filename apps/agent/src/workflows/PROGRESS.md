@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-15 [feat] 三条创作主流程接入 workflow-cache / resume-workflow：确认产物先缓存，节点入库与步骤标记共事务，失败建卡重新 diff，继续补完角色/伏笔；create outlined 状态不再提前跳过未完成收尾，plan 已建章可继续，regen 不重复升版，版本漂移拒绝。绑定保持原序号→ID，执行时重读伏笔并保留暂停期间编辑。主步骤恢复，未完成子 Agent 从保存输入重跑；SDK 原生消息用于追溯。跨模块主记录见根 PROGRESS.md 同日「主流程缓存与恢复」。AC：全量 typecheck / lint / 590 项测试通过，含重开库恢复、事务回滚、用户编辑与版本隔离回归，独立复审通过。
+
 - 2026-10-15 [fix] 伏笔绑定命名 prompt 约束（用户指定仅先改 prompt）：大纲要求本次全书幕名唯一、跨部不重名；章节规划要求本幕章名唯一、允许不同幕重名；提交前检查并同步改写伏笔 actName / recoverActName / chapterName 引用，明确排序号不能消除按名称绑定的歧义。未增加 schema/数据库强校验，不能保证模型始终遵守。AC：typecheck / lint / 全量 545 项测试通过；未调用真实模型。主流程缓存与最小消息模型仍在需求讨论，不计为已实现。
 
 - 2026-10-15 [feat] 叙事视角创作条件：createNovel 在「类型」后新增【2/6】视角步骤（静态菜单 第一人称 / 第三人称限知 / 第三人称全知 / 多视角轮换 + 自定义，选完即存 novels.narrative_pov，后续步骤序号顺延），NovelParams 与 OutlineContext 增 narrativePov；大纲 Agent system prompt 增视角要求（限知视角的信息遮蔽与揭示节奏、多视角轮换在幕梗概体现切换安排、全书不得漂移）、参数 JSON 自动携带（regen-outline 复用库内值、历史省略）；章节规划 prompt 与 write-chapter【小说】块各增视角行（未采集零注入）。AC：typecheck / lint / 全量 545 用例通过（本模块净增 create-novel 视角应答与落库断言、regen 视角上下文断言、plan-act-chapters 视角行进 prompt 断言、write-chapter 视角注入两态）；真实模型效果待人工验收。数据层 20→21 迁移与 stage 枚举 / StageBar 七阶段见根 PROGRESS 与 DECISIONS 当日条目。
@@ -16,9 +18,9 @@
 
 - 2026-10-14 [feat] 写作偏好两级配置（章节篇幅 + 文风合格线）：writeChapter 在组上下文前解析生效值——`providers/writing-prefs.ts` 的 resolveSystemWritingPrefs 读 NOVEL_CHAPTER_LENGTH_MIN/MAX + NOVEL_STYLE_PASS_SCORE（非法值静默归 null），shared resolveChapterLength / resolveStylePassScore 按「小说级 novels 行 > 系统级 > 内置默认 2000~3000 字 / 80 分」解析（篇幅 min/max 整体覆盖、半设乱序防御性跳过）；写作 prompt 篇幅条用生效值、chapter-review 文风合格线参数化（input.stylePassScore → 评分 prompt / isReportPassing / formatRevisionBlock，内置默认由 90 改为 80）、Options 增 systemWritingPrefs 注入（缺省读环境变量）、小说级覆盖生效时 notify 通报。AC：typecheck 3 工程 / lint / 全量 529 用例通过（本模块净增 writing-prefs 单测 3 + chapter-review 阈值用例 + write-chapter 偏好两态）；真实模型文学效果待人工验收。数据层 19→20 迁移、query CLI set-writing-prefs 与客户端设置入口见根 PROGRESS 与 DECISIONS 当日条目。
 
-- 2026-10-14 [feat] 伏笔最终回收判断与 eval：复用 resolveChapterTreePosition 的目标树版本全书章序，去重回收点取最大者为最终收尾章（不依赖数组顺序、幕内 sort 或 recoveryStatus）；前段标阶段回收保留核心真相，最终章要求完整揭露真相、解释表面行为联系并收尾，同源注入初稿/修订/内容审校；缺失或跨版回收点不猜测最终点。同章种收、登场资料缺失及归档目标仍有正确阶段要求。最终收尾优先于概述中的延后揭露描述，summary 不得仅因此报偏离；未收尾返回 foreshadow 整改项并进入既有三轮修订，保底保存/警告策略保持。AC：新增 8 项回归先红后绿，覆盖无序重复、跨部跨幕、版本隔离、异常降级及未收尾→整改→修订稿入库；typecheck / lint / 全量 507 项通过，独立审查提出的优先级冲突修复后复审关闭。未调用真实模型验证文学效果；中间章持续约束与本章位置展示仍在待办。
-
 ## 历史归档
+
+- 2026-10-14 [feat] 伏笔最终回收判断与 eval 已归档：基于目标版本全书章序识别最终回收，阶段回收与最终揭露分别约束，写作和内容审校同源；实现/测试详见 foreshadow-context.ts 与 Git 历史。
 
 - 2026-10-15 历史滚动摘要：2026-10-13 章节登场人物 ID 绑定（chapter-cast-intake 与上下文按阵容收窄）、角色编辑陈旧可见性（后由迁移影响范围判定接替），原验收见根记录与 Git 历史；本次归并 2026-10-14 Agent 模型 OpenAI 兼容接入的模块记录（主记录见根 PROGRESS）。；本次归并：2026-10-13 固定角色基准与迁移上下文模块、2026-10-14 迁移计划归属审查修复（完整验收见根进度与 Git 历史）。
 
@@ -44,7 +46,7 @@
 ## 已知 Bug
 
 - （非阻塞）deepseek-flash 在主角归一化时可能小幅补全用户未提及字段——本模块角色 Agent 的「确认门」兜底，用户答 n 可重新描述；换更强模型可进一步降低漂移
-- （限制，非 Bug）ID 续作/恢复路径目前仅「检测到已有 state 直接返回」，未接入分步恢复；依赖 NovelState 持久化（见待办）
+- （恢复边界）主流程按已持久化步骤恢复；失败子 Agent 的内部问答从已保存输入重新开始，SDK 消息暂只留作追溯。正文生成与角色润色未接入恢复。
 
 ## 待办与后续接入点
 
@@ -69,7 +71,7 @@
 - 章节规划修订流：同一幕重复规划章节需先降级旧章（当前重复保存被唯一索引拒绝——客户端幕卡已按「已规划隐藏入口」规避；大纲整树重生成已有版本切换流可参照）
 - ~~大纲重新生成的多版本流~~（2026-09-25 完成：`saveOutlineTreeNewVersion` 降级旧树与旧章、新树 max+1 当前；历史版本行保留在库）
 - 历史版本浏览 / 切换 UI：重生成归档的旧版行仅存于库（listOutlineNodes currentOnly 不见），客户端无查看/回切界面
-- NovelState 整体 SQLite 化：state 仍为内存态（`memoryNovelStateStore`），`store` 已参数化可直接替换实现
+- NovelState 内存接口保留；主流程已由 workflow_steps 重建状态并恢复，不再依赖内存常驻。更细的子 Agent 内部现场恢复留待后续设计
 - 未来写作工作流：按章节概述生成正文并经 `document_id` 关联（documents 表落地后补外键）
 
 

@@ -1,4 +1,5 @@
 import { unlinkSync } from "node:fs";
+import { WorkflowRunStore } from "./state/workflow-run-store";
 import { join } from "node:path";
 import {
   characterEntrySchema,
@@ -152,6 +153,10 @@ export function buildNovelDetail(
     .listStyleReferences(novelId)
     .map(toStyleReferenceEntry);
   return novelDetailSchema.parse({
+    pendingRuns: new WorkflowRunStore(db).listPending(novelId).map((run) => ({
+      id: run.id, kind: run.kind, targetId: run.targetId, status: run.status,
+      error: run.error, updatedAt: run.updatedAt,
+    })),
     novel: {
       ...toListItem(novel),
       genre: novel.genre,
@@ -513,6 +518,9 @@ function main(argv: string[]): number {
       case "list":
         process.stdout.write(`${JSON.stringify(buildNovelList(db))}\n`);
         return 0;
+      case "list-runs":
+        process.stdout.write(`${JSON.stringify(new WorkflowRunStore(db).listPending(novelId))}\n`);
+        return 0;
       case "get":
         if (!novelId) break;
         process.stdout.write(`${JSON.stringify(buildNovelDetail(db, novelId))}\n`);
@@ -594,7 +602,7 @@ function main(argv: string[]): number {
     db.close();
   }
   process.stderr.write(
-    "用法：bun run apps/agent/src/query.ts <list | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id> | set-writing-prefs <novelId> <偏好JSON> | add-character <novelId> <角色卡JSON> | update-foreshadow <novelId> <foreshadowId> <伏笔JSON> | save-migration <novelId> <characterId> <提交JSON> | add-migration <novelId> <characterId> <迁移JSON> | update-migration <novelId> <migrationId> <patchJSON> | confirm-migration <novelId> <migrationId> | cancel-migration <novelId> <migrationId> | add-style <novelId> <文风JSON> | update-style <novelId> <styleId> <文风JSON> | delete-style <styleId>>\n",
+    "用法：bun run apps/agent/src/query.ts <list | list-runs [novelId] | get <id> | rename <id> <name> | pin <id> | unpin <id> | favorite <id> | unfavorite <id> | delete <id> | set-writing-prefs <novelId> <偏好JSON> | add-character <novelId> <角色卡JSON> | update-foreshadow <novelId> <foreshadowId> <伏笔JSON> | save-migration <novelId> <characterId> <提交JSON> | add-migration <novelId> <characterId> <迁移JSON> | update-migration <novelId> <migrationId> <patchJSON> | confirm-migration <novelId> <migrationId> | cancel-migration <novelId> <migrationId> | add-style <novelId> <文风JSON> | update-style <novelId> <styleId> <文风JSON> | delete-style <styleId>>\n",
   );
   return 1;
 }

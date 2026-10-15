@@ -60,6 +60,11 @@ export class NovelStore {
   /** 共享数据库连接构造（与其他 store 同库不同表） */
   constructor(private readonly db: Database) {}
 
+  /** 与步骤缓存共用连接，使业务写入和完成标记处于同一事务。 */
+  get database(): Database {
+    return this.db;
+  }
+
   static open(path: string = DEFAULT_DB_PATH): NovelStore {
     return new NovelStore(openDatabase(path));
   }

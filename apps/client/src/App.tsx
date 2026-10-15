@@ -42,6 +42,7 @@ interface OutlineRegenTarget {
 export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [resumeRunId, setResumeRunId] = useState<string | null>(null);
   const [chapterPlan, setChapterPlan] = useState<ChapterPlanTarget | null>(null);
   /** 右栏新建角色态（角色组头「＋」进入；提交/取消/改选节点退出） */
   const [creatingCharacter, setCreatingCharacter] = useState(false);
@@ -183,6 +184,11 @@ export function App() {
   /** 创作完成：回浏览页 → 刷新书库 → 自动选中新作（列表已含新作时） */
   const handleFinished = (novelId: string): void => {
     setCreating(false);
+    setResumeRunId(null);
+    setSelection(null);
+    setCreatingCharacter(false);
+    setCreatingStyle(false);
+    if (selectedId === novelId) void reloadDetail(novelId);
     void refreshList().then((list) => {
       if (list?.some((novel) => novel.id === novelId)) setSelectedId(novelId);
     });
@@ -191,7 +197,10 @@ export function App() {
   /** 返回书库：终止 agent（已增量落库）并刷新书库（中途成果可见） */
   const handleCloseCreation = (): void => {
     setCreating(false);
+    setResumeRunId(null);
+    setSelection(null);
     void refreshList();
+    if (selectedId) void reloadDetail(selectedId);
   };
 
   /** 幕卡「规划本幕章节」：进入独立章节规划页（目标幕定位自当前选中小说） */
@@ -308,10 +317,14 @@ export function App() {
   };
 
   // 会话页：独立整页呈现（不带浏览页的汉堡 / 三栏结构），与浏览页互斥
-  if (creating) {
+  if (creating || resumeRunId) {
     return (
       <div className="app create-app">
-        <CreationFlow onFinished={handleFinished} onClose={handleCloseCreation} />
+        <CreationFlow
+          resumeRunId={resumeRunId ?? undefined}
+          onFinished={handleFinished}
+          onClose={handleCloseCreation}
+        />
       </div>
     );
   }
@@ -381,6 +394,26 @@ export function App() {
           />
         </aside>
         <nav className="tree-pane">
+          {detail?.novel.id === selectedId && !detailLoading && !detailError && detail.pendingRuns?.length ? (
+            <div className="structure">
+              <p className="hint">未完成的创作流程</p>
+              {detail.pendingRuns.map((run) => {
+                const actName = run.kind === "plan-chapters"
+                  ? detail.outlineNodes.find((node) => node.id === run.targetId)?.name
+                  : undefined;
+                const label = run.kind === "create"
+                  ? "继续新建小说"
+                  : run.kind === "plan-chapters"
+                    ? `继续本幕章节规划${actName ? ` · ${actName}` : ""}`
+                    : "继续大纲重生成";
+                return (
+                  <button key={run.id} className="tree-node" onClick={() => setResumeRunId(run.id)}>
+                    ▶ {label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
           <StructureTreePanel
             detail={detail}
             loading={detailLoading}

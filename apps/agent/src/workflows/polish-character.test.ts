@@ -1,3 +1,4 @@
+import { modelMessageSchema } from "ai";
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,7 +21,9 @@ type GenerateObjectArgs = { model: unknown; schema: unknown; prompt: string };
 let generateObjectCalls: GenerateObjectArgs[] = [];
 let generateObjectResult: Character | undefined;
 
+const sdkModelMessageSchema = modelMessageSchema;
 mock.module("ai", () => ({
+  modelMessageSchema: sdkModelMessageSchema,
   tool: (spec: unknown) => spec,
   generateText: async () => {
     throw new Error("润色工作流不应调用 generateText");
