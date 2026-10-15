@@ -14,6 +14,7 @@ export {
   saveCharacterMigrationSchema,
   normalizeMigrationValue,
   migrationValueError,
+  newMigrationValueError,
   readCharacterField,
   applyCharacterField,
   type CharacterFieldPath,

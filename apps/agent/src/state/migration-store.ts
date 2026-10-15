@@ -6,6 +6,7 @@ import {
   characterMigrationSchema,
   migrationValueError,
   newCharacterMigrationSchema,
+  newMigrationValueError,
   normalizeMigrationValue,
   readCharacterField,
   saveCharacterMigrationSchema,
@@ -213,7 +214,8 @@ export class CharacterMigrationStore {
   }
 
   /**
-   * 新建迁移（草案）：服务端校验字段值与章节区间、派生旧值、原子分配 sequence。
+   * 新建迁移（草案）：目标值一律非空（新增表达一次变化必须有目标，清空可选字段经编辑 patch 实现），
+   * 服务端校验字段值与章节区间、派生旧值、原子分配 sequence。
    * 草案允许起始章 / 诱因 / 过渡描述留空（确认时补齐）。
    */
   addMigration(
@@ -227,6 +229,8 @@ export class CharacterMigrationStore {
       const field = validated.migrateField;
       const newValue = normalizeMigrationValue(validated.newValue);
       this.assertFieldValue(field, newValue);
+      const createValueError = newMigrationValueError(newValue);
+      if (createValueError) throw new Error(createValueError);
 
       const range = this.resolveRange(
         novelId,

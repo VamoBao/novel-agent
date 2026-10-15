@@ -119,16 +119,30 @@ describe("CharacterMigrationStore 草案创建", () => {
     expect(created.migration.startChapterId).toBe(chapters[3]!.id);
   });
 
-  test("必填字段目标值不可为空；可选字段可清空", async () => {
+  test("新增迁移目标值一律不可为空：必填与可选字段、空白与 null 均拒绝且零写入", async () => {
     const { store, character } = await setup();
     expect(() =>
       store.addMigration(NOVEL_ID, character.id, { migrateField: "core.desire", newValue: "  " }),
     ).toThrow("必填");
-    const cleared = store.addMigration(NOVEL_ID, character.id, {
+    expect(() =>
+      store.addMigration(NOVEL_ID, character.id, { migrateField: "personality", newValue: null }),
+    ).toThrow("目标值不能为空");
+    expect(() =>
+      store.addMigration(NOVEL_ID, character.id, { migrateField: "personality", newValue: "   " }),
+    ).toThrow("目标值不能为空");
+    expect(store.listMigrations(NOVEL_ID)).toEqual([]);
+  });
+
+  test("可选字段清空经编辑实现：patch newValue null 生效且递增修订", async () => {
+    const { store, character } = await setup();
+    const draft = store.addMigration(NOVEL_ID, character.id, {
       migrateField: "personality",
-      newValue: null,
+      newValue: "谨慎",
     });
-    expect(cleared.migration.newValue).toBeNull();
+    const updated = store.updateMigration(NOVEL_ID, draft.id, { newValue: null });
+    expect(updated.migration.newValue).toBeNull();
+    expect(updated.migration.revision).toBe(2);
+    expect(store.listMigrationVersions(draft.id)).toHaveLength(1);
   });
 
   test("角色不存在 / 异小说角色被拒", async () => {

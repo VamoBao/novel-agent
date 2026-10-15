@@ -7,6 +7,7 @@ import {
   characterMigrationSchema,
   newCharacterMigrationSchema,
   migrationValueError,
+  newMigrationValueError,
   normalizeMigrationValue,
   readCharacterField,
 } from "./character-migration";
@@ -63,6 +64,15 @@ describe("character-migration schema", () => {
     expect(migrationValueError("core.desire", "   ")).toContain("必填");
     expect(migrationValueError("personality", null)).toBeNull();
     expect(migrationValueError("personality", "谨慎")).toBeNull();
+  });
+
+  test("newMigrationValueError：新增迁移目标值一律不可为空（不区分必填 / 可选字段）", () => {
+    expect(newMigrationValueError("谨慎")).toBeNull();
+    expect(newMigrationValueError("  谨慎  ")).toBeNull();
+    expect(newMigrationValueError("   ")).toBe("目标值不能为空");
+    expect(newMigrationValueError("")).toBe("目标值不能为空");
+    expect(newMigrationValueError(null)).toBe("目标值不能为空");
+    expect(newMigrationValueError(undefined)).toBe("目标值不能为空");
   });
 
   test("readCharacterField / applyCharacterField 往返：每个字段都可读可写", () => {

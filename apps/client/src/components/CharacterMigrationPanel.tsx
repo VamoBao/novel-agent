@@ -76,6 +76,7 @@ interface MigrationFormProps {
 /**
  * 迁移编辑 / 新建表单：字段（新建时可改，编辑态只读）、目标值、起止章、诱因与过渡描述；
  * 旧值只读（服务端派生）。草案可保存或原子保存并确认；已确认记录仅保存修改。
+ * 新建目标值一律必填（新增表达一次变化必须有目标），编辑可选字段留空 = 清空；
  * 必填项、区间与全链校验由服务端复核，失败零写入并原样回显错误。
  */
 function MigrationForm({
@@ -103,9 +104,12 @@ function MigrationForm({
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  /** 客户端预校验（服务端仍会复核）：必填目标值、起止章顺序 */
+  /** 客户端预校验（服务端仍会复核）：新建目标值一律必填、编辑必填字段不可清空、起止章顺序 */
   const localError = (): string | null => {
-    if (newValueMissing && spec.required) return `字段「${spec.label}」为必填，目标值不能为空`;
+    if (newValueMissing) {
+      if (entry === undefined) return "目标值不能为空";
+      if (spec.required) return `字段「${spec.label}」为必填，目标值不能为空`;
+    }
     if (form.endChapterId !== "" && form.startChapterId === "") return "结束章不能在没有起始章时绑定";
     if (form.startChapterId !== "" && form.endChapterId !== "") {
       const start = order.get(form.startChapterId);
@@ -179,13 +183,19 @@ function MigrationForm({
         </div>
         <div className="field">
           <label>
-            目标值{spec.required ? <span className="req"> *</span> : null}
+            目标值{entry === undefined || spec.required ? <span className="req"> *</span> : null}
           </label>
           <textarea
             rows={2}
             value={form.newValue}
             disabled={busy}
-            placeholder={spec.required ? "必填字段的目标值不能为空" : "留空表示清空该可选字段"}
+            placeholder={
+              entry === undefined
+                ? "目标值不能为空"
+                : spec.required
+                  ? "必填字段的目标值不能为空"
+                  : "留空表示清空该可选字段"
+            }
             onChange={(e) => setField("newValue", e.target.value)}
           />
         </div>

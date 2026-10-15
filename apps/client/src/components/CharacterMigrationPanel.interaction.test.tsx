@@ -136,9 +136,23 @@ describe("角色迁移表单交互与真实数据库副作用", () => {
     expect(f.refreshes()).toBe(1);
   });
 
-  test("新建确认失败与重复提交：不留下草案，取消表单也没有写入", async () => {
+  test("新增空目标值被客户端拦截（可选字段同样必填）：零请求零写入", async () => {
     const f = await fixture();
     await click("＋");
+    await submitPrimary();
+    expect(dom!.document.querySelector(".form-error")?.textContent).toContain("目标值不能为空");
+    expect(f.store.listMigrations(novelId)).toHaveLength(1);
+    expect(f.refreshes()).toBe(0);
+    await click("保存");
+    expect(dom!.document.querySelector(".form-error")?.textContent).toContain("目标值不能为空");
+    expect(f.store.listMigrations(novelId)).toHaveLength(1);
+    expect(f.refreshes()).toBe(0);
+  });
+
+  test("新建确认失败与重复提交：不留下草案，取消表单也没有写入", async () => {
+    const f = await fixture();
+    // 复制为新草案：目标值随源记录带入（非空）、章节清空——直达服务端起始章确认校验
+    await click("复制为新草案");
     await submitPrimary();
     expect(dom!.document.querySelector(".form-error")?.textContent).toContain("起始章");
     expect(f.store.listMigrations(novelId)).toHaveLength(1);

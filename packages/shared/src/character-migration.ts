@@ -100,7 +100,7 @@ export const characterMigrationSchema = z.object({
 });
 export type CharacterMigration = z.infer<typeof characterMigrationSchema>;
 
-/** 新增迁移（草案）入参：字段 + 目标值必填，其余可空（确认时补齐） */
+/** 新增迁移（草案）入参：字段 + 目标值必填——目标值一律非空（经 newMigrationValueError 校验，清空可选字段走编辑 patch），其余可空（确认时补齐） */
 export const newCharacterMigrationSchema = z.object({
   migrateField: characterFieldPathSchema.refine((field) => field !== "basicInfo.name", "姓名为固定项，不允许迁移修改"),
   newValue: z.string().nullable(),
@@ -156,7 +156,7 @@ export function normalizeMigrationValue(value: string | null | undefined): strin
   return trimmed.length > 0 ? trimmed : null;
 }
 
-/** 目标值校验：必填字段不可为空；返回错误信息或 null（合法） */
+/** 目标值校验（编辑 / 确认路径）：必填字段不可为空，可选字段留空 = 清空；返回错误信息或 null（合法） */
 export function migrationValueError(
   field: CharacterFieldPath,
   value: string | null | undefined,
@@ -168,6 +168,11 @@ export function migrationValueError(
       : null;
   }
   return null;
+}
+
+/** 目标值校验（新增路径）：一律不可为空——新增表达一次变化必须有目标，清空可选字段经编辑 patch 实现。返回错误信息或 null（合法） */
+export function newMigrationValueError(value: string | null | undefined): string | null {
+  return normalizeMigrationValue(value) === null ? "目标值不能为空" : null;
 }
 
 /** 从角色卡读某字段的当前值（可选字段缺省为 null） */
