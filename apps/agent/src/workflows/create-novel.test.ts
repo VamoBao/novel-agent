@@ -134,11 +134,12 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
       { origin: "宗门垄断灵脉", impact: "散修如草芥", idealResolution: "灵脉归于众生" },
     ];
 
-    // 用户应答脚本（FIFO）：跳过命名 → 选仙侠 → 选受众 → 跳过补充 → 世界观描述 →
+    // 用户应答脚本（FIFO）：跳过命名 → 选仙侠 → 选叙事视角 → 选受众 → 跳过补充 → 世界观描述 →
     // 首个角色描述 → 7 次字段确认 + 整卡确认 → 结束角色 → 冲突描述 → 幕数/部数 → 大纲确认
     const channel = new FakeChannel([
       "",
       "仙侠",
+      "第三人称限知",
       ["都市青年读者——节奏明快的成长与逆袭"],
       "",
       "九州大陆，灵脉断绝的修仙世界",
@@ -195,9 +196,12 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     expect(novelStore.getNovel(state.id)?.description).toBe(outlineFixture.logline);
     expect(novelStore.getNovel(state.id)).toMatchObject({
       genre: "仙侠",
+      narrativePov: "第三人称限知",
       audience: ["都市青年读者"],
       coreConflict: { origin: "宗门垄断灵脉", impact: "散修如草芥", idealResolution: "灵脉归于众生" },
     });
+    // 视角随完整参数进内存 state（大纲 Agent 上下文同源）
+    expect(state.params).toMatchObject({ genre: "仙侠", narrativePov: "第三人称限知" });
     const worldviewStore = new WorldviewStore(db);
     expect(worldviewStore.getWorldview(state.id)?.worldview.taboos).toEqual(worldviewFixture.taboos);
     const characterStore = new CharacterStore(db);
@@ -268,6 +272,7 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     const channel = new FakeChannel([
       "",
       "仙侠",
+      "第三人称限知",
       ["都市青年读者——节奏明快的成长与逆袭"],
       "",
       "九州大陆，灵脉断绝的修仙世界",
@@ -328,9 +333,10 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
   const audienceChoice = "都市青年读者——节奏明快的成长与逆袭";
   const conflict = { origin: "宗门垄断灵脉", impact: "散修如草芥", idealResolution: "灵脉归于众生" };
   const cases = [
-    { name: "类型后中止", answers: ["", "仙侠", null], expected: { genre: "仙侠", audience: null, coreConflict: null }, withCharacter: false },
-    { name: "受众后中止", answers: ["", "仙侠", [audienceChoice], "重视人物关系", null], expected: { genre: "仙侠", audience: ["都市青年读者", "重视人物关系"], coreConflict: null }, withCharacter: false },
-    { name: "大纲前中止", answers: ["", "仙侠", [audienceChoice], "", "九州大陆", "林恒", ...characterFields.map(() => true), true, "", "宗门垄断灵脉", null], expected: { genre: "仙侠", audience: ["都市青年读者"], coreConflict: conflict }, withCharacter: true },
+    { name: "视角前中止", answers: ["", "仙侠", null], expected: { genre: "仙侠", narrativePov: null, audience: null, coreConflict: null }, withCharacter: false },
+    { name: "视角后中止", answers: ["", "仙侠", "第三人称限知", null], expected: { genre: "仙侠", narrativePov: "第三人称限知", audience: null, coreConflict: null }, withCharacter: false },
+    { name: "受众后中止", answers: ["", "仙侠", "第三人称限知", [audienceChoice], "重视人物关系", null], expected: { genre: "仙侠", narrativePov: "第三人称限知", audience: ["都市青年读者", "重视人物关系"], coreConflict: null }, withCharacter: false },
+    { name: "大纲前中止", answers: ["", "仙侠", "第三人称限知", [audienceChoice], "", "九州大陆", "林恒", ...characterFields.map(() => true), true, "", "宗门垄断灵脉", null], expected: { genre: "仙侠", narrativePov: "第三人称限知", audience: ["都市青年读者"], coreConflict: conflict }, withCharacter: true },
   ];
   for (const scenario of cases) {
     test(`${scenario.name}：已收集创作条件仍绑定小说并可重开读取`, async () => {

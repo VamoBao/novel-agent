@@ -281,6 +281,9 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       "【小说】",
       `书名：${novel.name ?? "未命名小说"}`,
       novel.description ? `一句话简介：${novel.description}` : null,
+      novel.narrativePov
+        ? `叙事视角：${novel.narrativePov}（正文叙述全程保持该视角——人称与信息范围不得中途漂移，限知视角不得写出视角内角色不可知的信息）`
+        : null,
       "",
       "【世界观】",
       JSON.stringify(storedWorldview.worldview),

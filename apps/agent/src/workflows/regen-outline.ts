@@ -89,6 +89,7 @@ export async function regenerateOutline(options: RegenOutlineOptions): Promise<R
       worldview: storedWorldview.worldview,
       characters: characters.map((c) => c.character),
       ...(novel.genre !== null ? { genre: novel.genre } : {}),
+      ...(novel.narrativePov !== null ? { narrativePov: novel.narrativePov } : {}),
       ...(novel.audience !== null ? { audience: novel.audience } : {}),
       ...(novel.coreConflict !== null ? { coreConflict: novel.coreConflict } : {}),
     },

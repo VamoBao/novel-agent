@@ -9,6 +9,7 @@ import {
 describe("protocol schemas", () => {
   test("stage 枚举", () => {
     expect(stageSchema.parse("type")).toBe("type");
+    expect(stageSchema.parse("pov")).toBe("pov");
     expect(stageSchema.safeParse("unknown").success).toBe(false);
   });
 

@@ -122,6 +122,7 @@ export type StyleReferenceEntry = z.infer<typeof styleReferenceEntrySchema>;
 export const novelDetailSchema = z.object({
   novel: novelListItemSchema.extend({
     genre: novelCreationParamsSchema.shape.genre.default(null),
+    narrativePov: novelCreationParamsSchema.shape.narrativePov.default(null),
     audience: novelCreationParamsSchema.shape.audience.default(null),
     coreConflict: novelCreationParamsSchema.shape.coreConflict.default(null),
     ...novelWritingPrefsFields,

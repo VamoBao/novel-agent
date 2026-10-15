@@ -111,6 +111,7 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
       novelTitle: novel.name ?? "未命名小说",
       logline: novel.description ?? "",
       theme: readOutlineTheme(novelId),
+      narrativePov: novel.narrativePov ?? undefined,
       partName: part.node.name,
       partSummary: part.node.summary ?? "",
       actName: act.node.name,

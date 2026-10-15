@@ -210,7 +210,7 @@ function createV9Db(path: string): void {
   legacy.close();
 }
 
-describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
+describe("openDatabase 迁移（SCHEMA_VERSION 21)", () => {
   const tempDirs: string[] = [];
 
   afterAll(async () => {
@@ -248,7 +248,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     const recovered = openDatabase(path);
     try {
       expect(tableColumns(recovered, "novels")).toContain("core_conflict");
-      expect(recovered.query("PRAGMA user_version").get()).toEqual({ user_version: 20 });
+      expect(recovered.query("PRAGMA user_version").get()).toEqual({ user_version: 21 });
     } finally { recovered.close(); }
   });
 
@@ -297,7 +297,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
       const db = openDatabase(path);
       try {
         expect(tableColumns(db, "novels")).toContain("core_conflict");
-        expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 20 });
+        expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 21 });
       } finally { db.close(); }
     } finally { race.mockRestore(); }
   });
@@ -322,7 +322,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     const db = openDatabase(path);
     try {
       expect(tableColumns(db, "novels")).toContain("genre");
-      expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 20 });
+      expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 21 });
       expect(db.query("SELECT name, author, description, pinned, favorite, genre, audience, core_conflict FROM novels WHERE id = ?").get(NOVEL_ID)).toEqual({ name: "旧小说", author: "作者", description: "简介", pinned: 1, favorite: 1, genre: null, audience: null, core_conflict: null });
       expect(db.query("SELECT geography, taboos FROM worldviews WHERE novel_id = ?").get(NOVEL_ID)).toEqual({ geography: "九州", taboos: '["不可复活"]' });
       db.prepare("UPDATE novels SET genre = '仙侠', audience = '[]' WHERE id = ?").run(NOVEL_ID);
@@ -373,7 +373,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     const db = openDatabase(path);
     try {
       expect(tableColumns(db, "outlines")).toContain("character_ids");
-      expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(20);
+      expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(21);
       // 迁移只补列不回填：旧章行未绑定（NULL 即「未绑定」语义，正文生成回退全库注入）
       const row = db
         .query("SELECT name, character_ids FROM outlines WHERE id = 'chap-16'")
@@ -385,7 +385,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     }
     const reopened = openDatabase(path);
     try {
-      expect((reopened.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(20);
+      expect((reopened.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(21);
     } finally {
       reopened.close();
     }
@@ -462,7 +462,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     const db = openDatabase(path);
     try {
       expect(tableColumns(db, "characters")).toContain("updated_at");
-      expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(20);
+      expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(21);
       // 回填语义 = 末次变更时刻：编辑过的取最新快照时间，从未编辑的取 created_at
       expect(db.query("SELECT updated_at FROM characters WHERE id = 'char-edited'").get()).toEqual({
         updated_at: "2026-03-01T00:00:00.000Z",
@@ -475,7 +475,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     }
     const reopened = openDatabase(path);
     try {
-      expect((reopened.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(20);
+      expect((reopened.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(21);
     } finally {
       reopened.close();
     }
@@ -518,7 +518,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(20);
+    ).toBe(21);
     db.close();
   });
 
@@ -566,7 +566,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(20);
+    ).toBe(21);
     db.close();
   });
 
@@ -620,7 +620,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(20);
+    ).toBe(21);
     db.close();
   });
 
@@ -664,7 +664,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(20);
+    ).toBe(21);
     db.close();
   });
 
@@ -718,7 +718,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
 
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(20);
+    ).toBe(21);
     db.close();
   });
 
@@ -741,7 +741,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     raw.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(20);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(21);
     const columns = (db.query("PRAGMA table_info(foreshadows)").all() as { name: string }[]).map((c) => c.name);
     expect(columns).toContain("act_node_id");
     const row = db.query("SELECT surface_action, hidden_truth, attention_level, act_node_id FROM foreshadows WHERE id = 'f-1';").get() as Record<string, unknown>;
@@ -797,7 +797,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     legacy.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(20);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(21);
     expect(tableColumns(db, "locations")).toEqual([
       "id",
       "novel_id",
@@ -868,7 +868,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     legacy.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(20);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(21);
     const columns = (db.query("PRAGMA table_info(foreshadows)").all() as { name: string }[]).map((c) => c.name);
     expect(columns).toContain("recover_act_node_id");
     const row = db.query("SELECT surface_action, act_node_id, recover_act_node_id FROM foreshadows WHERE id = 'f-1';").get() as Record<string, unknown>;
@@ -904,7 +904,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     legacy.close();
 
     const db = openDatabase(dbPath);
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(20);
+    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(21);
     // 纯新增表由 CREATE TABLE IF NOT EXISTS 幂等落地，含启用开关 CHECK 与 novel_id 索引
     expect(tableColumns(db, "style_references")).toEqual([
       "id",
@@ -965,7 +965,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     ).toBe(1);
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(20);
+    ).toBe(21);
     db.close();
   });
 
@@ -986,7 +986,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     expect(tableColumns(db, "character_migration_versions")).toContain("migration");
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(20);
+    ).toBe(21);
     db.close();
   });
 
@@ -1071,7 +1071,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
 
     const db = openDatabase(path);
     try {
-      expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(20);
+      expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(21);
       // 主行内容恢复为第一版（基准），version / created_at / updated_at 保持稳定
       const edited = db
         .query("SELECT background, personality, version, created_at, updated_at FROM characters WHERE id = 'char-edited'")
@@ -1142,7 +1142,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
       expect(
         (reopened.query("SELECT COUNT(*) AS c FROM character_migrations").get() as { c: number }).c,
       ).toBe(3);
-      expect((reopened.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(20);
+      expect((reopened.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(21);
     } finally {
       reopened.close();
     }
@@ -1217,7 +1217,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     const db = openDatabase(path);
     try {
       expect(db.query("SELECT name, version FROM characters").all()).toEqual([{ name: "未改角色", version: 1 }]);
-      expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 20 });
+      expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 21 });
     } finally { db.close(); }
   });
 
@@ -1250,7 +1250,7 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
       expect(cols).toContain("chapter_length_min");
       expect(cols).toContain("chapter_length_max");
       expect(cols).toContain("style_pass_score");
-      expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 20 });
+      expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 21 });
       // 迁移只补列不回填：旧小说行 NULL 即「未设置小说级覆盖」
       expect(
         db
@@ -1264,10 +1264,53 @@ describe("openDatabase 迁移（SCHEMA_VERSION 20)", () => {
     }
     const reopened = openDatabase(path);
     try {
-      expect(reopened.query("PRAGMA user_version").get()).toEqual({ user_version: 20 });
+      expect(reopened.query("PRAGMA user_version").get()).toEqual({ user_version: 21 });
       expect(
         reopened.query("SELECT chapter_length_min, chapter_length_max, style_pass_score FROM novels WHERE id = ?").get(NOVEL_ID),
       ).toEqual({ chapter_length_min: 3000, chapter_length_max: 4500, style_pass_score: 85 });
+    } finally {
+      reopened.close();
+    }
+  });
+
+  test("v20 库迁移：novels 补 narrative_pov 列、旧行留 NULL（未采集语义）、版本升 21、重开不重复迁移", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-db-mig21-"));
+    tempDirs.push(dir);
+    const path = join(dir, "v20.db");
+    // 手工构造 v20 形态：novels 含创作条件与写作偏好列但无 narrative_pov
+    const legacy = new Database(path, { create: true });
+    legacy.exec("PRAGMA foreign_keys = ON;");
+    legacy.exec(`
+      CREATE TABLE novels (id TEXT PRIMARY KEY, name TEXT, author TEXT, description TEXT,
+        pinned INTEGER NOT NULL DEFAULT 0, favorite INTEGER NOT NULL DEFAULT 0,
+        genre TEXT, audience TEXT, core_conflict TEXT,
+        chapter_length_min INTEGER, chapter_length_max INTEGER, style_pass_score INTEGER,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      PRAGMA user_version = 20;
+    `);
+    legacy
+      .prepare("INSERT INTO novels VALUES (?, '旧小说', NULL, '旧简介', 1, 0, '仙侠', NULL, NULL, 2500, 4000, 85, ?, ?)")
+      .run(NOVEL_ID, NOW, NOW);
+    legacy.close();
+
+    const db = openDatabase(path);
+    try {
+      expect(tableColumns(db, "novels")).toContain("narrative_pov");
+      expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 21 });
+      // 迁移只补列不回填；既有创作条件与写作偏好数据无损
+      expect(
+        db.query("SELECT genre, narrative_pov, chapter_length_min FROM novels WHERE id = ?").get(NOVEL_ID),
+      ).toEqual({ genre: "仙侠", narrative_pov: null, chapter_length_min: 2500 });
+      db.prepare("UPDATE novels SET narrative_pov = '第三人称限知' WHERE id = ?").run(NOVEL_ID);
+    } finally {
+      db.close();
+    }
+    const reopened = openDatabase(path);
+    try {
+      expect(reopened.query("PRAGMA user_version").get()).toEqual({ user_version: 21 });
+      expect(reopened.query("SELECT narrative_pov FROM novels WHERE id = ?").get(NOVEL_ID)).toEqual({
+        narrative_pov: "第三人称限知",
+      });
     } finally {
       reopened.close();
     }

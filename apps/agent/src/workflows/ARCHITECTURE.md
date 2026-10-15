@@ -10,7 +10,7 @@ apps/agent/src/workflows/
 ├── index.ts                  # 模块出口：createNovel / planActChapters / regenerateOutline /
 │                             #   polishCharacter / writeChapter / collectWorldview /
 │                             #   createOutline / planChapters
-├── create-novel.ts           # 主编排 createNovel：ID 生成 → 参数收集（类型/受众/核心冲突逐项入 novels）→ 大纲生成确认（连带新增角色与伏笔清单）→
+├── create-novel.ts           # 主编排 createNovel：ID 生成 → 参数收集（类型/叙事视角/受众/核心冲突逐项入 novels）→ 大纲生成确认（连带新增角色与伏笔清单）→
 │                             #   入库与落盘 → 新增角色兜底 diff + 自动创建入库 → 伏笔清单挂幕入库 → 会话收尾
 │                             #   （章节规划不自动衔接，由客户端单幕会话逐幕手动发起）
 ├── plan-act-chapters.ts      # 单幕章节规划编排 planActChapters：校验（含世界观已确认）并从库组装上下文
@@ -31,7 +31,8 @@ apps/agent/src/workflows/
 │                             #   客户端「📖 大纲」组头刷新按钮的会话（headless regen-outline 模式）
 ├── write-chapter.ts          # 章节正文生成编排 writeChapter：读库校验（小说/章节点/概述/世界观——
 │                             #   已有正文不再拒绝，getDocumentByChapter 有行即 isRegen 重生成路径）
-│                             #   → 写作偏好生效值解析（resolveSystemWritingPrefs 读系统级环境变量 +
+│                             #   → 叙事视角注入（novels.narrative_pov 随【小说】块带出并要求全程保持，
+│                             #   未采集零注入）→ 写作偏好生效值解析（resolveSystemWritingPrefs 读系统级环境变量 +
 │                             #   shared resolveChapterLength / resolveStylePassScore——小说级 novels 行 >
 │                             #   系统级 > 内置默认 2000~3000 / 80；篇幅 min/max 整体覆盖、半设乱序
 │                             #   防御性跳过；小说级覆盖生效时 notify 通报）
@@ -126,14 +127,16 @@ apps/agent/src/workflows/
     │                         #   结构化入参附 newCharacters 新增角色清单（清单内名字不得重复）与 newForeshadows
     │                         #   伏笔清单（挂幕不挂章，清单内表面行为不得重复）随大纲进确认门连带确认；
     │                         #   产物 OutlineSubmission = outline + newCharacters + newForeshadows；
-    │                         #   入参 OutlineContext 松绑（genre/audience/coreConflict 可选，重生成仅喂库内数据）
+    │                         #   入参 OutlineContext 松绑（genre/narrativePov/audience/coreConflict 可选，重生成仅喂库内数据）；
+    │                         #   system prompt 含叙事视角要求（限知视角的信息遮蔽与揭示节奏、多视角轮换在幕梗概体现切换安排、全书不得漂移）
     │                         #   另导出 outlineSchemaFor（恰好 M 部共 N 幕 refine 强校验）
     ├── chapter-agent.ts      # planChapters：单幕拆章——按幕梗概与情节点推荐章节数量、概述与
     │                         #   逐章登场角色清单（chapters[].characters——库内与新角色全列、
     │                         #   全员必填 role：库内=在本章中的作用 / 新角色=设定级一句话定位），
     │                         #   过用户确认门（save_chapters；chapterPlanSchema 强约束 1~12 章、
     │                         #   每章登场至少 1 人、章内名字不重复）；list_characters 角色库查询工具 +
-    │                         #   prompt 已有角色行与本幕未绑伏笔行（概述尽量点名出场角色、体现伏笔表面
+    │                         #   prompt 已有角色行、叙事视角行（narrativePov 有则带——概述与登场安排
+    │                         #   须与该视角一致）与本幕未绑伏笔行（概述尽量点名出场角色、体现伏笔表面
     │                         #   行为），save_chapters 经 saveChaptersInputSchema 结构化入参（顶层
     │                         #   newCharacters 清单已取消——确认视图的新增角色由 execute 内
     │                         #   collectChapterCharacters + filterNewCharacters 对角色库现查派生，单一事实源）
@@ -225,11 +228,12 @@ apps/agent/src/workflows/
 1. **ID 与初始化**：`generateNovelId()` 在调用任何 Agent / LLM 之前生成；`store.get(id)` 已有记录则直接返回（续作/恢复预留，目前仅原样返回既有 state）；否则 `store.create`（status: initializing）
 2. **命名（可选）**：`channel.askText`（optional），跳过则大纲确认后以大纲标题回填
 3. **novels 行创建**：先于角色/世界观入库（外键顺序），携带用户命名（如有）
-4. **【1/5】类型**：静态热门类型菜单单选 + 自定义输入
-5. **【2/5】受众**：`generateObject`（audienceSuggestionSchema）推断候选 → 用户多选 + 自由补充，只存标签
-6. **【3/5】世界观**：`channel.askText` 初始描述 → `collectWorldview(desc, channel)` → `channel.present(worldview)` → `worldviewStore.saveWorldview`（upsert 入库）
-7. **【4/5】角色**：`for(;;)` 循环（至少一名叙事定位含「主角」的角色）→ `createCharacter(desc, characters, channel)` → `characterStore.addCharacter` 每卡确认后立即增量入库
-8. **【5/5】核心冲突**：自由文本 → `generateObject`（coreConflictSchema）归一化
+4. **【1/6】类型**：静态热门类型菜单单选 + 自定义输入
+5. **【2/6】叙事视角**：静态菜单单选（第一人称 / 第三人称限知 / 第三人称全知 / 多视角轮换）+ 自定义输入，选完即存 novels.narrative_pov（第五项创作条件）
+6. **【3/6】受众**：`generateObject`（audienceSuggestionSchema）推断候选 → 用户多选 + 自由补充，只存标签
+7. **【4/6】世界观**：`channel.askText` 初始描述 → `collectWorldview(desc, channel)` → `channel.present(worldview)` → `worldviewStore.saveWorldview`（upsert 入库）
+8. **【5/6】角色**：`for(;;)` 循环（至少一名叙事定位含「主角」的角色）→ `createCharacter(desc, characters, channel)` → `characterStore.addCharacter` 每卡确认后立即增量入库
+9. **【6/6】核心冲突**：自由文本 → `generateObject`（coreConflictSchema）归一化
 9. **state 落 params**：status → gathering
 10. **幕数与部数**：`askInt` 幕数（3-20，回车默认 5）→ `askInt` 部数（1~幕数，回车默认 1）
 11. **大纲**：`createOutline(params, { novelTitle, actCount, partCount, novelId, characterStore, locationStore }, channel)`（大纲 Agent 配 `list_characters` 角色库查询工具与 `list_locations` 地点库查询工具；save_outline 结构化入参附 newCharacters 新增角色清单、newForeshadows 伏笔清单与 newLocations 新增地点清单——项内名字 / 表面行为 / 名字不得重复，随大纲进确认门连带确认）→ `channel.present(outline full)` 两级完整展示 → `saveOutlineTree` 整树事务入库（部根节点 / 幕子节点，version=1/当前/planned，梗概与关键情节点随节点入列——供写作期按幕内容生成章节大纲）→ `saveOutline` 落盘 `output/<id>.json` → state 收尾与回填（status → outlined；`novelStore.updateNovel`——未命名时 name = outline.title，description = outline.logline）→ **新增地点确定性入库**（置于角色自动入库之前——毫秒级同步代码先行即「与角色同批次」，不并行避免 notify 交错）：`filterNewLocations` 兜底 diff（剔除库内已有名 / 去重 / 空名剔除，空清单跳过）→ `plantNewLocations`（`location-intake.ts`）逐条 addLocation（name + description）并 notify「✨ 地点已入库：…」+ 汇报名单 → **新增角色自动入库**：`filterNewCharacters` 兜底 diff（trim 全等剔除库内已有名、清单内同名去重保留首个、空名剔除——不信任模型的「新增」判定），空清单跳过（零 LLM 调用），非空经 `autoCreateCharacters` 依据世界观与大纲自动填充角色卡逐张入库（notify 通报进度与名单）。auto 块置于收尾回填之后：其抛错（maxSteps 耗尽 / 会话中止）时小说本身已是自洽终态（outlined + 回填完成），不会停留在「半成品」——与 regenerateOutline 失败路径对称；随后**伏笔清单挂幕入库**（置于角色自动入库之后——伏笔清单可能引用本轮自动入库的新角色，服务角色 ID 需角色先入库）：非空时 `plantOutlineForeshadows`（`foreshadow-intake.ts`）确定性创建（幕名→当前版本幕节点、回收幕名→回收幕节点（漂移不阻塞伏笔入库仅留空警告）、服务角色名→角色 ID，未匹配逐条跳过并 notify `⚠️ 伏笔跳过…` 警告不阻塞其余条目），notify「✨ 本次大纲伏笔已入库 N 处（M 处因幕名/角色名未匹配跳过）」，空清单跳过
@@ -282,7 +286,7 @@ apps/agent/src/workflows/
 
 ## 小说创作条件的持久化边界
 
-createNovel 在类型选择、受众多选与补充、核心冲突归一化展示完成时，分别调用 NovelStore.updateNovel 保存 genre / audience / coreConflict；后续中止不撤回已采集结果。regenerateOutline 从小说行读取各非 null 条件传入 OutlineContext；旧小说缺失项省略，沿用大纲 Agent 缺省策略。共享字段 schema、JSON 编解码、迁移与详情契约见根 ARCHITECTURE.md。
+createNovel 在类型选择、叙事视角选择、受众多选与补充、核心冲突归一化展示完成时，分别调用 NovelStore.updateNovel 保存 genre / narrativePov / audience / coreConflict；后续中止不撤回已采集结果。regenerateOutline 从小说行读取各非 null 条件（含叙事视角）传入 OutlineContext；旧小说缺失项省略，沿用大纲 Agent 缺省策略。共享字段 schema、JSON 编解码、迁移与详情契约见根 ARCHITECTURE.md。
 
 ## 伏笔最终回收与审校（2026-10-14）
 

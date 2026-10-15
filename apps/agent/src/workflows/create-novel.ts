@@ -35,6 +35,14 @@ const GENRES = [
   "无限流",
 ] as const;
 
+/** 常见叙事视角（用户也可自定义输入）：大纲结构、章节规划与正文叙述全程遵循 */
+const NARRATIVE_POVS = [
+  "第一人称",
+  "第三人称限知",
+  "第三人称全知",
+  "多视角轮换",
+] as const;
+
 export interface CreateNovelOptions {
   /** 交互通道（终端 / 协议 / 测试替身），业务交互的唯一出口 */
   channel: UiChannel;
@@ -107,12 +115,21 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
 
   // 1. 类型
   channel.stage("type");
-  const genre = await channel.askSelect("【1/5】选择小说类型", GENRES, { allowCustom: true });
+  const genre = await channel.askSelect("【1/6】选择小说类型", GENRES, { allowCustom: true });
   novelStore.updateNovel(id, { genre });
 
-  // 2. 受众（LLM 根据类型推断候选，用户多选 + 可补充）
+  // 2. 叙事视角（静态菜单 + 自定义，选完即存；大纲 / 章节规划 / 正文全程遵循）
+  channel.stage("pov");
+  const narrativePov = await channel.askSelect(
+    "【2/6】选择叙事视角（正文的叙述人称与信息范围）",
+    NARRATIVE_POVS,
+    { allowCustom: true },
+  );
+  novelStore.updateNovel(id, { narrativePov });
+
+  // 3. 受众（LLM 根据类型推断候选，用户多选 + 可补充）
   channel.stage("audience");
-  channel.notify("\n【2/5】目标受众");
+  channel.notify("\n【3/6】目标受众");
   channel.notify("正在根据类型推断典型受众群体…");
   const { object: suggestion } = await generateObject({
     model,
@@ -128,9 +145,9 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
   const audience = [...audienceLabels, ...(supplement.length > 0 ? [supplement] : [])];
   novelStore.updateNovel(id, { audience });
 
-  // 3. 世界观（独立 ReAct Agent 多轮收集）
+  // 4. 世界观（独立 ReAct Agent 多轮收集）
   channel.stage("worldview");
-  channel.notify("\n【3/5】世界观设定");
+  channel.notify("\n【4/6】世界观设定");
   const initialWorldview = await channel.askText(
     "请描述你的世界观构想（一段文字即可，不清楚的地方 AI 会追问）> ",
   );
@@ -141,9 +158,9 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
   worldviewStore.saveWorldview(id, worldview);
   channel.notify("🌍 世界观已入库");
 
-  // 4. 角色设定（ReAct Agent 逐字段确认，至少一名主角）
+  // 5. 角色设定（ReAct Agent 逐字段确认，至少一名主角）
   channel.stage("character");
-  channel.notify("\n【4/5】角色设定");
+  channel.notify("\n【5/6】角色设定");
   const characters: Character[] = [];
   for (;;) {
     const hasProtagonist = characters.some((c) => c.core.narrativeRole.includes("主角"));
@@ -173,9 +190,9 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
     );
   }
 
-  // 5. 核心冲突（自由文本 → schema 归一化）
+  // 6. 核心冲突（自由文本 → schema 归一化）
   channel.stage("conflict");
-  channel.notify("\n【5/5】核心冲突");
+  channel.notify("\n【6/6】核心冲突");
   const conflictDescription = await channel.askText(
     "请描述核心冲突（由来 / 对角色的影响 / 理想的解决结果，写个大概即可）> ",
   );
@@ -189,7 +206,7 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
   novelStore.updateNovel(id, { coreConflict: conflict });
 
   // 参数收集完毕，落 state
-  const params: NovelParams = { genre, audience, worldview, characters, coreConflict: conflict };
+  const params: NovelParams = { genre, narrativePov, audience, worldview, characters, coreConflict: conflict };
   await store.update(id, { status: "gathering", params });
 
   // 大纲结构：幕数（默认 5）→ 部数（默认 1，上限为幕数）

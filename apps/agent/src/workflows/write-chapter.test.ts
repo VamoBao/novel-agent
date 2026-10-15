@@ -225,6 +225,8 @@ describe("writeChapter", () => {
     expect(prompt).toContain("下一章");
     expect(prompt).toContain("宗门来人追查");
     expect(prompt).toContain("2000~3000 字");
+    // 未采集叙事视角（历史小说形态）：prompt 无该行（现状回归）
+    expect(prompt).not.toContain("叙事视角");
 
     // 库内只登记元数据：file_path 相对路径 + 字数；章节点 documentId 回写 + 状态 completed
     const chapter = ctx.outlineStore.getOutlineNode(ctx.chapterNodeId)!;
@@ -470,6 +472,26 @@ describe("writeChapter", () => {
       ...ctx,
     });
     expect(generateTextCalls[0]!.prompt).toContain("篇幅约 1200~1800 字");
+  });
+
+  test("叙事视角注入：采集后随【小说】块进 prompt（全程保持），未采集零注入", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    ctx.novelStore.updateNovel(NOVEL_ID, { narrativePov: "第三人称限知" });
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+
+    await writeChapter({ channel: new FakeChannel([]), novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
+
+    const prompt = generateTextCalls[0]!.prompt;
+    expect(prompt).toContain("叙事视角：第三人称限知");
+    expect(prompt).toContain("正文叙述全程保持该视角");
+    // 位于【小说】块内（书名 / 简介之后，世界观之前）
+    const novelAt = prompt.indexOf("【小说】");
+    const povAt = prompt.indexOf("叙事视角：");
+    const worldviewAt = prompt.indexOf("【世界观】");
+    expect(povAt).toBeGreaterThan(novelAt);
+    expect(povAt).toBeLessThan(worldviewAt);
   });
 
   test("跨幕上一章衔接：前章正文可用时注入 prompt，超预算回退概述", async () => {

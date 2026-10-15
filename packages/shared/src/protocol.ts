@@ -7,9 +7,10 @@ import { viewSchema } from "./views";
 /** stdio JSON 行协议版本；hello 时不一致由 client 拒绝继续 */
 export const PROTOCOL_VERSION = 1;
 
-/** 创作流程阶段（client 侧 StageBar 进度展示用）；chapter 为单幕章节规划会话阶段，不进新建小说全流程 */
+/** 创作流程阶段（client 侧 StageBar 进度展示用）；pov 为叙事视角步骤（类型之后），chapter 为单幕章节规划会话阶段，不进新建小说全流程 */
 export const stageSchema = z.enum([
   "type",
+  "pov",
   "audience",
   "worldview",
   "character",

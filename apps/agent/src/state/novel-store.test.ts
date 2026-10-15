@@ -95,11 +95,18 @@ describe("小说创作条件持久化", () => {
     }
   });
 
-  test("未采集返回 null，创建时可保存数组与结构化冲突", () => {
+  test("未采集返回 null，创建时可保存数组与结构化冲突；叙事视角随创作条件读写", () => {
     const db = openDatabase(":memory:");
     try {
       const store = new NovelStore(db);
-      expect(store.createNovel()).toMatchObject({ genre: null, audience: null, coreConflict: null });
+      expect(store.createNovel()).toMatchObject({ genre: null, narrativePov: null, audience: null, coreConflict: null });
+      // 叙事视角：选完即存（updateNovel 逐项）、null 可显式清空、空串拒绝
+      const { id } = store.createNovel();
+      store.updateNovel(id, { narrativePov: "第三人称限知" });
+      expect(store.getNovel(id)).toMatchObject({ narrativePov: "第三人称限知" });
+      store.updateNovel(id, { narrativePov: null });
+      expect(store.getNovel(id)).toMatchObject({ narrativePov: null });
+      expect(() => store.updateNovel(id, { narrativePov: "" })).toThrow();
       const created = store.createNovel(creationParams);
       expect(created).toMatchObject(creationParams);
       const row = db.query("SELECT genre, audience, core_conflict FROM novels WHERE id = ?").get(created.id) as { genre: string; audience: string; core_conflict: string };
@@ -116,16 +123,17 @@ describe("小说创作条件持久化", () => {
     try {
       const { id } = store.createNovel({ name: "旧名" });
       store.updateNovel(id, { genre: creationParams.genre });
+      store.updateNovel(id, { narrativePov: "第一人称" });
       store.updateNovel(id, { audience: creationParams.audience });
       store.updateNovel(id, { coreConflict: creationParams.coreConflict });
       store.updateNovel(id, { name: "新名", description: "新的梗概" });
       store.setNovelPinned(id, true);
       store.setNovelFavorite(id, true);
-      expect(store.getNovel(id)).toMatchObject({ ...creationParams, name: "新名", description: "新的梗概", pinned: true, favorite: true });
+      expect(store.getNovel(id)).toMatchObject({ ...creationParams, narrativePov: "第一人称", name: "新名", description: "新的梗概", pinned: true, favorite: true });
       store.close();
       store = NovelStore.open(path);
-      expect(store.getNovel(id)).toMatchObject(creationParams);
-      expect(store.listNovels()[0]).toMatchObject(creationParams);
+      expect(store.getNovel(id)).toMatchObject({ ...creationParams, narrativePov: "第一人称" });
+      expect(store.listNovels()[0]).toMatchObject({ ...creationParams, narrativePov: "第一人称" });
       expect(store.updateNovel(id, { audience: [] })).toMatchObject({ genre: "仙侠", audience: [], coreConflict: creationParams.coreConflict });
       expect(store.updateNovel(id, { genre: undefined })).toMatchObject({ genre: "仙侠", audience: [] });
     } finally {
@@ -403,7 +411,7 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     ).toEqual({ updated_at: "2026-01-01T00:00:00Z" });
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(20);
+    ).toBe(21);
     db.close();
     await rm(dir, { recursive: true, force: true });
   });

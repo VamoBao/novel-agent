@@ -5,6 +5,8 @@ export type NovelStatus = "initializing" | "gathering" | "outlined";
 /** 构建大纲所需的基本参数（由初始化流程逐步收集） */
 export interface NovelParams {
   genre: string;
+  /** 叙事视角（类型之后收集：第一人称 / 第三人称限知 / 第三人称全知 / 多视角轮换，可自定义） */
+  narrativePov: string;
   audience: string[];
   worldview: Worldview;
   /** 角色卡列表（内核/背景/创作目的/结局方向为固定属性；至少一名主角） */

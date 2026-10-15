@@ -179,9 +179,9 @@ function optionsFor(world: Seeded, channel: FakeChannel) {
 }
 
 describe("regenerateOutline（FakeChannel + mock LLM 集成）", () => {
-  test("大纲重生成复用数据库中的类型、受众与核心冲突，简介回填保留原条件", async () => {
+  test("大纲重生成复用数据库中的类型、叙事视角、受众与核心冲突，简介回填保留原条件", async () => {
     const world = await seed();
-    const params = { genre: "仙侠", audience: ["人物成长读者"], coreConflict: { origin: "宗门独占灵脉", impact: "散修受压迫", idealResolution: "人人都可修炼" } };
+    const params = { genre: "仙侠", narrativePov: "第三人称限知", audience: ["人物成长读者"], coreConflict: { origin: "宗门独占灵脉", impact: "散修受压迫", idealResolution: "人人都可修炼" } };
     world.novelStore.updateNovel(NOVEL_ID, params);
     textScript = [[[{ tool: "save_outline", args: newOutlineFixture(1, 3) }]]];
     agentPrompts = [];
@@ -201,9 +201,10 @@ describe("regenerateOutline（FakeChannel + mock LLM 集成）", () => {
     const prompt = agentPrompts[0] ?? "";
     const context = JSON.parse(prompt.split("创作参数如下（JSON）：\n")[1]!.split("\n\n")[0]!);
     expect(context).not.toHaveProperty("genre");
+    expect(context).not.toHaveProperty("narrativePov");
     expect(context).not.toHaveProperty("audience");
     expect(context).not.toHaveProperty("coreConflict");
-    expect(prompt).toContain("类型/受众/核心冲突未提供");
+    expect(prompt).toContain("类型/叙事视角/受众/核心冲突未提供");
   });
 
   test("确认后新版本入库：旧树旧章降级归档，产物覆盖，description 回填", async () => {

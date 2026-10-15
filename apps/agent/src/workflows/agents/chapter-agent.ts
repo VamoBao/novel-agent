@@ -53,6 +53,8 @@ export interface PlanChaptersInput {
   novelTitle: string;
   logline: string;
   theme?: string;
+  /** 叙事视角（创作条件；历史小说未采集时缺省——不注入该行） */
+  narrativePov?: string;
   partName: string;
   partSummary: string;
   actName: string;
@@ -189,6 +191,9 @@ export async function planChapters(
     prompt: [
       `小说：《${input.novelTitle}》——${input.logline}`,
       ...(input.theme ? [`主题：${input.theme}`] : []),
+      ...(input.narrativePov
+        ? [`叙事视角：${input.narrativePov}（章节概述与登场安排须与该视角一致——限知视角不得概述出视角外角色不可知的信息，多视角轮换在概述中注明本章视角人物）`]
+        : []),
       `所属部：${input.partName}（${input.partSummary}）`,
       `目标幕：${input.actName}`,
       `本幕梗概：${input.actSummary}`,

@@ -9,7 +9,8 @@ import { DEFAULT_DB_PATH, getDefaultDatabase, openDatabase } from "./db";
 import { generateNovelId } from "./id";
 
 /** novels 表记录：小说基本信息（name 在大纲确认后回填；pinned / favorite 为书库管理标记；
- *  写作偏好三字段为小说级覆盖，null=未设置——正文生成按「小说级 > 系统设置 > 内置默认」解析） */
+ *  创作条件含叙事视角 narrativePov（未采集 null）；写作偏好三字段为小说级覆盖，null=未设置
+ *  ——正文生成按「小说级 > 系统设置 > 内置默认」解析） */
 export interface NovelRecord extends NovelCreationParams {
   id: string;
   name: string | null;
@@ -40,13 +41,13 @@ const INSERT_SQL = `
 `;
 
 const SELECT_SQL = `
-  SELECT id, name, author, description, genre, audience, core_conflict,
+  SELECT id, name, author, description, genre, narrative_pov, audience, core_conflict,
          chapter_length_min, chapter_length_max, style_pass_score, pinned, favorite, created_at, updated_at
   FROM novels WHERE id = ?;
 `;
 
 const LIST_SQL = `
-  SELECT id, name, author, description, genre, audience, core_conflict,
+  SELECT id, name, author, description, genre, narrative_pov, audience, core_conflict,
          chapter_length_min, chapter_length_max, style_pass_score, pinned, favorite, created_at, updated_at
   FROM novels ORDER BY pinned DESC, created_at DESC, id DESC;
 `;
@@ -67,6 +68,7 @@ export class NovelStore {
   createNovel(input: NovelInput = {}): NovelRecord {
     const params = novelCreationParamsSchema.parse({
       genre: input.genre ?? null,
+      narrativePov: input.narrativePov ?? null,
       audience: input.audience ?? null,
       coreConflict: input.coreConflict ?? null,
     });
@@ -153,6 +155,7 @@ export class NovelStore {
     set("author", patch.author ?? undefined);
     set("description", patch.description ?? undefined);
     set("genre", params.genre);
+    set("narrative_pov", params.narrativePov);
     set("audience", params.audience === undefined ? undefined : encodeJson(params.audience));
     set("core_conflict", params.coreConflict === undefined ? undefined : encodeJson(params.coreConflict));
     set("updated_at", new Date().toISOString());
@@ -212,6 +215,7 @@ interface NovelRow {
   author: string | null;
   description: string | null;
   genre: string | null;
+  narrative_pov: string | null;
   audience: string | null;
   core_conflict: string | null;
   chapter_length_min: number | null;
@@ -226,6 +230,7 @@ interface NovelRow {
 function rowToNovel(row: NovelRow): NovelRecord {
   const params = novelCreationParamsSchema.safeParse({
     genre: row.genre,
+    narrativePov: row.narrative_pov,
     audience: decodeJson(row.id, "audience", row.audience),
     coreConflict: decodeJson(row.id, "coreConflict", row.core_conflict),
   });

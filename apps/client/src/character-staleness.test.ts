@@ -103,6 +103,7 @@ function makeDetail(
       createdAt: "2026-10-01T00:00:00.000Z",
       updatedAt: "2026-10-01T00:00:00.000Z",
       genre: null,
+      narrativePov: null,
       audience: null,
       coreConflict: null,
       chapterLengthMin: null,

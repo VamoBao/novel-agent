@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-15 [feat] 叙事视角创作条件：createNovel 在「类型」后新增【2/6】视角步骤（静态菜单 第一人称 / 第三人称限知 / 第三人称全知 / 多视角轮换 + 自定义，选完即存 novels.narrative_pov，后续步骤序号顺延），NovelParams 与 OutlineContext 增 narrativePov；大纲 Agent system prompt 增视角要求（限知视角的信息遮蔽与揭示节奏、多视角轮换在幕梗概体现切换安排、全书不得漂移）、参数 JSON 自动携带（regen-outline 复用库内值、历史省略）；章节规划 prompt 与 write-chapter【小说】块各增视角行（未采集零注入）。AC：typecheck / lint / 全量 545 用例通过（本模块净增 create-novel 视角应答与落库断言、regen 视角上下文断言、plan-act-chapters 视角行进 prompt 断言、write-chapter 视角注入两态）；真实模型效果待人工验收。数据层 20→21 迁移与 stage 枚举 / StageBar 七阶段见根 PROGRESS 与 DECISIONS 当日条目。
+
 - 2026-10-15 [fix] 写作偏好反馈阈值一致性：writeChapter 的初稿/修订、三段审核开始/结束与保存事件均携带本次解析的 stylePassScore，经 headless → shared write-progress → 客户端章卡传递，警告与建议显示使用同审核阈值。协议新字段可选、旧消息默认 80，零阈值保留。扩展工作流默认 80 与小说覆盖 85 的全阶段/跨轮断言，客户端与协议新增回归见根 PROGRESS。AC：先红后绿，typecheck / lint / 全量 539 项通过，独立复审无新增问题。
 
 - 2026-10-14 [feat] 写作偏好两级配置（章节篇幅 + 文风合格线）：writeChapter 在组上下文前解析生效值——`providers/writing-prefs.ts` 的 resolveSystemWritingPrefs 读 NOVEL_CHAPTER_LENGTH_MIN/MAX + NOVEL_STYLE_PASS_SCORE（非法值静默归 null），shared resolveChapterLength / resolveStylePassScore 按「小说级 novels 行 > 系统级 > 内置默认 2000~3000 字 / 80 分」解析（篇幅 min/max 整体覆盖、半设乱序防御性跳过）；写作 prompt 篇幅条用生效值、chapter-review 文风合格线参数化（input.stylePassScore → 评分 prompt / isReportPassing / formatRevisionBlock，内置默认由 90 改为 80）、Options 增 systemWritingPrefs 注入（缺省读环境变量）、小说级覆盖生效时 notify 通报。AC：typecheck 3 工程 / lint / 全量 529 用例通过（本模块净增 writing-prefs 单测 3 + chapter-review 阈值用例 + write-chapter 偏好两态）；真实模型文学效果待人工验收。数据层 19→20 迁移、query CLI set-writing-prefs 与客户端设置入口见根 PROGRESS 与 DECISIONS 当日条目。

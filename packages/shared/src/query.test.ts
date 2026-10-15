@@ -23,7 +23,7 @@ describe("小说详情的创作条件契约", () => {
   const emptyDetail = { novel: validListItem, worldview: null, characters: [], migrations: [], outlineNodes: [], documents: [], foreshadows: [], locations: [], styleReferences: [] };
 
   test("旧详情载荷缺少创作条件时补 null", () => {
-    expect(novelDetailSchema.parse(emptyDetail).novel).toMatchObject({ genre: null, audience: null, coreConflict: null });
+    expect(novelDetailSchema.parse(emptyDetail).novel).toMatchObject({ genre: null, narrativePov: null, audience: null, coreConflict: null });
   });
 
   test("写作偏好三字段：旧载荷缺省补 null（未设置覆盖），携带时透传，非法值拒绝", () => {
@@ -39,11 +39,17 @@ describe("小说详情的创作条件契约", () => {
     ).toThrow();
   });
 
-  test("详情保留结构化创作条件并允许空受众，非法形态拒绝", () => {
+  test("详情保留结构化创作条件并允许空受众，非法形态拒绝；叙事视角可空透传", () => {
     const params = { genre: "科幻", audience: [], coreConflict: { origin: "资源枯竭", impact: "居民流离失所", idealResolution: "找到新的家园" } };
     expect(novelDetailSchema.parse({ ...emptyDetail, novel: { ...validListItem, ...params } }).novel).toMatchObject(params);
     expect(() => novelDetailSchema.parse({ ...emptyDetail, novel: { ...validListItem, audience: "错误" } })).toThrow();
     expect(() => novelDetailSchema.parse({ ...emptyDetail, novel: { ...validListItem, coreConflict: { origin: "不完整" } } })).toThrow();
+    const withPov = novelDetailSchema.parse({
+      ...emptyDetail,
+      novel: { ...validListItem, ...params, narrativePov: "第三人称限知" },
+    });
+    expect(withPov.novel.narrativePov).toBe("第三人称限知");
+    expect(() => novelDetailSchema.parse({ ...emptyDetail, novel: { ...validListItem, narrativePov: "" } })).toThrow();
   });
 });
 
