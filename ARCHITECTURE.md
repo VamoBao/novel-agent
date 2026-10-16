@@ -7,7 +7,9 @@
 ```text
 apps/agent/src/
 ├── index.ts              # CLI 入口：API Key 检查、运行 createNovel、错误处理与优雅退出
-├── headless.ts           # 协议模式入口：stdio JSON 行协议（hello 握手 / 消息分发 / EOF·SIGTERM 收尾）；
+├── headless.ts           # 协议模式入口：stdio JSON 行协议（hello 握手 / 消息分发 / EOF·SIGTERM 收尾；
+│                         #   会话收尾——run_finished / fatal error 发出后 destroy stdin 解除读监听保活，
+│                         #   宿主不关 stdin 管道也能在 stdout 排干后自然退出，否则子进程驻留会卡死客户端下次启动）；
 │                         #   argv 选会话模式——无参 = 新建小说全流程，`plan-chapters <novelId> <actNodeId>`
 │                         #   = 单幕章节规划，`regen-outline <novelId>` = 大纲重新生成（新版本入库），
 │                         #   `polish-character <novelId> [characterId] <formJson>` = 角色 AI 润色
@@ -207,7 +209,8 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 │   │                    #   各一次，主题保存即生效）；窗口 backgroundColor 随
 │   │                    #   nativeTheme.shouldUseDarkColors、updated 监听同步底色；
 │   │                    #   诊断钩子 NOVEL_CLIENT_THEME=system|light|dark 强制覆盖主题
-│   ├── agent-process.ts # 协议校验与生命周期宿主：串行停止/启动、close后退出、旧事件隔离
+│   ├── agent-process.ts # 协议校验与生命周期宿主：串行停止/启动、close后退出、旧事件隔离；
+│   │                    #   run_finished 已到但子进程仍驻留时宽限 2s 等自然关闭、超时终止回收（防 start 永久等待 close）
 │   ├── terminate-agent.ts # 等待SIGTERM退出，超时升级SIGKILL
 │   └── preload.ts       # contextBridge 最小 API（start（携带会话参数）/ stop / respond /
 │                        #   onMessage / onExit / listNovels / getNovelDetail / rename /

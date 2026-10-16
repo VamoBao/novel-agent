@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-16 [fix] 正文生成按钮 loading 无进度界面（连续会话被残留子进程卡死）：根因——headless 收尾（run_finished / fatal error）后 stdin 的 data 监听保活事件循环，宿主（Electron 单例全程持管道不关）下子进程永久驻留；`AgentProcess.start` 对 completed 子进程 `await closing` 等一个永不到来的 close → `agent:start` 永久挂起、新进程不 spawn → 客户端只有本地 loading 态、零 write-progress 消息（步骤界面渲染条件依赖首条消息）。间歇性由自愈路径解释：error 收尾客户端主动 stop、进过会话页（use-agent-session start 前 stop）、润色完成 stop、重启都会清掉残留；「一章成功后不离开浏览页直接点下一章」必现。修复两层：①agent 根因——headless 会话收尾后 `process.stdin.destroy()` 解除保活，stdout 排干后自然退出（CLI/任意宿主通用）；②client 防御——`AgentProcess.start` 区分子进程状态：已退出等 drain close（既有语义不变）、completed 仍驻留宽限 2s 等自然关闭后终止回收（兼容旧版 agent 二进制）、活跃会话维持不吞不杀。先红后绿净增 2 用例：真实 headless + stdin pipe 保持打开（修复前驻留超时）与残留 completed 子进程下次 start 挂起（修复前超时）；既有 4 个生命周期用例（drain / 自然关闭 / 活跃任务不误杀）全数保留通过。AC：typecheck 3 工程 / lint / 全量 668 项（63 文件）通过；端到端实跑——真实 headless resume 连续两会话，会话 1 run_finished 后自退（exitCode 0）、会话 2 点击后 109ms 拉起并完整走完。
+
 - 2026-10-16 [fix] 模型 provider 审查两项修复：角色润色使用本地全字段必填输出 schema（含 basicInfo），满足 OpenAI strict required，保留角色输入/存储可选字段与基准只读；设置弹窗按组跟踪接口类型/Key/模型名/Base URL 的编辑，保存当前显示的 provider，未编辑组和仅改主题/写作偏好仍保留环境优先级。新增三家真实 SDK + 内存 SQLite 润色协议回归（递归检查 OpenAI 严格 schema、返回全字段且基准不变）与 Agent/写作两组真实 React 仅改连接不改下拉框回归，原环境 provider 用例改为真实主题编辑。先红后绿，净增 5 项。AC：typecheck / lint / 全量 666 项（63 文件）通过，独立复审无阻塞；未调用真实模型。
 
 - 2026-10-16 [feat] 模型 provider 选择与 DeepSeek JSON 输出修复（复杂需求，设计规格 `docs/superpowers/specs/2026-10-16-model-provider-selection-design.md`，3 个串行任务逐一实现；决策见 DECISIONS）：①模型接入——shared 新增 `model-provider.ts`（provider 三选枚举 + 官方默认地址 + `parseModelProvider` / `isDeepSeekOfficialBaseUrl` / `inferModelProvider` 与 `resolveAgentModelProvider` / `resolveWritingModelProvider` 生效 provider 解析纯函数，agent 侧与客户端弹窗回显共用）；agent 新增 `providers/model-factory.ts` 的 `createProviderModel` 按 provider 调用官方 SDK——OpenAI 显式 `chat(model)` 走 Chat Completions、DeepSeek 官方包、Claude 走 Anthropic Messages，Base URL 留空按 provider 取官方默认；`agent-model.ts` 解析 `AGENT_MODEL_PROVIDER` + 三字段（缺省按有效地址迁移：官方地址 → deepseek、其余 → openai、地址留空沿用 DeepSeek 官方默认；模型名留空仅 DeepSeek 有默认值）并新增 `describeAgentModelConfigError` 交 index.ts / headless.ts 启动检查报非法 provider 与缺模型名，`writing-model.ts` 解析 `WRITING_MODEL_PROVIDER`（缺省迁移、独立写作默认 openai，非法值抛可读错误）且三字段齐才启用；依赖改用 `@ai-sdk/openai` / `@ai-sdk/deepseek` / `@ai-sdk/anthropic`（连带 `ai` 升至 7.0.142 统一 provider 单副本，移除 `@ai-sdk/openai-compatible`）；**根因修复**——通用兼容接口不注入 JSON 指令，DeepSeek 服务端对「prompt 不含 json 字样」的 json_object 请求返回 400，专用 provider 的 `convert-to-deepseek-chat-messages` 会自动注入 schema 指令。②设置与配置链路——settings.json 两族模型增 `provider` 字段（空串 = 历史配置未设置且**不做地址推断**，避免遮蔽 `.env` / 继承环境里已配置的值；旧 deepseek 组迁移保留）、`resolveModelEnv` 增两个 provider 变量（同款三级优先级、空串键删除）、SettingsDialog 两组各增接口类型下拉框（`.field select` 与输入框同款样式）、`.env.example` 与 README 环境变量表同步。**弹窗回显与保存语义（独立审查后修正）**：`settings:get` 新增回传 `effectiveProviders`（`resolveEffectiveProviders` 按三级优先级解析后交 shared 同一对纯函数推断），下拉框显示的是 agent 子进程真正会用的接口类型（可能来自 `.env` / 继承环境变量）；保存时**未触碰下拉框则写回设置文件原值**（空串保持「按地址迁移」），只把用户显式选择落盘——否则「只为改主题保存一次」就会把回显出的推断值固化进设置文件、遮蔽 `.env` 里的 provider；切换 provider 只换 Base URL 与模型名提示，不改写已填值。AC：typecheck 3 工程 / lint / 全量 661 项（63 文件）通过（净增 34：shared provider 纯函数 12 + agent 配置与协议回归 9 + 写作模型 provider 5 + 客户端设置（含生效 provider 解析）6 + 设置弹窗真实 React 交互 2）；真实 SDK 协议回归**经各家服务端约束模拟**校验——模拟端点对缺 Bearer / 缺 x-api-key 与 anthropic-version / 缺 max_tokens / system 混入 messages / 不完整 json_schema / DeepSeek json_object 缺 json 字样一律 400，十次调用零拒绝：DeepSeek 无 JSON 字样的业务 prompt 靠 SDK 注入的 JSON 指令拿到结构化对象、OpenAI 走自定义 Chat Completions 地址 + Bearer + 完整 `json_schema`、Claude 走 Messages 协议（x-api-key + anthropic-version + system 独立字段 + max_tokens + input_schema 工具 + `output_config` 结构化输出）、写作模型独立选 provider 且未配置回落同一 Agent 实例；另跑真实 socket 冒烟（本地 Bun.serve 模拟 DeepSeek 约束，`generateObject` 注入生效、结构化对象返回）；真实三家模型端到端待用户复验（未使用真实 Key、未发起付费调用）。
@@ -16,9 +18,9 @@
 
 - 2026-10-16 [feat] 客户端隐藏系统菜单栏（简单需求快速通道）：main.ts 顶层 `Menu.setApplicationMenu(null)` 清空应用菜单 + BrowserWindow `autoHideMenuBar: true` 兜底——File/Edit/View 等菜单本地工具用不到；菜单内建快捷键（F11 / Ctrl+R）随之失效，开发期刷新走 HMR。AC：typecheck 3 工程 / lint / 客户端 64 用例通过；NOVEL_CLIENT_SCREENSHOT 无头冒烟实跑正常启动、截图存盘、退出码 0（截图仅页面内容，菜单栏隐藏效果待用户肉眼确认）。
 
-- 2026-10-15 [feat] 主流程缓存与恢复：用户确认采用 AI SDK 原生 `ModelMessage[]`。SQLite 21→22 新增 workflow_runs / workflow_steps / agent_message_traces，主输入、已确认产物与节点结果持久化，同步数据库副作用和完成标记共事务；新建小说、单幕章节规划、大纲重生成按 runId 继续，已创建树/章/地点/角色不重复入库，自动建卡部分失败后按库内 diff 补齐伏笔收尾。SDK 按 step 留存工具调用/结果及 provider 元信息，system 单存，不保存模型连接配置。CLI/headless resume、query list-runs/详情 pendingRuns、客户端错误页与书库继续入口接通。恢复保留中断期间用户编辑的伏笔，版本漂移拒绝；Electron 宿主提取为可测试模块，停止/启动串行且 stdout 排空后才上报退出。AC：typecheck 三工程 / lint / 全量 590 项（59 文件）通过，后端与客户端独立复审通过；覆盖重开库、部分建卡、入库回滚、版本保护、真实 SDK 工具消息、CLI/协议、真实 React 与子进程竞态。第一期恢复主步骤，失败子 Agent 从缓存输入重跑，内部消息仅供追溯；正文与润色未接入，未调用真实模型。计划见 docs/superpowers/plans/2026-10-15-workflow-cache.md，决策见 DECISIONS。
-
 ## 历史归档
+
+- 2026-10-15 [feat] 主流程缓存与恢复已归档：workflow_runs/steps 与 SDK ModelMessage 缓存、runId 断点恢复、Electron 宿主停止/启动串行与 stdout 排空后退出通知；完整实现与验收见 Git 历史及 DECISIONS。
 
 - 2026-10-15 历史滚动摘要：2026-10-15 写作偏好审查修复已归档：迟到详情响应隔离、文风会话阈值透传、加载失败反馈与真实React回归，验收见Git历史及同日DECISIONS。；创作流程新增叙事视角设置（完整实现与验收见对应提交。）
 
@@ -70,6 +72,8 @@
 - （非阻塞）deepseek-flash 在主角归一化时仍可能小幅补全用户未提及字段——已有「确认门」兜底，用户答 n 可重新描述；若换更强模型（deepseek-v4-pro）可进一步降低漂移
 
 ## 流程复盘记录
+
+- 2026-10-16 正文生成按钮 loading 无进度：生命周期测试未复刻宿主真实挂载——既有用例的假子进程全部自杀式 `process.exit(0)`、协议级测试 spawn 一律 `stdin: "ignore"`，而 Electron 宿主实际持 stdin 管道不关，stdin data 监听保活事件循环的真实形态从未被测到。归因：类别 B（测试盲区，验证形态与真实运行形态不一致）。本次新增用例改为「真实 headless + stdin pipe 保持打开」与「收尾后驻留不退出的假子进程」，后续涉及子进程生命周期的测试须对齐宿主真实挂载方式。
 
 - 2026-10-14 角色迁移初验覆盖 SSR 和正序添加链，但未覆盖实际按钮操作、倒序补入/重排以及失败后的持久化副作用，导致 453 项通过仍遗漏七项行为缺陷。用户明确要求完善测试流程，本次补充真实 React/DOM→query/store→SQLite 测试、CLI 临时库隔离、失败前后完整行与快照断言及状态/顺序矩阵，并固化为 docs/character-migration-testing.md 与定向脚本；禁止将 SSR 展示或替身模型评分当作完整业务/文学验收。
 

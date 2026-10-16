@@ -14,6 +14,15 @@ const waitForStopScript = `
   process.stdout.write(JSON.stringify({type:'notify', text:'ready'}) + '\\n');
 `;
 
+// 复刻收尾后驻留的 headless：stdin 挂 data 监听保活 + 发出 run_finished 但不退出
+// （修复前的真实形态——宿主持有 stdin 管道不关时事件循环不会排空）
+const lingerFinishedScript = `
+  process.on('SIGTERM', () => process.exit(0));
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', () => {});
+  process.stdout.write(JSON.stringify({type:'run_finished', novelId:'novel', outputPath:''}) + '\\n');
+`;
+
 test("停止途中启动新会话会等待旧进程退出，不吞掉启动也不终止活跃任务", async () => {
   const children: ChildProcess[] = [];
   const modes: string[] = [];
@@ -108,6 +117,41 @@ test("自然进程已 exit 但仍在 drain 时新启动等待 close", async () =
     await host.kill();
   }
 });
+
+test("run_finished 后仍驻留的子进程在下次启动时被回收，不永久挂起 start", async () => {
+  const children: ChildProcess[] = [];
+  const events: string[] = [];
+  const host = new AgentProcess({
+    spawn: () => {
+      const process = child(children.length === 0 ? lingerFinishedScript : waitForStopScript);
+      children.push(process);
+      return process;
+    },
+    onMessage: (message) => events.push(message.type),
+    onExit: () => events.push("exit"),
+  });
+  await host.start();
+  await once(children[0]!.stdout!, "data");
+  expect(events).toEqual(["run_finished"]);
+  // 复刻用户场景：write-chapter 成功后停留浏览页直接点下一章生成——残留的
+  // 已完成子进程必须被回收，而不是让 agent:start 永久等待它的 close
+  const starting = host.start({ mode: "resume", runId: "next" });
+  const outcome = await Promise.race([
+    starting.then(() => "started" as const),
+    Bun.sleep(6000).then(() => "timeout" as const),
+  ]);
+  expect(outcome).toBe("started");
+  expect(children).toHaveLength(2);
+  expect(children[0]!.exitCode).toBe(0);
+  expect(children[0]!.killed).toBe(true);
+  try {
+    await once(children[1]!.stdout!, "data");
+    // 旧进程 exit 通知先于新会话消息（stdout 排空后发送的既有顺序）
+    expect(events).toEqual(["run_finished", "exit", "notify"]);
+  } finally {
+    await host.kill();
+  }
+}, 15000);
 
 test("收到 run_finished 后立即启动下一会话会等待旧进程自然关闭", async () => {
   const children: ChildProcess[] = [];

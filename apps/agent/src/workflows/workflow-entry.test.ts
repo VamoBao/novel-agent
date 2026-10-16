@@ -52,6 +52,38 @@ test.each(["create", "plan-chapters", "regen-outline"] satisfies WorkflowKind[])
   },
 );
 
+test("headless 会话收尾后进程退出：宿主保持 stdin 管道打开时不驻留", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "novel-headless-exit-"));
+  const dbPath = join(dir, "test.db");
+  // stdin 用 pipe 且全程不关——对齐 Electron 宿主（单例持有子进程 stdin 不关）；
+  // 修复前 stdin 的 data 监听保活事件循环，发完收尾消息后进程永久驻留
+  const proc = Bun.spawn(
+    [process.execPath, fileURLToPath(new URL("../headless.ts", import.meta.url)), "write-chapter", "missing-novel", "missing-chapter"],
+    {
+      env: { ...process.env, NOVEL_DB_PATH: dbPath, NOVEL_OUTPUT_DIR: dir, AGENT_MODEL_API_KEY: "test" },
+      stdin: "pipe", stdout: "pipe", stderr: "pipe",
+    },
+  );
+  try {
+    const stdinSink = proc.stdin; // 保持引用：父进程侧管道全程打开
+    void stdinSink;
+    const exit = await Promise.race([
+      proc.exited,
+      Bun.sleep(4000).then(() => "timeout" as const),
+    ]);
+    expect(exit).toBe(1);
+    const [out, err] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    expect(out).toContain("小说不存在");
+    expect(err).toBe("");
+  } finally {
+    try { proc.kill(); } catch { /* 已退出时忽略 */ }
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 10000);
+
 test("headless resume 缺失运行报可读错误", async () => {
   const proc = Bun.spawn([process.execPath, fileURLToPath(new URL("../headless.ts", import.meta.url)), "resume", "missing"], {
     env: { ...process.env, NOVEL_DB_PATH: ":memory:", AGENT_MODEL_API_KEY: "test" },

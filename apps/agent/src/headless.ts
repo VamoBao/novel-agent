@@ -193,6 +193,10 @@ async function main(): Promise<void> {
   } finally {
     channel.close();
   }
+  // 会话已收尾（run_finished / fatal error 均已发出）：解除 stdin 读监听对事件循环
+  // 的保活——宿主持有 stdin 管道不关（Electron 单例全程持有）时进程也能在 stdout
+  // 排干后自然退出；否则子进程永久驻留，客户端下一次 start 会等待其 close 而挂起
+  process.stdin.destroy();
 }
 
 if (import.meta.main) {

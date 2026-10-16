@@ -8,6 +8,11 @@ interface AgentProcessOptions {
   onExit: (code: number) => void;
 }
 
+/** run_finished 已到达但子进程未退出的回收宽限：先等自然关闭（stdout 排干收尾，
+ *  不误杀正常退出中的进程），超时仍驻留（旧版 agent 不自退 / 异常卡死）则终止
+ *  回收——否则 start 永久等待 close，下一次会话拉不起来 */
+const REAP_GRACE_MS = 2000;
+
 /** 子进程协议与生命周期宿主；Electron 窗口和环境配置由入口注入。 */
 export class AgentProcess {
   private child: ChildProcess | null = null;
@@ -19,9 +24,17 @@ export class AgentProcess {
 
   async start(options: AgentStartOptions = { mode: "create" }): Promise<void> {
     if (this.stopping) await this.stopping;
-    // 自然退出后仍须等 stdout drain，末尾完成消息先于退出通知。
-    if (this.child && (this.completed || this.child.exitCode !== null || this.child.signalCode !== null)) {
-      await this.closing;
+    const previous = this.child;
+    if (previous) {
+      if (previous.exitCode !== null || previous.signalCode !== null) {
+        // 自然退出后仍须等 stdout drain，末尾完成消息先于退出通知。
+        await this.closing;
+      } else if (this.completed) {
+        await this.reapFinished();
+      } else {
+        // 活跃会话占用单例：不吞掉启动也不终止任务。
+        return;
+      }
     }
     if (this.child) return;
     const child = this.options.spawn(options);
@@ -52,6 +65,19 @@ export class AgentProcess {
       failed = true;
       console.error("[agent] 子进程错误：", error);
     });
+  }
+
+  /** run_finished 已到但子进程仍在：宽限等自然关闭，超时终止回收（kill 内含
+   *  terminateAgent 与 close 等待，返回即代表旧进程已收尾、单例已空闲） */
+  private async reapFinished(): Promise<void> {
+    const closing = this.closing;
+    if (!closing) return;
+    const grace = new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, REAP_GRACE_MS);
+      timer.unref();
+    });
+    await Promise.race([closing, grace]);
+    if (this.closing) await this.kill();
   }
 
   private dispatchAgentLine(line: string): void {

@@ -61,7 +61,7 @@
 - `workflows/workflow-cache.ts`：`step` 原子执行确定性入库、`asyncStep` 保存输入与已完成子任务结果；新建小说、单幕规划、大纲重生成接入。确认产物先缓存，再建树/章和补角色、伏笔；失败重试按角色库 diff 补齐，拒绝大纲版本漂移。
 - `agents/session-context.ts` + `react.ts`：保存 SDK 原生 `ModelMessage[]`，用 SDK `modelMessageSchema` 校验；按每个 SDK step 追加 assistant/tool 消息，保留工具调用 ID、参数、结果及 provider 元信息，system 单独存储。模型 API Key 不进入缓存。
 - `workflows/resume-workflow.ts`：按保存的 runId 分发原流程。CLI `resume <runId>`、headless `resume <runId>` 与 shared `AgentStartOptions.mode=resume` 共用此入口；`workflow-run` 消息供客户端保留恢复标识。query `list-runs [novelId]` 列未完成运行，详情 `pendingRuns` 只返回摘要。
-- 客户端三类会话页失败后继续同一运行，书库提供未完成流程入口；完成或返回后刷新书库/详情。`electron/agent-process.ts` 承载可测试的协议与生命周期宿主（入口注入 spawn/消息出口），`terminate-agent.ts` 负责等待旧子进程退出；停止与后续启动串行，退出消息在 stdout 排空后发送。
+- 客户端三类会话页失败后继续同一运行，书库提供未完成流程入口；完成或返回后刷新书库/详情。`electron/agent-process.ts` 承载可测试的协议与生命周期宿主（入口注入 spawn/消息出口），`terminate-agent.ts` 负责等待旧子进程退出；停止与后续启动串行，退出消息在 stdout 排空后发送。headless 会话收尾（run_finished / fatal error 发出后）destroy stdin 解除读监听保活、stdout 排干后自退（2026-10-16 修复：此前 stdin 管道被宿主持有不关时子进程永久驻留，`AgentProcess.start` 等待其 close 永久挂起——表现为上一章生成成功后直接点下一章时按钮 loading 但无任何进度消息）；`AgentProcess.start` 对 run_finished 已到但仍在驻留的子进程宽限 2s 等自然关闭、超时终止回收（兼容旧版 agent 二进制）。
 - 第一期在主步骤边界恢复：未完成子 Agent 从缓存输入重新执行，内部消息留作追溯，不恢复其问答现场；正文生成与角色润色暂不接入。
 
 ### 伏笔多幕回收规划（2026-10-16）
