@@ -1,14 +1,16 @@
+import { WorkflowRunStore } from "../state/workflow-run-store";
+import { pendingForeshadowRecoveries, refineForeshadowRecoveries } from "./foreshadow-refinement";
 import { runCachedWorkflow, type WorkflowCacheOptions } from "./workflow-cache";
 import type { UiChannel } from "../ui/channel";
 import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
 import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
 import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
-import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
+import { getDefaultOutlineStore, type OutlineStore, type StoredOutlineNode } from "../state/outline-store";
 import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
 import { getDefaultLocationStore, type LocationStore } from "../state/location-store";
 import { readOutlineTheme } from "../output/outline-writer";
 import type { Outline } from "@novel/shared";
-import { planChapters } from "./agents/chapter-agent";
+import { planChapters, type PlanChaptersInput } from "./agents/chapter-agent";
 import { autoCreateCharacters, collectChapterCharacters, filterNewCharacters } from "./agents/auto-character-agent";
 import { plantChapterForeshadows } from "./foreshadow-intake";
 import { bindChapterCasts } from "./chapter-cast-intake";
@@ -42,6 +44,23 @@ export interface PlanActChaptersResult {
   chapterCount: number;
 }
 
+/** 全书当前树按部→幕→章展开，ID 仅供 Agent 校验跨幕绑定使用。 */
+function fullOutlineContext(nodes: readonly StoredOutlineNode[]): NonNullable<PlanChaptersInput["fullOutline"]> {
+  const ordered = (items: StoredOutlineNode[]) => items.sort((a, b) => a.node.sort - b.node.sort || a.id.localeCompare(b.id));
+  return ordered(nodes.filter((node) => node.node.type === "part")).flatMap((part) =>
+    ordered(nodes.filter((node) => node.node.type === "act" && node.node.parentId === part.id)).map((act) => ({
+      id: act.id,
+      partName: part.node.name,
+      partSummary: part.node.summary ?? "",
+      name: act.node.name,
+      summary: act.node.summary ?? "",
+      keyPlotPoints: act.node.keyPlotPoints ?? [],
+      chapters: ordered(nodes.filter((node) => node.node.type === "chapter" && node.node.parentId === act.id))
+        .map((chapter) => ({ id: chapter.id, name: chapter.node.name, summary: chapter.node.summary ?? "" })),
+    })),
+  );
+}
+
 /**
  * 单幕章节规划工作流（客户端幕节点「规划本幕章节」入口）：
  * 从库中校验并组装目标幕的规划上下文（小说名/logline、所属部、幕梗概与关键情节点，
@@ -65,11 +84,12 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
   const characterStore = options.characterStore ?? getDefaultCharacterStore();
   const foreshadowStore = options.foreshadowStore ?? getDefaultForeshadowStore();
   const locationStore = options.locationStore ?? getDefaultLocationStore();
+  const runStore = options.runStore ?? new WorkflowRunStore(novelStore.database);
 
   if (!novelStore.getNovel(novelId)) throw new Error(`小说不存在，无法规划章节：${novelId}`);
 
-  return runCachedWorkflow({ ...options, kind: "plan-chapters", novelStore, targetId: actNodeId }, async (cache) => {
-    const { novel, act, part, actSummary, keyPlotPoints, storedWorldview, unboundForeshadows, recoverableForeshadows } = cache.step("planning-context", () => {
+  return runCachedWorkflow({ ...options, kind: "plan-chapters", novelStore, runStore, targetId: actNodeId }, async (cache) => {
+    const { novel, act, part, actSummary, keyPlotPoints, storedWorldview, unboundForeshadows: initialUnbound, recoverableForeshadows: initialRecoverable } = cache.step("planning-context", () => {
       const novel = novelStore.getNovel(novelId);
       if (!novel) {
         throw new Error(`小说不存在，无法规划章节：${novelId}`);
@@ -122,21 +142,23 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
     assertCurrentAct();
     channel.stage("chapter");
     channel.notify(`📑 章节规划 Agent 启动（${act.node.name}）…`);
-    const { plan, newForeshadows, foreshadowBindings, foreshadowRecoverBindings, newLocations } = await cache.asyncStep("confirmed-plan", () => planChapters(
-      {
-        novelTitle: novel.name ?? "未命名小说",
-        logline: novel.description ?? "",
-        theme: readOutlineTheme(novelId),
-        narrativePov: novel.narrativePov ?? undefined,
-        partName: part.node.name,
-        partSummary: part.node.summary ?? "",
-        actName: act.node.name,
-        actSummary,
-        keyPlotPoints,
-      },
-      channel,
-      { novelId, characterStore, locationStore, unboundForeshadows, recoverableForeshadows },
-    ));
+    const submission = await cache.asyncStep("confirmed-plan", async () => {
+      // 未确认任务恢复时读取最新待办；一旦确认，清单与序号映射随 submission 一起缓存。
+      const unboundForeshadows = foreshadowStore.listUnboundByAct(novelId, act.id);
+      const recoverableForeshadows = foreshadowStore.listUnrecoveredByAct(novelId, act.id);
+      const confirmed = await planChapters({
+        novelTitle: novel.name ?? "未命名小说", logline: novel.description ?? "",
+        theme: readOutlineTheme(novelId), narrativePov: novel.narrativePov ?? undefined,
+        partName: part.node.name, partSummary: part.node.summary ?? "", actName: act.node.name,
+        actSummary, keyPlotPoints,
+        fullOutline: fullOutlineContext(outlineStore.listOutlineNodes(novelId, { currentOnly: true })),
+      }, channel, { novelId, characterStore, locationStore, unboundForeshadows, recoverableForeshadows });
+      return { ...confirmed, foreshadowContext: { unboundForeshadows, recoverableForeshadows } };
+    });
+    const { plan, newForeshadows, foreshadowBindings, foreshadowRecoverBindings, newLocations } = submission;
+    // 升级前已确认缓存没有内部上下文，保留其原 planning-context 的固定序号。
+    const { unboundForeshadows, recoverableForeshadows } = submission.foreshadowContext
+      ?? { unboundForeshadows: initialUnbound, recoverableForeshadows: initialRecoverable };
 
     const chapterNodes = cache.step("save-chapters", () => {
       if (!outlineStore.getOutlineNode(act.id)?.node.isCurrentVersion) throw new Error("大纲版本已变更，无法保存旧幕章节");
@@ -224,28 +246,46 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
       );
     });
 
+    let refinedForeshadows = newForeshadows;
+    if (!runStore.getStep(cache.run.id, "save-foreshadows")) {
+      for (let round = 0; ; round += 1) {
+        const fullOutline = fullOutlineContext(outlineStore.listOutlineNodes(novelId, { currentOnly: true }));
+        if (pendingForeshadowRecoveries(refinedForeshadows, fullOutline).length === 0) break;
+        const key = round === 0 ? "refined-foreshadow-recoveries" : `refined-foreshadow-recoveries-${round}`;
+        // 原确认产物保留不动；细化结果单独缓存，后续失败恢复不重复询问。
+        const currentSubmission = { ...submission, newForeshadows: refinedForeshadows };
+        refinedForeshadows = await cache.asyncStep(key, () => refineForeshadowRecoveries({
+          novelTitle: novel.name ?? "未命名小说", logline: novel.description ?? "",
+          partName: part.node.name, partSummary: part.node.summary ?? "", actName: act.node.name,
+          actSummary, keyPlotPoints, fullOutline,
+        }, currentSubmission, channel));
+        assertCurrentAct();
+      }
+    }
+
     // 伏笔处理：新伏笔带登场章与幕入库、既有未绑伏笔按 LLM 绑定指令 patch（确定性代码）。
     // 置于角色自动入库块之后：新伏笔的 characterNames 可能引用本轮自动入库的新角色。
     cache.step("save-foreshadows", () => {
-      if (newForeshadows.length > 0 || foreshadowBindings.length > 0 || foreshadowRecoverBindings.length > 0) {
+      if (refinedForeshadows.length > 0 || foreshadowBindings.length > 0 || foreshadowRecoverBindings.length > 0) {
         channel.notify(
-          `\n✨ 本幕伏笔处理中：新增 ${newForeshadows.length} 处、绑定 ${foreshadowBindings.length} 处、回收绑定 ${foreshadowRecoverBindings.length} 处…`,
+          `\n✨ 本幕伏笔处理中：新增 ${refinedForeshadows.length} 处、绑定 ${foreshadowBindings.length} 处、回收绑定 ${foreshadowRecoverBindings.length} 处…`,
         );
         const chapterNodeRefs = chapterNodes.map((n) => ({ id: n.id, name: n.node.name }));
         // 全书当前版本章节点（含本次规划）——回收/登场顺序校验的全局章序依据
-        const allChapterNodes = outlineStore
-          .listOutlineNodes(novelId, { currentOnly: true })
+        const allOutlineNodes = outlineStore.listOutlineNodes(novelId, { currentOnly: true });
+        const allChapterNodes = allOutlineNodes
           .map((n) => ({ id: n.id, parentId: n.node.parentId, type: n.node.type, sort: n.node.sort }));
         const { created, skipped, bound, recoverBound } = plantChapterForeshadows({
           novelId,
           actNodeId: act.id,
-          newForeshadows,
+          newForeshadows: refinedForeshadows,
           bindings: foreshadowBindings,
           recoverBindings: foreshadowRecoverBindings,
           recoverable: recoverableForeshadows,
           characters: characterStore.listCharacters(novelId),
           chapterNodes: chapterNodeRefs,
           allChapterNodes,
+          allOutlineNodes,
           unbound: unboundForeshadows,
           channel,
           foreshadowStore,

@@ -461,3 +461,38 @@ describe("buildChapterForeshadowContext", () => {
     expect(result.degradedCount).toBe(0);
   });
 });
+
+// 抓住“已绑回收章中的最晚章”误当最终章、提前揭露尚有后幕计划的真相。
+test("后续回收幕尚未细化：当前回收章只作阶段回收，后幕细化后才在那里最终收尾", async () => {
+  const ctx = await setupDb();
+  try {
+    const currentAct = ctx.outlineStore.getOutlineNode(ctx.c1)!.node.parentId!;
+    const partId = ctx.outlineStore.getOutlineNode(currentAct)!.node.parentId!;
+    const later = ctx.outlineStore.addOutlineNode(NOVEL_ID, {
+      type: "act", parentId: partId, name: "终幕", sort: 2, summary: "揭开碎片真相", keyPlotPoints: ["揭晓真相"],
+    });
+    const f = ctx.foreshadowStore.addForeshadow(NOVEL_ID, foreshadowFixture({
+      appearChapterId: ctx.c1, recoverChapterIds: [ctx.c2],
+    }), currentAct, [currentAct, later.id]);
+    const pending = ctx.build(ctx.c2).lines.join("\n");
+    expect(pending).toContain("回收阶段：阶段回收");
+    expect(pending).toContain("终幕");
+    expect(pending).not.toContain("回收阶段：最终回收");
+    const [last] = ctx.outlineStore.saveChapters(NOVEL_ID, later.id, [{ name: "终章", summary: "碎片真相揭晓" }]);
+    ctx.foreshadowStore.updateForeshadow(f.id, { recoverChapterIds: [ctx.c2, last!.id] });
+    expect(ctx.build(ctx.c2).lines.join("\n")).toContain("回收阶段：阶段回收");
+    expect(ctx.build(last!.id).lines.join("\n")).toContain("回收阶段：最终回收");
+  } finally { await ctx.cleanup(); }
+});
+
+test("计划回收幕缺失时不擅自把当前已绑章判作最终回收", async () => {
+  const ctx = await setupDb();
+  try {
+    ctx.foreshadowStore.addForeshadow(NOVEL_ID, foreshadowFixture({
+      appearChapterId: ctx.c1, recoverChapterIds: [ctx.c2],
+    }), undefined, ["missing-act"]);
+    const text = ctx.build(ctx.c2).lines.join("\n");
+    expect(text).toContain("回收阶段：无法确定");
+    expect(text).not.toContain("回收阶段：最终回收");
+  } finally { await ctx.cleanup(); }
+});

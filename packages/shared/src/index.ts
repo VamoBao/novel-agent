@@ -36,12 +36,14 @@ export {
   outlineNewForeshadowSchema,
   chapterNewForeshadowSchema,
   foreshadowBindingSchema,
+  foreshadowRecoveryPlanEntrySchema,
   type Foreshadow,
   type ForeshadowPatch,
   type NewForeshadow,
   type OutlineNewForeshadow,
   type ChapterNewForeshadow,
   type ForeshadowBinding,
+  type ForeshadowRecoveryPlanEntry,
 } from "./foreshadow";
 export { coreConflictSchema, type CoreConflict } from "./conflict";
 export { novelCreationParamsSchema, type NovelCreationParams } from "./novel";

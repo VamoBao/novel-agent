@@ -84,7 +84,7 @@ describe("saveOutlineInputSchemaFor", () => {
     expect(() => saveOutlineInputSchemaFor(4, 1).parse({ ...submission, newForeshadows: [], newLocations: [] })).toThrow("1 部");
   });
 
-  const outlineFs = { surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], actName: "第一幕" };
+  const outlineFs = { surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], actName: "第一幕", recoverActNames: ["第二幕"] };
 
   test("newForeshadows 缺省省略不合法（必填数组）、空数组合法、完整条目通过", () => {
     expect(() => saveOutlineInputSchemaFor(4, 2).parse(submission)).toThrow(); // submission 不含伏笔字段
@@ -117,29 +117,42 @@ describe("saveOutlineInputSchemaFor", () => {
     ).toThrow();
   });
 
-  test("recoverActName 幕序校验：晚于埋设幕通过；缺省合法；同名幕 / 更早幕 / 不存在的幕被拒绝", () => {
+  test("回收幕计划必须非空真实唯一，允许同幕和跨部多个后幕，禁止更早幕", () => {
     const base = { ...submission, newLocations: [] as never[] };
-    expect(() =>
-      saveOutlineInputSchemaFor(4, 2).parse({
-        ...base,
-        newForeshadows: [{ ...outlineFs, recoverActName: "第二幕" }],
-      }),
-    ).not.toThrow();
-    expect(() =>
-      saveOutlineInputSchemaFor(4, 2).parse({ ...base, newForeshadows: [outlineFs] }),
-    ).not.toThrow();
-    expect(() =>
-      saveOutlineInputSchemaFor(4, 2).parse({
-        ...base,
-        newForeshadows: [{ ...outlineFs, recoverActName: "第一幕" }],
-      }),
-    ).toThrow("回收幕");
-    expect(() =>
-      saveOutlineInputSchemaFor(4, 2).parse({
-        ...base,
-        newForeshadows: [{ ...outlineFs, recoverActName: "不存在的幕" }],
-      }),
-    ).toThrow("回收幕");
+    for (const recoverActNames of [["第一幕"], ["第二幕", "第四幕"]]) {
+      expect(() => saveOutlineInputSchemaFor(4, 2).parse({ ...base,
+        newForeshadows: [{ ...outlineFs, recoverActNames }],
+      })).not.toThrow();
+    }
+    for (const item of [
+      { ...outlineFs, recoverActNames: [] },
+      { ...outlineFs, recoverActNames: ["不存在的幕"] },
+      { ...outlineFs, recoverActNames: ["第二幕", "第二幕"] },
+      { ...outlineFs, actName: "第三幕", recoverActNames: ["第二幕"] },
+      { ...outlineFs, actName: "不存在的幕", recoverActNames: ["第四幕"] },
+    ]) {
+      expect(() => saveOutlineInputSchemaFor(4, 2).parse({ ...base, newForeshadows: [item] })).toThrow();
+    }
+    const legacy = { surfaceAction: outlineFs.surfaceAction, hiddenTruth: outlineFs.hiddenTruth,
+      attentionLevel: 4, characterNames: ["林恒"], actName: "第一幕" };
+    expect(() => saveOutlineInputSchemaFor(4, 2).parse({ ...base,
+      newForeshadows: [{ ...legacy, recoverActName: "第二幕" }],
+    })).toThrow();
+  });
+
+  test("回收计划引用的埋设幕或回收幕重名时拒绝歧义", () => {
+    const duplicate = { ...fourActTwoPartOutline, parts: fourActTwoPartOutline.parts.map((part) => ({
+      ...part, acts: part.acts.map((item) => item.name === "第四幕" ? { ...item, name: "第二幕" } : item),
+    })), newCharacters: [], newLocations: [] };
+    for (const foreshadow of [
+      { ...outlineFs, recoverActNames: ["第二幕"] },
+      { ...outlineFs, actName: "第二幕", recoverActNames: ["第三幕"] },
+    ]) {
+      expect(() => saveOutlineInputSchemaFor(4, 2).parse({ ...duplicate, newForeshadows: [foreshadow] })).toThrow();
+    }
+    expect(() => saveOutlineInputSchemaFor(4, 2).parse({ ...duplicate,
+      newForeshadows: [{ ...outlineFs, recoverActNames: ["第三幕"] }],
+    })).not.toThrow();
   });
 
   test("伏笔清单内表面行为重复被拒绝", () => {

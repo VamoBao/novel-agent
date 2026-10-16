@@ -138,7 +138,7 @@ function formatOutlineForConfirm(
   if (newForeshadows && newForeshadows.length > 0) {
     lines.push(`  ✨ 本次大纲伏笔（确认后自动入库）：`);
     for (const f of newForeshadows) {
-      lines.push(`    · [${f.actName}] ${f.surfaceAction} ⇢ ${f.hiddenTruth}（注意度 ${f.attentionLevel}，服务：${f.characterNames.join("、")}${f.recoverActName ? `，回收：${f.recoverActName}` : ""}）`);
+      lines.push(`    · [${f.actName}] ${f.surfaceAction} ⇢ ${f.hiddenTruth}（注意度 ${f.attentionLevel}，服务：${f.characterNames.join("、")}，回收幕：${f.recoverActNames.join("、")}）`);
     }
   }
   if (newLocations && newLocations.length > 0) {
@@ -194,6 +194,9 @@ function formatChapterPlan(
     lines.push(`  ✨ 本次规划新增伏笔（确认后自动入库）：`);
     for (const f of newForeshadows) {
       lines.push(`    · [${f.chapterName}] ${f.surfaceAction} ⇢ ${f.hiddenTruth}（注意度 ${f.attentionLevel}，服务：${f.characterNames.join("、")}）`);
+      for (const recovery of f.recoveryPlan) {
+        lines.push(`      回收幕：${recovery.actName}：${recovery.chapterNames.length > 0 ? recovery.chapterNames.join("、") : "待细化（尚未规划回收章）"}`);
+      }
     }
   }
   if (foreshadowBindings && foreshadowBindings.length > 0) {

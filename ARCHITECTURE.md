@@ -93,6 +93,8 @@ apps/agent/src/
 └── workflows/
     ├── index.ts         # 模块出口（createNovel / planActChapters / regenerateOutline / polishCharacter
     │                    #   / writeChapter / collectWorldview / createOutline / planChapters）
+    ├── foreshadow-plan.ts # 多幕回收计划解析、幕序与缓存绑定合并判断
+    ├── foreshadow-refinement.ts # 暂停后未来幕已有章时，仅细化原回收计划并确认
     ├── workflow-cache.ts # 主步骤缓存执行器：同步入库与标记共事务，异步复用完成值
     ├── resume-workflow.ts # 按 runId 分发原模式、小说与幕目标
     ├── create-novel.ts  # 主编排：初始化 → 参数收集 → 大纲生成确认入库 → state 收尾回填 → 新增地点确定性入库
@@ -357,3 +359,13 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 `WorkflowCache` 覆盖 create / plan-chapters / regen-outline 的主输入、已完成子 Agent 产物与入库收尾。未完成子 Agent 从保存输入重跑，消息日志暂不用于恢复子 Agent 问答现场。正文与润色未接入。恢复校验原小说/幕及大纲版本，拒绝把旧计划挂到新版；已完成运行重入只返回结果。
 
 CLI `bun run dev resume <runId>`、headless `resume <runId>` 经 `resume-workflow.ts` 分发；query `list-runs [novelId]` 列未完成运行，详情 `pendingRuns` 返回摘要。shared 协议增加 `workflow-run` 和 resume 启动参数。客户端三类会话页记录 runId 并支持继续，书库中选中小说可恢复未完成流程；结束或返回刷新详情。Electron `agent-process.ts` 从 main 提取协议与生命周期宿主，spawn 和消息出口由 main 注入，`terminate-agent.ts` 等待进程终止。stop 与后续 start 串行，close 后才清理会话并上报退出，保留 stdout 尾部完成消息；子进程实例守卫避免旧事件干扰新会话。
+
+## 伏笔多幕回收规划（2026-10-16）
+
+shared `outlineNewForeshadowSchema` 要求 `recoverActNames` 非空且不重复；`chapterNewForeshadowSchema` 要求 `recoveryPlan`（回收幕 + 章名清单）。注意度保持 1 易发现、10 难发现；更难发现可回收更晚是节奏指导。Agent 确认前校验真实、唯一的幕章引用及顺序，回收幕不得早于登场幕，同幕具体回收章必须更晚。章节 Agent 获得完整当前大纲，既有本幕登场/回收清单必须覆盖；新伏笔对未规划后幕先确定幕，章名留空，已有幕则选真实章。多幕计划在前幕保留核心真相、最后计划幕完整揭露。
+
+22→23 增量迁移在 immediate 事务内新增 `foreshadows.recover_act_node_ids` JSON 数组与 `edit_revision` 整数，旧单幕转单元素数组、无则 []，旧编辑版本 0，原时间戳与注意度不变；锁内复查，失败回滚。store 保留旧 singular 读取为数组首项，add 第四参兼容字符串/数组。查询详情新增 `recoverActNodeIds`（契约可选供旧载荷兼容），不暴露内部编辑计数。每幕按自己的章绑定识别未细化任务，自动回收绑定追加去重并按全书章序排列。
+
+主流程恢复既保存确认产物，也固定确认时清单序号映射。未确认子步骤重跑刷新本幕两清单及当前大纲；已确认缓存沿用原映射。`foreshadow-plan.ts` 将普通编辑修订与工作流绑定追加区分：用户显式更新递增 `editRevision`，自动绑定指定 workflow 来源保持计数；只有核心设定不变、绑定单调增加且编辑版本一致的新快照可合并，旧无版本快照保守保护。原空章回收幕在暂停期间已规划时，通过受限细化步骤选择真实章，再确认并缓存后入库，不丢弃已确认伏笔。
+
+React/CLI 确认门展示全部回收计划，预览逐幕列已绑定章或待细化。`foreshadow-context.ts` 根据目标树版本与后续计划幕检查最终回收；仍有更晚计划幕未细化时只给阶段回收，写作和审校继续复用同源材料。工作流实现与边界详见模块 ARCHITECTURE.md。

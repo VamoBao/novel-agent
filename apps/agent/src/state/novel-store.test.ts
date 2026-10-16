@@ -411,7 +411,7 @@ describe("书库管理（pinned / favorite / 级联删除 / v4 迁移）", () =>
     ).toEqual({ updated_at: "2026-01-01T00:00:00Z" });
     expect(
       (db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(22);
+    ).toBe(23);
     db.close();
     await rm(dir, { recursive: true, force: true });
   });

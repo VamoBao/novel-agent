@@ -218,6 +218,8 @@ describe("query CLI（buildNovelList / buildNovelDetail）", () => {
         appearChapterId: "ch-1",
         characterIds: [charId],
       },
+      "plant-act",
+      ["recover-act-1", "recover-act-2"],
     );
     store.addForeshadow(id, {
       surfaceAction: "半块玉佩",
@@ -243,6 +245,7 @@ describe("query CLI（buildNovelList / buildNovelDetail）", () => {
       appearChapterId: "ch-1",
       characterIds: [charId],
       recoveryStatus: "unrecovered",
+      recoverActNodeIds: ["recover-act-1", "recover-act-2"],
     });
     expect(detail.foreshadows[1]?.recoverChapterIds).toEqual(["ch-9"]);
     expect(detail.foreshadows[2]?.appearChapterId).toBeUndefined();

@@ -26,6 +26,7 @@ let textScript: ScriptedTurn[][] = [];
 // runReactAgent 把 prompt 原文包在首条 user 消息（messages[0].content）传入，
 // 逐次记录各 Agent 会话的 prompt 供断言（章节 Agent 为每个用例的首个调用）
 let agentPrompts: string[] = [];
+let toolResults: unknown[] = [];
 
 type MockTool = { execute: (input: never, options: unknown) => Promise<unknown> };
 
@@ -48,7 +49,7 @@ mock.module("ai", () => ({
       for (const call of turn) {
         const t = tools[call.tool];
         if (!t) throw new Error(`脚本调用了未注册的工具：${call.tool}`);
-        await t.execute(call.args as never, { toolCallId: `call_${callIndex++}`, messages: [] });
+        toolResults.push(await t.execute(call.args as never, { toolCallId: `call_${callIndex++}`, messages: [] }));
       }
     }
     return { text: "", steps: turns.map(() => ({})), finishReason: "tool-calls", response: { messages: [] } };
@@ -218,7 +219,7 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
         tool: "save_chapters",
         args: {
           ...chapterPlanFixture,
-          newForeshadows: [{ surfaceAction: "来客留下半块玉佩", hiddenTruth: "玉佩是主角身世信物", attentionLevel: 5, characterNames: ["林恒"], chapterName: "第二章·来客" }],
+          newForeshadows: [{ surfaceAction: "来客留下半块玉佩", hiddenTruth: "玉佩是主角身世信物", attentionLevel: 5, characterNames: ["林恒"], chapterName: "第二章·来客", recoveryPlan: [{ actName: "第2幕", chapterNames: ["第三章·破晓"] }] }],
           foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }],
           foreshadowRecoverBindings: [{ index: 1, chapterName: "第三章·破晓" }],
           newLocations: [
@@ -527,7 +528,7 @@ test("确认后部分建卡失败：重开库恢复复用规划、节点与原�
       ...chapter, characters: [...chapter.characters, { name: "苏晚", role: "盟友" }],
     } : chapter),
     newForeshadows: [{ surfaceAction: "新线索", hiddenTruth: "新真相", attentionLevel: 4,
-      characterNames: ["苏晚"], chapterName: "第二章·来客" }],
+      characterNames: ["苏晚"], chapterName: "第二章·来客", recoveryPlan: [{ actName: "第1幕", chapterNames: ["第三章·破晓"] }] }],
     foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }],
   };
   textScript = [
@@ -568,7 +569,7 @@ test("伏笔块中断整体回滚，恢复后只创建一次且完成运行可�
   const actNodeId = world.actNodes[0]!.id;
   const fixture = { ...noNewCastFixture, newForeshadows: ["甲", "乙"].map((label) => ({
     surfaceAction: label, hiddenTruth: `${label}真相`, attentionLevel: 4,
-    characterNames: ["林恒"], chapterName: "第一章·雨夜",
+    characterNames: ["林恒"], chapterName: "第一章·雨夜", recoveryPlan: [{ actName: "第1幕", chapterNames: ["第三章·破晓"] }],
   })) };
   textScript = [[[{ tool: "save_chapters", args: fixture }]]];
   const original = world.foreshadowStore.addForeshadow.bind(world.foreshadowStore);
@@ -649,4 +650,182 @@ test("恢复保留用户在中断期间编辑的伏笔绑定，原序号仍绑�
   expect(world.foreshadowStore.getForeshadow(untouched.id)?.foreshadow.appearChapterId).toBe(firstChapter.id);
   expect(channel.calls).toEqual([]);
   expect(channel.notifies.some((line) => line.includes("已被编辑") && line.includes("用户维护的线索"))).toBe(true);
+});
+
+
+test("确认前拒绝遗漏和非法伏笔计划，修订完整后只询问一次并获得全书大纲上下文", async () => {
+  const world = await seed();
+  const actNodeId = world.actNodes[1]!.id;
+  const priorChapter = world.outlineStore.saveChapters(NOVEL_ID, world.actNodes[0]!.id, [{ name: "序章", summary: "既有章节概述" }])[0]!;
+  world.foreshadowStore.addForeshadow(NOVEL_ID, {
+    surfaceAction: "本幕登场", hiddenTruth: "真相", attentionLevel: 4, recoveryStatus: "unrecovered",
+  }, actNodeId);
+  world.foreshadowStore.addForeshadow(NOVEL_ID, {
+    surfaceAction: "本幕回收", hiddenTruth: "回收真相", attentionLevel: 7, recoveryStatus: "unrecovered", appearChapterId: priorChapter.id,
+  }, world.actNodes[0]!.id, actNodeId);
+  const valid = { ...noNewCastFixture,
+    foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }],
+    foreshadowRecoverBindings: [{ index: 1, chapterName: "第三章·破晓" }],
+  };
+  const newFs = { surfaceAction: "新线索", hiddenTruth: "真相", attentionLevel: 9,
+    characterNames: ["林恒"], chapterName: "第一章·雨夜",
+    recoveryPlan: [{ actName: "第2幕", chapterNames: ["第三章·破晓"] }],
+  };
+  const invalid = [
+    { ...valid, foreshadowBindings: [] },
+    { ...valid, foreshadowRecoverBindings: [] },
+    { ...valid, foreshadowBindings: [{ index: 1, chapterName: "虚构章" }] },
+    { ...valid, foreshadowRecoverBindings: [{ index: 9, chapterName: "第三章·破晓" }] },
+    { ...valid, newForeshadows: [{ ...newFs, recoveryPlan: [{ actName: "第1幕", chapterNames: ["序章"] }] }] },
+    { ...valid, newForeshadows: [{ ...newFs, recoveryPlan: [{ actName: "第2幕", chapterNames: ["第一章·雨夜"] }] }] },
+    { ...valid, newForeshadows: [{ ...newFs, recoveryPlan: [{ actName: "不存在的幕", chapterNames: [] }] }] },
+  ];
+  toolResults = [];
+  agentPrompts = [];
+  textScript = [[...invalid.map((args) => [{ tool: "save_chapters", args }]), [{ tool: "save_chapters", args: valid }]]];
+  const channel = new FakeChannel([true]);
+  await planActChapters({ ...world, novelId: NOVEL_ID, actNodeId, channel });
+  expect(channel.calls.map((call) => call.method)).toEqual(["askConfirm"]);
+  expect(toolResults.slice(0, invalid.length).every((result) => (result as { ok: boolean; error?: string }).ok === false
+    && typeof (result as { error?: string }).error === "string")).toBe(true);
+  expect(agentPrompts[0]).toContain("全书大纲");
+  expect(agentPrompts[0]).toContain("既有章节概述");
+  expect(agentPrompts[0]).toContain("第1幕");
+  expect(agentPrompts[0]).toContain("第2幕");
+});
+
+test("未确认的旧planning-context恢复时补齐最新全书幕章，已有后幕真实章可用于新增回收计划", async () => {
+  const world = await seed();
+  const actNodeId = world.actNodes[0]!.id;
+  let runId = "";
+  const options = { ...world, novelId: NOVEL_ID, actNodeId, onRun: (run: { id: string }) => { runId = run.id; } };
+  textScript = [[[{ tool: "save_chapters", args: noNewCastFixture }]]];
+  await expect(planActChapters({ ...options, channel: new FakeChannel([null]) })).rejects.toBeInstanceOf(UserAbortedError);
+  const { WorkflowRunStore } = await import("../state/workflow-run-store");
+  const cacheStore = new WorkflowRunStore(world.novelStore.database);
+  expect(cacheStore.getStep(runId, "planning-context")?.value).not.toHaveProperty("fullOutline");
+  expect(cacheStore.getStep(runId, "confirmed-plan")).toBeUndefined();
+  const futureChapter = world.outlineStore.saveChapters(NOVEL_ID, world.actNodes[1]!.id, [{ name: "后幕已规划章", summary: "新补入的后幕剧情概述" }])[0]!;
+  agentPrompts = [];
+  textScript = [[[{ tool: "save_chapters", args: { ...noNewCastFixture, newForeshadows: [{
+    surfaceAction: "交给后幕的线索", hiddenTruth: "后幕揭示", attentionLevel: 8,
+    characterNames: ["林恒"], chapterName: "第二章·来客",
+    recoveryPlan: [{ actName: "第2幕", chapterNames: ["后幕已规划章"] }],
+  }] } }]]];
+  const channel = new FakeChannel([true]);
+  await planActChapters({ ...options, resumeRunId: runId, channel });
+  expect(agentPrompts[0]).toContain("新补入的后幕剧情概述");
+  expect(agentPrompts[0]!.indexOf('"name": "第1幕"')).toBeLessThan(agentPrompts[0]!.indexOf('"name": "第2幕"'));
+  expect(channel.calls.map((call) => call.method)).toEqual(["askConfirm"]);
+  expect(world.foreshadowStore.listForeshadows(NOVEL_ID).find((f) => f.foreshadow.surfaceAction === "交给后幕的线索")?.foreshadow.recoverChapterIds).toEqual([futureChapter.id]);
+});
+
+test("多幕待回收清单提示全部回收幕：前幕阶段推进，最后计划幕才完整揭露", async () => {
+  const world = await seed();
+  const firstAct = world.actNodes[0]!.id;
+  const lastAct = world.actNodes[1]!.id;
+  const foreshadow = world.foreshadowStore.addForeshadow(NOVEL_ID, {
+    surfaceAction: "多幕追踪的玉佩", hiddenTruth: "玉佩标记了真正继承人", attentionLevel: 9, recoveryStatus: "unrecovered",
+  }, firstAct, [firstAct, lastAct]);
+  const firstPlan = { ...noNewCastFixture,
+    foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }],
+    foreshadowRecoverBindings: [{ index: 1, chapterName: "第三章·破晓" }],
+  };
+  textScript = [[[{ tool: "save_chapters", args: firstPlan }]]];
+  agentPrompts = [];
+  await planActChapters({ ...world, novelId: NOVEL_ID, actNodeId: firstAct, channel: new FakeChannel([true]) });
+  expect(agentPrompts[0]).toContain("全部回收幕：第1幕 → 第2幕");
+  expect(agentPrompts[0]).toContain("本幕：阶段回收，推进线索并保留核心真相");
+  expect(world.foreshadowStore.listUnrecoveredByAct(NOVEL_ID, lastAct).map((item) => item.id)).toContain(foreshadow.id);
+  textScript = [[[{ tool: "save_chapters", args: { ...noNewCastFixture,
+    foreshadowRecoverBindings: [{ index: 1, chapterName: "第三章·破晓" }],
+  } }]]];
+  agentPrompts = [];
+  await planActChapters({ ...world, novelId: NOVEL_ID, actNodeId: lastAct, channel: new FakeChannel([true]) });
+  expect(agentPrompts[0]).toContain("全部回收幕：第1幕 → 第2幕");
+  expect(agentPrompts[0]).toContain("本幕：最终回收幕，完整揭露核心真相");
+  expect(world.foreshadowStore.getForeshadow(foreshadow.id)?.foreshadow.recoverChapterIds).toHaveLength(2);
+});
+
+test("A确认回收B留空后建卡失败，B先完成规划，恢复A自动细化真实回收章并再次确认", async () => {
+  const world = await seed();
+  const firstAct = world.actNodes[0]!.id;
+  const laterAct = world.actNodes[1]!.id;
+  let runId = "";
+  const options = { ...world, novelId: NOVEL_ID, actNodeId: firstAct, onRun: (run: { id: string }) => { runId = run.id; } };
+  const originalForeshadow = {
+    surfaceAction: "跨幕迟回收的信物", hiddenTruth: "信物指向失散血亲", attentionLevel: 8,
+    characterNames: ["林恒"], chapterName: "第一章·雨夜", recoveryPlan: [{ actName: "第2幕", chapterNames: [] }],
+  };
+  textScript = [
+    [[{ tool: "save_chapters", args: { ...chapterPlanFixture, newForeshadows: [originalForeshadow] } }]],
+    [[{ tool: "模拟中断", args: {} }]],
+  ];
+  await expect(planActChapters({ ...options, channel: new FakeChannel([true]) })).rejects.toThrow("模拟中断");
+  const firstChapterIds = world.outlineStore.listOutlineNodes(NOVEL_ID).filter((n) => n.node.parentId === firstAct).map((n) => n.id);
+  textScript = [[[{ tool: "save_chapters", args: noNewCastFixture }]]];
+  await planActChapters({ ...world, novelId: NOVEL_ID, actNodeId: laterAct, channel: new FakeChannel([true]) });
+  const laterChapterIds = world.outlineStore.listOutlineNodes(NOVEL_ID).filter((n) => n.node.parentId === laterAct).map((n) => n.id);
+  textScript = [
+    [[{ tool: "save_character", args: autoCard }]],
+    [[{ tool: "save_foreshadow_recoveries", args: { recoveries: [
+      { foreshadowIndex: 1, actName: "第2幕", chapterNames: ["第二章·来客"] },
+    ] } }]],
+  ];
+  const channel = new FakeChannel([true]);
+  const addForeshadow = world.foreshadowStore.addForeshadow.bind(world.foreshadowStore);
+  world.foreshadowStore.addForeshadow = () => { throw new Error("细化确认后数据库失败"); };
+  await expect(planActChapters({ ...options, resumeRunId: runId, channel })).rejects.toThrow("细化确认后数据库失败");
+  const { WorkflowRunStore } = await import("../state/workflow-run-store");
+  const cacheStore = new WorkflowRunStore(world.novelStore.database);
+  expect(cacheStore.getStep<{ newForeshadows: unknown[] }>(runId, "confirmed-plan")?.value.newForeshadows).toEqual([originalForeshadow]);
+  expect(cacheStore.getStep(runId, "refined-foreshadow-recoveries")?.value).toMatchObject([{
+    recoveryPlan: [{ actName: "第2幕", chapterNames: ["第二章·来客"] }],
+  }]);
+  world.foreshadowStore.addForeshadow = addForeshadow;
+  const finalChannel = new FakeChannel([]);
+  await planActChapters({ ...options, resumeRunId: runId, channel: finalChannel });
+  expect(finalChannel.calls).toEqual([]);
+  const row = world.foreshadowStore.listForeshadows(NOVEL_ID).find((f) => f.foreshadow.surfaceAction === originalForeshadow.surfaceAction);
+  expect(row).toBeDefined();
+  expect(row?.foreshadow.recoverChapterIds).toEqual([laterChapterIds[1]!]);
+  expect(row?.foreshadow.hiddenTruth).toBe(originalForeshadow.hiddenTruth);
+  expect(world.outlineStore.listOutlineNodes(NOVEL_ID).filter((n) => n.node.parentId === firstAct).map((n) => n.id)).toEqual(firstChapterIds);
+  expect(world.outlineStore.listOutlineNodes(NOVEL_ID).filter((n) => n.node.parentId === laterAct).map((n) => n.id)).toEqual(laterChapterIds);
+  expect(channel.calls.map((call) => call.method)).toEqual(["askConfirm"]);
+  expect(channel.views[0]).toMatchObject({ kind: "chapter-plan", newForeshadows: [{
+    ...originalForeshadow, recoveryPlan: [{ actName: "第2幕", chapterNames: ["第二章·来客"] }],
+  }] });
+  expect(textScript).toHaveLength(0);
+});
+
+test("B未确认时失败、A随后新增回收B的伏笔，B恢复刷新清单并先拒绝遗漏再确认", async () => {
+  const world = await seed();
+  const firstAct = world.actNodes[0]!.id;
+  const laterAct = world.actNodes[1]!.id;
+  let runId = "";
+  const options = { ...world, novelId: NOVEL_ID, actNodeId: laterAct, onRun: (run: { id: string }) => { runId = run.id; } };
+  textScript = [[[{ tool: "模拟中断", args: {} }]]];
+  await expect(planActChapters({ ...options, channel: new FakeChannel([]) })).rejects.toThrow("模拟中断");
+  textScript = [[[{ tool: "save_chapters", args: { ...noNewCastFixture, newForeshadows: [{
+    surfaceAction: "A新加的线索", hiddenTruth: "B揭晓", attentionLevel: 5, characterNames: ["林恒"],
+    chapterName: "第一章·雨夜", recoveryPlan: [{ actName: "第2幕", chapterNames: [] }],
+  }] } }]]];
+  await planActChapters({ ...world, novelId: NOVEL_ID, actNodeId: firstAct, channel: new FakeChannel([true]) });
+  const fs = world.foreshadowStore.listForeshadows(NOVEL_ID)[0]!;
+  toolResults = [];
+  agentPrompts = [];
+  textScript = [[
+    [{ tool: "save_chapters", args: noNewCastFixture }],
+    [{ tool: "save_chapters", args: { ...noNewCastFixture,
+      foreshadowRecoverBindings: [{ index: 1, chapterName: "第三章·破晓" }],
+    } }],
+  ]];
+  const channel = new FakeChannel([true]);
+  await planActChapters({ ...options, resumeRunId: runId, channel });
+  expect(toolResults[0]).toMatchObject({ ok: false });
+  expect(agentPrompts[0]).toContain("A新加的线索");
+  expect(channel.calls.map((call) => call.method)).toEqual(["askConfirm"]);
+  const recoveryChapter = world.outlineStore.listOutlineNodes(NOVEL_ID).find((n) => n.node.parentId === laterAct && n.node.name === "第三章·破晓")!;
+  expect(world.foreshadowStore.getForeshadow(fs.id)?.foreshadow.recoverChapterIds).toEqual([recoveryChapter.id]);
 });

@@ -218,7 +218,7 @@ describe("regenerateOutline（FakeChannel + mock LLM 集成）", () => {
     // LLM 脚本：大纲 Agent 一次 save_outline（携带新增角色 + 伏笔 + 地点清单）；auto-character Agent 一轮入库萧无咎
     textScript = [
       [[{ tool: "save_outline", args: newOutlineFixture(1, 5, "灵脉遗孤·新版", [{ name: "萧无咎", role: "反派·血宗宗主" }], [
-        { surfaceAction: "新版伏笔", hiddenTruth: "新真相", attentionLevel: 5, characterNames: ["林恒"], actName: "新1部·第1幕" },
+        { surfaceAction: "新版伏笔", hiddenTruth: "新真相", attentionLevel: 5, characterNames: ["林恒"], actName: "新1部·第1幕", recoverActNames: ["新1部·第3幕"] },
       ], [
         { name: "青云城", description: "新版主战场·东部边境要塞" },
         { name: "北境大陆", description: "误标已有地点（应被兜底 diff 剔除）" },
@@ -282,10 +282,10 @@ describe("regenerateOutline（FakeChannel + mock LLM 集成）", () => {
   test("确认循环：用户拒绝并给反馈 → Agent 修订后再次提交才入库", async () => {
     const world = await seed();
     textScript = [
-      [[{ tool: "save_outline", args: newOutlineFixture(1, 5, "灵脉遗孤·初稿") }]],
+      [[{ tool: "save_outline", args: newOutlineFixture(1, 3, "灵脉遗孤·初稿") }]],
       [[{ tool: "save_outline", args: newOutlineFixture(1, 3, "灵脉遗孤·修订稿") }]],
     ];
-    const channel = new FakeChannel([3, 1, false, "幕数太多，精简到 3 幕", true]);
+    const channel = new FakeChannel([3, 1, false, "调整幕内情节，增强冲突", true]);
 
     const result = await regenerateOutline(optionsFor(world, channel));
 
@@ -319,7 +319,7 @@ test("新版确认后建卡失败：恢复只生成一个版本并补完伏笔",
   const world = await seed();
   const fixture = newOutlineFixture(1, 3, "新版", [{ name: "萧无咎", role: "反派" }], [{
     surfaceAction: "新版本线索", hiddenTruth: "隐藏真相", attentionLevel: 4,
-    characterNames: ["萧无咎"], actName: "新1部·第1幕",
+    characterNames: ["萧无咎"], actName: "新1部·第1幕", recoverActNames: ["新1部·第3幕"],
   }]);
   textScript = [
     [[{ tool: "save_outline", args: fixture }]],

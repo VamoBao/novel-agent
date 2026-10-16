@@ -16,6 +16,10 @@ export interface StoredForeshadow {
   actNodeId: string | null;
   /** 回收幕节点（大纲规划的真相揭晓幕，可空裸列——章节规划按幕圈定回传「待回收」伏笔） */
   recoverActNodeId: string | null;
+  /** 全部回收幕；旧单幕兼容字段始终取本数组首项。 */
+  recoverActNodeIds: string[];
+  /** 普通编辑修订号；工作流自动绑定不递增，用于恢复时识别用户修改。 */
+  editRevision: number;
   createdAt: string;
   updatedAt: string;
   foreshadow: Foreshadow;
@@ -34,6 +38,8 @@ interface ForeshadowRow {
   appear_chapter_id: string | null;
   act_node_id: string | null;
   recover_act_node_id: string | null;
+  recover_act_node_ids: string;
+  edit_revision: number;
   recover_chapter_ids: string | null;
   character_ids: string | null;
   created_at: string;
@@ -43,22 +49,22 @@ interface ForeshadowRow {
 const INSERT_SQL = `
   INSERT INTO foreshadows (
     id, novel_id, surface_action, hidden_truth, attention_level, recovery_status,
-    planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids, act_node_id, recover_act_node_id,
+    planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids, act_node_id, recover_act_node_id, recover_act_node_ids,
     created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 `;
 
 const SELECT_BY_NOVEL_SQL = `
   SELECT id, novel_id, surface_action, hidden_truth, attention_level, recovery_status,
-         planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids, act_node_id, recover_act_node_id,
-         created_at, updated_at
+         planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids, act_node_id, recover_act_node_id, recover_act_node_ids,
+         edit_revision, created_at, updated_at
   FROM foreshadows WHERE novel_id = ? ORDER BY created_at ASC, id ASC;
 `;
 
 const SELECT_BY_ID_SQL = `
   SELECT id, novel_id, surface_action, hidden_truth, attention_level, recovery_status,
-         planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids, act_node_id, recover_act_node_id,
-         created_at, updated_at
+         planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids, act_node_id, recover_act_node_id, recover_act_node_ids,
+         edit_revision, created_at, updated_at
   FROM foreshadows WHERE id = ?;
 `;
 
@@ -66,7 +72,7 @@ const UPDATE_SQL = `
   UPDATE foreshadows SET
     surface_action = ?, hidden_truth = ?, attention_level = ?, recovery_status = ?,
     planting_method = ?, purpose = ?, appear_chapter_id = ?,
-    recover_chapter_ids = ?, character_ids = ?, updated_at = ?
+    recover_chapter_ids = ?, character_ids = ?, updated_at = ?, edit_revision = edit_revision + ?
   WHERE id = ?;
 `;
 
@@ -103,11 +109,17 @@ function rowToForeshadow(row: ForeshadowRow): Foreshadow {
 }
 
 function rowToStored(row: ForeshadowRow): StoredForeshadow {
+  const recoverActNodeIds = parseJsonArrayColumn(row.id, "recover_act_node_ids", row.recover_act_node_ids);
+  if (recoverActNodeIds.some((id) => id.length === 0)) {
+    throw new Error(`伏笔 ${row.id} 的 recover_act_node_ids 列损坏：幕 ID 不可为空`);
+  }
   return {
     id: row.id,
     novelId: row.novel_id,
     actNodeId: row.act_node_id,
-    recoverActNodeId: row.recover_act_node_id,
+    recoverActNodeId: recoverActNodeIds[0] ?? null,
+    recoverActNodeIds,
+    editRevision: row.edit_revision,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     foreshadow: rowToForeshadow(row),
@@ -143,26 +155,33 @@ export class ForeshadowStore {
   }
 
   /** 写入伏笔（先过 schema 校验；携带服务角色时角色须存在且属于同一小说；actNodeId 为
-   *  埋设幕节点、recoverActNodeId 为回收幕节点（大纲规划的真相揭晓幕），均缺省 NULL），
+   *  埋设幕节点，第四参支持单个或多个回收幕；缺省不规划回收幕），
    *  返回带库表元信息的记录 */
   addForeshadow(
     novelId: string,
     foreshadow: Foreshadow,
     actNodeId?: string,
-    recoverActNodeId?: string,
+    recoverActNodeId?: string | readonly string[],
   ): StoredForeshadow {
     const validated = foreshadowSchema.parse(foreshadow);
+    const recoverActNodeIds = [...new Set(typeof recoverActNodeId === "string"
+      ? [recoverActNodeId] : (recoverActNodeId ?? []))];
+    if (recoverActNodeIds.some((id) => typeof id !== "string" || id.length === 0)) {
+      throw new Error("回收幕 ID 必须为非空字符串");
+    }
     this.assertCharactersInNovel(novelId, validated.characterIds);
     const id = generateUuidV7();
     const now = new Date().toISOString();
     this.db
       .prepare(INSERT_SQL)
-      .run(id, novelId, ...foreshadowToColumns(validated), actNodeId ?? null, recoverActNodeId ?? null, now, now);
+      .run(id, novelId, ...foreshadowToColumns(validated), actNodeId ?? null, recoverActNodeIds[0] ?? null, JSON.stringify(recoverActNodeIds), now, now);
     return {
       id,
       novelId,
       actNodeId: actNodeId ?? null,
-      recoverActNodeId: recoverActNodeId ?? null,
+      recoverActNodeId: recoverActNodeIds[0] ?? null,
+      recoverActNodeIds,
+      editRevision: 0,
       createdAt: now,
       updatedAt: now,
       foreshadow: validated,
@@ -182,8 +201,8 @@ export class ForeshadowStore {
     const rows = this.db
       .prepare(
         `SELECT id, novel_id, surface_action, hidden_truth, attention_level, recovery_status,
-                planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids, act_node_id, recover_act_node_id,
-                created_at, updated_at
+                planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids, act_node_id, recover_act_node_id, recover_act_node_ids,
+                edit_revision, created_at, updated_at
          FROM foreshadows
          WHERE novel_id = ? AND act_node_id = ? AND appear_chapter_id IS NULL
          ORDER BY created_at ASC, id ASC;`,
@@ -192,23 +211,20 @@ export class ForeshadowStore {
     return rows.map(rowToStored);
   }
 
-  /** 某本小说指定幕下「未绑回收章」的伏笔（回收幕=本幕且回收章为空，章节规划回传清单，按入库顺序） */
+  /** 本幕尚未细化回收章的伏笔；其他幕已有回收章不影响本幕待办。 */
   listUnrecoveredByAct(novelId: string, actNodeId: string): StoredForeshadow[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, novel_id, surface_action, hidden_truth, attention_level, recovery_status,
-                planting_method, purpose, appear_chapter_id, recover_chapter_ids, character_ids, act_node_id, recover_act_node_id,
-                created_at, updated_at
-         FROM foreshadows
-         WHERE novel_id = ? AND recover_act_node_id = ? AND recover_chapter_ids IS NULL
-         ORDER BY created_at ASC, id ASC;`,
-      )
-      .all(novelId, actNodeId) as ForeshadowRow[];
-    return rows.map(rowToStored);
+    const chapters = this.db.prepare(
+      "SELECT id FROM outlines WHERE novel_id = ? AND parent_id = ? AND type = 'chapter';",
+    ).all(novelId, actNodeId) as Array<{ id: string }>;
+    const chapterIds = new Set(chapters.map((chapter) => chapter.id));
+    return this.listForeshadows(novelId).filter((stored) =>
+      stored.recoverActNodeIds.includes(actNodeId)
+      && !stored.foreshadow.recoverChapterIds?.some((id) => chapterIds.has(id)),
+    );
   }
 
-  /** patch 更新（undefined=不动 / null=清空 / 值=覆盖），自动盖章 updated_at，返回更新后记录 */
-  updateForeshadow(id: string, patch: ForeshadowPatch): StoredForeshadow {
+  /** patch 更新并盖章 updated_at；普通编辑递增修订号，工作流自动绑定保留修订号。 */
+  updateForeshadow(id: string, patch: ForeshadowPatch, options?: { source?: "workflow" }): StoredForeshadow {
     const validated = foreshadowPatchSchema.parse(patch);
     const current = this.getForeshadow(id);
     if (!current) {
@@ -231,7 +247,7 @@ export class ForeshadowStore {
     const updatedAt = new Date().toISOString();
     this.db
       .prepare(UPDATE_SQL)
-      .run(...foreshadowToColumns(updated), updatedAt, id);
+      .run(...foreshadowToColumns(updated), updatedAt, options?.source === "workflow" ? 0 : 1, id);
     const stored = this.getForeshadow(id);
     if (!stored) {
       throw new Error(`伏笔更新后读取失败：${id}`);

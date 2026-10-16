@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { CharacterStore } from "./character-store";
 import { ForeshadowStore } from "./foreshadow-store";
 import { NovelStore } from "./novel-store";
+import { openDatabase } from "./db";
+import { OutlineStore } from "./outline-store";
 import { characterSchema, foreshadowSchema, type Character, type Foreshadow } from "@novel/shared";
 
 let tempDir: string;
@@ -216,7 +218,16 @@ describe("act_node_id 与 listUnboundByAct", () => {
 
   test("listUnrecoveredByAct：命中回收幕=本幕且回收章为空；排除他幕 / 已绑回收章 / 无回收幕 / 无回收幕且已绑", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-fs-unrecovered-"));
-    const store = setup(join(dir, "t.db"));
+    const path = join(dir, "t.db");
+    const store = setup(path);
+    // 已绑定的章必须真实属于目标幕，不能把任意其他章都视作已细化。
+    const db = openDatabase(path);
+    const outlines = new OutlineStore(db);
+    const act = outlines.addOutlineNode(NOVEL_A, { type: "act", name: "回收幕", sort: 1 });
+    db.prepare("UPDATE outlines SET id = 'act-9' WHERE id = ?").run(act.id);
+    const chapter = outlines.addOutlineNode(NOVEL_A, { type: "chapter", name: "回收章", parentId: "act-9", sort: 1 });
+    db.prepare("UPDATE outlines SET id = 'ch-9' WHERE id = ?").run(chapter.id);
+    db.close();
     store.addForeshadow(NOVEL_A, makeForeshadow(), "act-1", "act-9");                            // 命中
     store.addForeshadow(
       NOVEL_A,
@@ -249,3 +260,98 @@ describe("act_node_id 与 listUnboundByAct", () => {
   });
 });
 
+
+
+describe("多幕回收存储", () => {
+  test("数组回收计划重开往返、旧单幕参数兼容，编辑伏笔不改回收幕", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "novel-fs-multiact-"));
+    const path = join(dir, "test.db");
+    const store = setup(path);
+    const multiple = store.addForeshadow(NOVEL_A, makeForeshadow(), "plant", ["recover-1", "recover-2"]);
+    const single = store.addForeshadow(NOVEL_A, makeForeshadow(), "plant", "recover-3");
+    const none = store.addForeshadow(NOVEL_A, makeForeshadow());
+    expect(multiple.recoverActNodeIds).toEqual(["recover-1", "recover-2"]);
+    expect(multiple.recoverActNodeId).toBe("recover-1");
+    expect(single.recoverActNodeIds).toEqual(["recover-3"]);
+    expect(none.recoverActNodeIds).toEqual([]);
+    store.close();
+    const reopened = ForeshadowStore.open(path);
+    try {
+      expect(reopened.getForeshadow(multiple.id)?.recoverActNodeIds).toEqual(["recover-1", "recover-2"]);
+      expect(reopened.updateForeshadow(multiple.id, { hiddenTruth: "修订真相" }).recoverActNodeIds).toEqual(["recover-1", "recover-2"]);
+      expect(reopened.getForeshadow(single.id)?.recoverActNodeId).toBe("recover-3");
+      expect(reopened.getForeshadow(none.id)?.recoverActNodeId).toBeNull();
+    } finally { reopened.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  test("按幕分别判断待办，其他幕已绑定回收章不隐藏后续幕", () => {
+    const db = openDatabase(":memory:");
+    const novelId = new NovelStore(db).createNovel({}).id;
+    const otherNovelId = new NovelStore(db).createNovel({}).id;
+    const outlines = new OutlineStore(db);
+    const act1 = outlines.addOutlineNode(novelId, { type: "act", name: "前幕", sort: 1 });
+    const act2 = outlines.addOutlineNode(novelId, { type: "act", name: "后幕", sort: 2 });
+    const chapter1 = outlines.addOutlineNode(novelId, { type: "chapter", name: "阶段回收", parentId: act1.id, sort: 1 });
+    const chapter2 = outlines.addOutlineNode(novelId, { type: "chapter", name: "最终回收", parentId: act2.id, sort: 1 });
+    const store = new ForeshadowStore(db);
+    try {
+      const fs = store.addForeshadow(novelId, makeForeshadow(), undefined, [act1.id, act2.id]);
+      expect(store.listUnrecoveredByAct(novelId, act1.id).map((f) => f.id)).toEqual([fs.id]);
+      expect(store.listUnrecoveredByAct(novelId, act2.id).map((f) => f.id)).toEqual([fs.id]);
+      store.updateForeshadow(fs.id, { recoverChapterIds: [chapter1.id] });
+      expect(store.listUnrecoveredByAct(novelId, act1.id)).toEqual([]);
+      expect(store.listUnrecoveredByAct(novelId, act2.id).map((f) => f.id)).toEqual([fs.id]);
+      expect(store.listUnrecoveredByAct(otherNovelId, act2.id)).toEqual([]);
+      store.updateForeshadow(fs.id, { recoverChapterIds: [chapter1.id, chapter2.id] });
+      expect(store.listUnrecoveredByAct(novelId, act2.id)).toEqual([]);
+      store.updateForeshadow(fs.id, { recoverChapterIds: ["missing-chapter"] });
+      expect(store.listUnrecoveredByAct(novelId, act2.id).map((f) => f.id)).toEqual([fs.id]);
+    } finally { db.close(); }
+  });
+
+  test("损坏回收幕 JSON 给出定位错误，不静默回落旧单幕", () => {
+    const db = openDatabase(":memory:");
+    const novelId = new NovelStore(db).createNovel({}).id;
+    const store = new ForeshadowStore(db);
+    try {
+      const fs = store.addForeshadow(novelId, makeForeshadow(), undefined, ["act-1", "act-2"]);
+      for (const invalid of ["broken", "null", "{}", '[1]', '[""]']) {
+        db.prepare("UPDATE foreshadows SET recover_act_node_ids = ? WHERE id = ?").run(invalid, fs.id);
+        expect(() => store.getForeshadow(fs.id)).toThrow("recover_act_node_ids");
+      }
+    } finally { db.close(); }
+  });
+});
+
+
+test("编辑修订号区分用户修改与工作流自动绑定，重开保持，失败不递增", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "novel-fs-edit-revision-"));
+  const path = join(dir, "test.db");
+  const db = openDatabase(path);
+  const novelId = new NovelStore(db).createNovel({}).id;
+  const store = new ForeshadowStore(db);
+  try {
+    const created = store.addForeshadow(novelId, makeForeshadow(), undefined, ["act-1", "act-2"]);
+    expect(created.editRevision).toBe(0);
+    db.prepare("UPDATE foreshadows SET updated_at = '2000-01-01' WHERE id = ?").run(created.id);
+    const automatic = store.updateForeshadow(created.id, { recoverChapterIds: ["chapter-first"] }, { source: "workflow" });
+    expect(automatic.editRevision).toBe(0);
+    expect(automatic.updatedAt).not.toBe("2000-01-01");
+    expect(automatic.foreshadow.recoverChapterIds).toEqual(["chapter-first"]);
+    const manual = store.updateForeshadow(created.id, { hiddenTruth: "用户指定的真相" });
+    expect(manual.editRevision).toBe(1);
+    const nextAuto = store.updateForeshadow(created.id, { recoverChapterIds: ["chapter-first", "chapter-final"] }, { source: "workflow" });
+    expect(nextAuto.editRevision).toBe(1);
+    expect(nextAuto.foreshadow.hiddenTruth).toBe("用户指定的真相");
+    // 默认普通更新即使内容未变化也代表一次编辑；失败则不留修订号副作用。
+    expect(store.updateForeshadow(created.id, {}, {}).editRevision).toBe(2);
+    expect(() => store.updateForeshadow(created.id, { attentionLevel: 11 })).toThrow();
+    expect(store.getForeshadow(created.id)?.editRevision).toBe(2);
+    const reopened = ForeshadowStore.open(path);
+    try {
+      expect(reopened.getForeshadow(created.id)?.editRevision).toBe(2);
+      expect(reopened.listForeshadows(novelId)[0]?.editRevision).toBe(2);
+      expect(reopened.listUnboundByAct(novelId, "missing")).toEqual([]);
+    } finally { reopened.close(); }
+  } finally { db.close(); await rm(dir, { recursive: true, force: true }); }
+});

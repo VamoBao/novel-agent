@@ -219,7 +219,7 @@ describe("伏笔回收链路", () => {
     db.close();
   });
 
-  test("plantChapterForeshadows 回收绑定：成功（含同伏笔多章）；越界/章名漂移/登场未绑/回收早于登场逐条跳过；登场绑定对称校验", async () => {
+  test("plantChapterForeshadows 回收绑定：多章与逆序规划成功；非法引用/回收早于登场跳过；登场绑定对称校验", async () => {
     const dir = await mkdtemp(join(tmpdir(), "novel-intake-recover-bind-"));
     tempDir = tempDir || dir;
     const db = openDatabase(join(dir, "t.db"));
@@ -282,15 +282,14 @@ describe("伏笔回收链路", () => {
       foreshadowStore: store,
     });
 
-    expect(result.recoverBound).toBe(2);
+    expect(result.recoverBound).toBe(3);
     expect(store.getForeshadow(okFs.id)?.foreshadow.recoverChapterIds).toEqual(["ch-1", "ch-2"]);
-    expect(store.getForeshadow(noAppear.id)?.foreshadow.recoverChapterIds).toBeUndefined();
+    expect(store.getForeshadow(noAppear.id)?.foreshadow.recoverChapterIds).toEqual(["ch-1"]);
     // 登场绑定对称校验：A 登场 ch-1（序2 < 回收 ch-2 序3）合法；B 登场 ch-2（序3 ≥ 回收 ch-1 序2）拦截
     expect(store.getForeshadow(symmetricOk.id)?.foreshadow.appearChapterId).toBe("ch-1");
     expect(store.getForeshadow(symmetricBad.id)?.foreshadow.appearChapterId).toBeUndefined();
     expect(channel.notifies.some((n) => n.includes("♻ 伏笔已绑定回收章"))).toBe(true);
     expect(channel.notifies.some((n) => n.includes("序号 9 越界"))).toBe(true);
-    expect(channel.notifies.some((n) => n.includes("登场章未绑定"))).toBe(true);
     expect(channel.notifies.some((n) => n.includes("回收章须晚于登场章"))).toBe(true);
     expect(channel.notifies.some((n) => n.includes("登场章须早于回收章"))).toBe(true);
     db.close();

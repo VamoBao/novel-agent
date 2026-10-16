@@ -14,7 +14,7 @@ export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 22;
+const SCHEMA_VERSION = 23;
 
 /** 工作流执行、完成步骤与原生 SDK 消息日志：业务写入和步骤标记共用同一连接。 */
 const CREATE_WORKFLOW_CACHE_SQL = `
@@ -279,9 +279,9 @@ function migrateCharactersToMigrations(db: Database): void {
  *   parent_id 自引用外键（城市→大陆层级）
  * - foreshadows：伏笔（表面行为/隐藏真相/读者注意度 1-10/回收状态枚举），
  *   出现章节 ID、埋设幕节点 ID（act_node_id，章节规划按幕圈定回传的依据）与回收幕节点 ID
- *   （recover_act_node_id，大纲规划的真相揭晓幕）均为
- *   可空裸列（chapter 节点写作期落地后补约束，先例 document_id），
- *   回收章节 IDs 与服务角色 IDs 存 JSON 文本
+ *   （recover_act_node_id，兼容旧单幕，值为回收幕数组首项）均为可空裸列，
+ *   recover_act_node_ids 存完整多幕回收计划（JSON 数组，默认 []），
+ *   回收章节 IDs 与服务角色 IDs 同样存 JSON 文本
  * - style_references：参考文风（名字/文本内容/启用开关）——**内容直接进库**
  *   （TEXT 列，不落文件：文风是喂给 LLM 的素材而非人类阅读产物，体量小而恒定，
  *   每次生成正文都全量注入无懒加载空间），每本小说独立（novel_id 外键），
@@ -579,8 +579,23 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
         db.exec(CREATE_WORKFLOW_CACHE_SQL);
         db.exec("PRAGMA user_version = 22;");
       }).immediate();
+      // 22→23：多幕回收计划与用户编辑修订号（默认 0）；不修改原字段、时间与注意度。
+      db.transaction(() => {
+        const lockedVersion = db.query("PRAGMA user_version").get() as { user_version: number };
+        if (lockedVersion.user_version >= 23) return;
+        const columns = db.query("PRAGMA table_info(foreshadows)").all() as Array<{ name: string }>;
+        if (columns.length > 0 && !columns.some((column) => column.name === "recover_act_node_ids")) {
+          db.exec("ALTER TABLE foreshadows ADD COLUMN recover_act_node_ids TEXT NOT NULL DEFAULT '[]';");
+          db.exec(`UPDATE foreshadows SET recover_act_node_ids =
+            CASE WHEN recover_act_node_id IS NULL THEN '[]' ELSE json_array(recover_act_node_id) END;`);
+        }
+        if (columns.length > 0 && !columns.some((column) => column.name === "edit_revision")) {
+          db.exec("ALTER TABLE foreshadows ADD COLUMN edit_revision INTEGER NOT NULL DEFAULT 0;");
+        }
+        db.exec("PRAGMA user_version = 23;");
+      }).immediate();
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>22 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>23 的库被旧代码打开）：重建兜底
       db.exec("DROP TABLE IF EXISTS agent_message_traces;");
       db.exec("DROP TABLE IF EXISTS workflow_steps;");
       db.exec("DROP TABLE IF EXISTS workflow_runs;");
@@ -747,6 +762,8 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       appear_chapter_id TEXT,
       act_node_id TEXT,
       recover_act_node_id TEXT,
+      recover_act_node_ids TEXT NOT NULL DEFAULT '[]',
+      edit_revision INTEGER NOT NULL DEFAULT 0,
       recover_chapter_ids TEXT,
       character_ids TEXT,
       created_at TEXT NOT NULL,

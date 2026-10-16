@@ -354,6 +354,13 @@ describe("foreshadowEntrySchema 与 novelDetail.foreshadows", () => {
     expect(foreshadowEntrySchema.parse({ ...entry, recoverActNodeId: null }).recoverActNodeId).toBeNull();
   });
 
+  test("回收幕数组保留多幕且兼容缺失的新字段", () => {
+    expect(foreshadowEntrySchema.parse({ ...entry, recoverActNodeIds: ["act-2", "act-3"] }).recoverActNodeIds).toEqual(["act-2", "act-3"]);
+    expect(foreshadowEntrySchema.parse({ ...entry, recoverActNodeIds: [] }).recoverActNodeIds).toEqual([]);
+    expect(foreshadowEntrySchema.parse(entry).recoverActNodeIds).toBeUndefined();
+    expect(() => foreshadowEntrySchema.parse({ ...entry, recoverActNodeIds: [""] })).toThrow();
+  });
+
   test("novelDetail 携带 foreshadows 数组通过契约校验", () => {
     const detail = novelDetailSchema.parse({
       novel: {

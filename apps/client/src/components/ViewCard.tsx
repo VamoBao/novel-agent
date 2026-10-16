@@ -84,7 +84,7 @@ export function ViewCard({ view }: { view: View }) {
               <p className="part-name">✨ 本次大纲伏笔（确认后自动入库）</p>
               {view.newForeshadows.map((f) => (
                 <p key={`${f.actName}-${f.surfaceAction}`} className="act">
-                  · [{f.actName}] {f.surfaceAction} ⇢ {f.hiddenTruth}（注意度 {f.attentionLevel}，服务：{f.characterNames.join("、")}）
+                  · [{f.actName}] {f.surfaceAction} ⇢ {f.hiddenTruth}（注意度 {f.attentionLevel}，服务：{f.characterNames.join("、")}，回收幕：{f.recoverActNames.join("、")}）
                 </p>
               ))}
             </>
@@ -138,9 +138,16 @@ export function ViewCard({ view }: { view: View }) {
             <>
               <p className="part-name">✨ 本次规划新增伏笔（确认后自动入库）</p>
               {view.newForeshadows.map((f) => (
-                <p key={`${f.chapterName}-${f.surfaceAction}`} className="act">
-                  · [{f.chapterName}] {f.surfaceAction} ⇢ {f.hiddenTruth}（注意度 {f.attentionLevel}，服务：{f.characterNames.join("、")}）
-                </p>
+                <div key={`${f.chapterName}-${f.surfaceAction}`} className="act">
+                  <p>
+                    · [{f.chapterName}] {f.surfaceAction} ⇢ {f.hiddenTruth}（注意度 {f.attentionLevel}，服务：{f.characterNames.join("、")}）
+                  </p>
+                  {f.recoveryPlan.map((recovery) => (
+                    <p key={recovery.actName} className="plot">
+                      回收幕：{recovery.actName}：{recovery.chapterNames.length > 0 ? recovery.chapterNames.join("、") : "待细化（尚未规划回收章）"}
+                    </p>
+                  ))}
+                </div>
               ))}
             </>
           ) : null}
@@ -150,6 +157,16 @@ export function ViewCard({ view }: { view: View }) {
               {view.foreshadowBindings.map((b) => (
                 <p key={`${b.index}-${b.chapterName}`} className="plot">
                   {b.index}) → {b.chapterName}
+                </p>
+              ))}
+            </>
+          ) : null}
+          {view.foreshadowRecoverBindings && view.foreshadowRecoverBindings.length > 0 ? (
+            <>
+              <p className="part-name">♻ 伏笔回收绑定（确认后生效）</p>
+              {view.foreshadowRecoverBindings.map((binding) => (
+                <p key={`${binding.index}-${binding.chapterName}`} className="plot">
+                  {binding.index}) → {binding.chapterName}
                 </p>
               ))}
             </>

@@ -22,7 +22,7 @@ const SYSTEM_PROMPT = `你是一名资深小说编辑与故事结构师。你的
 - 全书分为若干部（part），每部是故事的一个宏观段落：有部名与本部梗概（概括该部在整体故事中的位置与作用）；
 - 每部包含若干幕（act），每幕有幕名、梗概与关键情节点；
 - 部数与总幕数必须与结构要求完全一致，每部至少 1 幕；各部包含几幕由你按剧情节奏与冲突推进决定。
-- 本次大纲的所有幕名必须全书唯一，跨部也不得重名；伏笔按幕名绑定，不能仅靠部名或排序号区分同名幕。提交前检查并改写重复的幕名，伏笔 actName / recoverActName 必须与最终幕名完全一致。
+- 本次大纲的所有幕名必须全书唯一，跨部也不得重名；伏笔按幕名绑定，不能仅靠部名或排序号区分同名幕。提交前检查并改写重复的幕名，伏笔 actName / recoverActNames 必须与最终幕名完全一致。
 
 要求：
 1. 大纲必须围绕核心冲突组织（若已提供）：冲突的「由来」对应开端与铺垫，「对角色的影响」推动中段发展，「理想的解决结果」指向结局；
@@ -43,8 +43,10 @@ const SYSTEM_PROMPT = `你是一名资深小说编辑与故事结构师。你的
    - surfaceAction 表面行为（读者可见的表现）、hiddenTruth 隐藏的真相（真正指向的剧情）、attentionLevel 读者注意度 1-10（1 最易发现，10 最难发现）；
    - characterNames 服务角色名（可引用角色库或 newCharacters 清单中的名字，必须真实存在）；
    - actName 埋设幕名（必须是本大纲中真实的幕名）；
-2. 伏笔挂幕不挂章（章节尚不存在，登场章在后续章节规划时绑定）；真相在后续某幕揭晓的伏笔附 recoverActName（回收幕名）：必须是大纲中真实的幕名且在埋设幕之后，大纲期看不到回收点的伏笔省略该字段——回收幕随伏笔入库，该幕章节规划时自动绑定回收章；
-3. 清单内 surfaceAction 不得重复；newForeshadows 会在确认时随大纲一并展示，确认后自动入库。
+2. 每条伏笔必须提供非空 recoverActNames（回收幕名数组），列出至少一个真实回收幕，可在同幕或后续多幕分阶段回收，不得指定埋设之前的幕、重复幕或虚构幕；同幕种收须在后续章节规划时安排不同章节，具体回收章严格晚于登场章；
+3. 注意度沿用 1 最易发现、10 最难发现；越难发现的伏笔可跨更长时间后再回收，以故事节奏与真相推进为依据，不按分数机械指定幕数；
+4. 大纲期不挂具体章，回收幕先随伏笔入库，规划该幕章节时再细化真实回收章；
+5. 清单内 surfaceAction 不得重复；newForeshadows 会在确认时随大纲一并展示，确认后自动入库。
 
 地点梳理要求：
 1. 大纲中作为剧情发生地的真实地理场所（大陆、城市、山脉、宗门驻地、秘境等），不在地点库中的列入 save_outline 的 newLocations：name 为地点名，description 为一句话定位（如「东部边境要塞·主角初战的战场」）；清单内名字不得重复，地点库已有地点不得列入（可用 list_locations 工具查询地点库现状）；
@@ -63,19 +65,14 @@ export function outlineSchemaFor(actCount: number, partCount: number) {
   );
 }
 
-/** 幕名 → 大纲全局序（部序展开后幕的流水号）：伏笔回收幕必须在埋设幕之后的校验依据 */
+/** 幕名 → 大纲全局序（部序展开后幕的流水号）：伏笔回收幕不得早于埋设幕的校验依据 */
 function actOrderIndex(o: Outline, actName: string): number | undefined {
-  let index = 0;
-  for (const part of o.parts) {
-    for (const act of part.acts) {
-      index += 1;
-      if (act.name === actName) return index;
-    }
-  }
-  return undefined;
+  const indexes = o.parts.flatMap((part) => part.acts)
+    .flatMap((act, index) => act.name === actName ? [index + 1] : []);
+  return indexes.length === 1 ? indexes[0] : undefined;
 }
 
-/** save_outline 的结构化入参：大纲本体 + 新增角色清单（项内名字不得重复）+ 伏笔清单（项内表面行为不得重复，回收幕须为真实幕名且晚于埋设幕）+ 新增地点清单（项内名字不得重复），叠加部/幕强校验 */
+/** save_outline 的结构化入参：大纲本体 + 新增角色清单（项内名字不得重复）+ 伏笔清单（项内表面行为不得重复，回收幕须为真实幕名且不早于埋设幕）+ 新增地点清单（项内名字不得重复），叠加部/幕强校验 */
 export function saveOutlineInputSchemaFor(actCount: number, partCount: number) {
   return outlineSchema
     .extend({
@@ -92,12 +89,13 @@ export function saveOutlineInputSchemaFor(actCount: number, partCount: number) {
     .refine(
       (o) =>
         o.newForeshadows.every((f) => {
-          if (!f.recoverActName) return true;
           const plant = actOrderIndex(o, f.actName);
-          const recover = actOrderIndex(o, f.recoverActName);
-          return plant !== undefined && recover !== undefined && recover > plant;
+          return plant !== undefined && f.recoverActNames.every((name) => {
+            const recover = actOrderIndex(o, name);
+            return recover !== undefined && recover >= plant;
+          });
         }),
-      "伏笔回收幕必须是大纲中真实的幕名且在埋设幕之后",
+      "伏笔埋设幕与回收幕必须是大纲中真实的幕名，回收幕不得早于埋设幕",
     )
     .refine(
       (o) =>
@@ -186,7 +184,9 @@ export async function createOutline(
       "大纲完成后调用此工具保存（参数 = 完整大纲 + newCharacters 新增角色清单 + newForeshadows 伏笔清单 + newLocations 新增地点清单）。会把剧情梗概、主题、每部概述、每幕名称概述与三组清单展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整后重新调用。",
     inputSchema: saveOutlineInputSchemaFor(actCount, partCount),
     execute: async (input) => {
-      const { newCharacters, newForeshadows, newLocations, ...outline } = input;
+      const parsed = saveOutlineInputSchemaFor(actCount, partCount).safeParse(input);
+      if (!parsed.success) return { ok: false as const, error: parsed.error.message, note: "请修订大纲及伏笔回收幕计划后重新提交" };
+      const { newCharacters, newForeshadows, newLocations, ...outline } = parsed.data;
       const confirmed = await channel.askConfirm("以上大纲是否确认？", {
         default: true,
         view: { kind: "outline", detail: "confirm", outline, newCharacters, newForeshadows, newLocations },

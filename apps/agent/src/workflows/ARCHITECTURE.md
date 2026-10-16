@@ -315,3 +315,14 @@ writeChapter 在会话开始解析一次 stylePassScore，所有 WriteProgressEv
 - `resume-workflow.ts` 只接 runId，从持久化运行读取模式/小说/目标再分发；不接受调用方另指定目标。完成的运行读取最终结果，不重复提问或写库。
 
 恢复粒度为主步骤边界：失败子 Agent 从已保存输入重新运行；`agents/react.ts` 留存的 SDK 原生消息用于追溯，当前不重新注入以续接子 Agent 内部问答。运行完成与消息记录分离，不能凭工具消息认定业务已提交。正文生成及角色润色不接入本期缓存。根架构文档维护表结构、锁与客户端入口的主说明。
+
+## 伏笔多幕回收规划（2026-10-16）
+
+1. 大纲 `save_outline` 新增伏笔必须提供 `recoverActNames` 非空数组。按部/幕全书顺序验证回收幕真实、唯一且不早于登场幕，允许同幕；注意度保持 1 易发现、10 难发现，越难发现可拉长跨度。
+2. `plan-act-chapters.fullOutlineContext` 从当前树按部→幕→章排序，注入所有幕梗概、情节点及已规划章节概述。`chapter-agent.validateChapterForeshadowPlan` 在确认前强校验本幕既有清单覆盖、序号与真实唯一幕章引用；先安排既有伏笔，再安排新伏笔。回收清单带完整回收幕名及阶段/最终回收幕提示。
+3. 章节新增伏笔 `recoveryPlan` 为非空幕列表；本幕指定本次真实后章、已有后幕指定真实章，尚未规划后幕章列表为空。`foreshadow-plan.resolveChapterRecoveryPlan` 在确定性入库时将计划解析为全部幕 ID 与已有章 ID；旧确认产物无新字段时按原格式继续，不猜回收点。
+4. `foreshadow-intake` 先处理已有登场/回收绑定，既有回收章合并去重；跨幕逆序规划时按已知埋设幕顺序允许先绑回收章，同幕须先确定具体登场章。通过 `editRevision` 区分人工更新与其他幕正常追加，自动绑定不递增计数，用户编辑/删除继续优先。
+5. 确认前重试刷新两清单，确认结果连同当次序号映射缓存；旧确认缓存回退原 planning-context 映射。确认后暂停期间原空章计划幕已有章时，`foreshadow-refinement.ts` 的受限细化 Agent 只选择这些伏笔在指定幕的真实回收章，确认与缓存后沿原步骤入库；原章规划和其他设定保持。
+6. `foreshadow-context.describeRecoveryStage` 同时考虑全部计划回收幕。后续幕尚未细化时，当前已知最晚回收章仍是阶段回收；计划幕缺失或跨版本时不猜最终章。写作与内容审核继续复用同源上下文。
+
+新增计划解析模块依赖 shared 和 state 类型，不进行模型调用；存储/迁移、查询与展示协议的主说明见根 ARCHITECTURE.md。具体设计和验收矩阵见 docs/superpowers/specs/2026-10-16-foreshadow-recovery-plan-design.md。

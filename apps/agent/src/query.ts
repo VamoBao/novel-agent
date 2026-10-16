@@ -413,7 +413,7 @@ function parseForeshadowJson(json: string): Foreshadow {
 }
 
 function toForeshadowEntry(stored: StoredForeshadow): ForeshadowEntry {
-  return { id: stored.id, ...stored.foreshadow, actNodeId: stored.actNodeId, recoverActNodeId: stored.recoverActNodeId };
+  return { id: stored.id, ...stored.foreshadow, actNodeId: stored.actNodeId, recoverActNodeId: stored.recoverActNodeId, recoverActNodeIds: stored.recoverActNodeIds };
 }
 
 /**

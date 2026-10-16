@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-16 [feat] 伏笔多幕回收自动规划：按用户要求，大纲新增伏笔必填 recoverActNames，允许同幕或后续多幕、禁止前置幕；章节 Agent 注入完整当前大纲（含各部/幕梗概、情节点与已有章概述），确认前校验本幕既有登场/回收全覆盖与真实唯一引用。新伏笔必填 recoveryPlan，已有幕选真实章、未规划后幕先定幕后定章，回收章严格晚于登场章。注意度经澄清沿用 1 易发现/10 难发现，难发现可拉长跨度，历史值不改。SQLite 22→23 增多幕JSON和编辑计数，旧单幕保数据迁移；逐幕待办、章绑定追加，后续幕尚未细化不提前最终揭露；React/CLI确认与卡片完整展示计划。恢复区分人工编辑和其他幕自动追加，未确认重试刷新清单、确认后缓存固定序号；原空章计划遇到后幕先规划时，由受限细化Agent选真实章再确认并缓存，不丢伏笔且DB失败后不重复询问。AC：typecheck三工程 / lint / 全量627项（62文件）通过，独立复审通过；覆盖迁移回滚、跨部/同幕、多幕追加、逆序、旧缓存、两种上下文漂移、人工编辑及真实React。未调用真实模型；规格/计划见 docs/superpowers 同日 foreshadow-recovery-plan 文档。
+
 - 2026-10-16 [feat] 客户端隐藏系统菜单栏（简单需求快速通道）：main.ts 顶层 `Menu.setApplicationMenu(null)` 清空应用菜单 + BrowserWindow `autoHideMenuBar: true` 兜底——File/Edit/View 等菜单本地工具用不到；菜单内建快捷键（F11 / Ctrl+R）随之失效，开发期刷新走 HMR。AC：typecheck 3 工程 / lint / 客户端 64 用例通过；NOVEL_CLIENT_SCREENSHOT 无头冒烟实跑正常启动、截图存盘、退出码 0（截图仅页面内容，菜单栏隐藏效果待用户肉眼确认）。
 
 - 2026-10-15 [feat] 主流程缓存与恢复：用户确认采用 AI SDK 原生 `ModelMessage[]`。SQLite 21→22 新增 workflow_runs / workflow_steps / agent_message_traces，主输入、已确认产物与节点结果持久化，同步数据库副作用和完成标记共事务；新建小说、单幕章节规划、大纲重生成按 runId 继续，已创建树/章/地点/角色不重复入库，自动建卡部分失败后按库内 diff 补齐伏笔收尾。SDK 按 step 留存工具调用/结果及 provider 元信息，system 单存，不保存模型连接配置。CLI/headless resume、query list-runs/详情 pendingRuns、客户端错误页与书库继续入口接通。恢复保留中断期间用户编辑的伏笔，版本漂移拒绝；Electron 宿主提取为可测试模块，停止/启动串行且 stdout 排空后才上报退出。AC：typecheck 三工程 / lint / 全量 590 项（59 文件）通过，后端与客户端独立复审通过；覆盖重开库、部分建卡、入库回滚、版本保护、真实 SDK 工具消息、CLI/协议、真实 React 与子进程竞态。第一期恢复主步骤，失败子 Agent 从缓存输入重跑，内部消息仅供追溯；正文与润色未接入，未调用真实模型。计划见 docs/superpowers/plans/2026-10-15-workflow-cache.md，决策见 DECISIONS。
@@ -16,9 +18,9 @@
 
 - 2026-10-15 [feat] 新增角色迁移目标值一律非空（简单需求快速通道，决策见 DECISIONS）：新增迁移表单此前仅必填字段拦截空目标值、可选字段留空即以 null 入库（清单显示「→（清空）」）——现新增路径一律要求非空（新增表达一次变化必须有目标）：shared 新增 `newMigrationValueError` 纯函数；store `addMigration` 先字段级必填校验（必填字段保留「字段「X」为必填」精确文案）再一律非空校验（query CLI / IPC / store 直调全入口生效）；客户端新建表单预校验同规则、目标值恒带必填星标、placeholder 更新。「清空可选字段」语义保留在编辑 patch 路径（留空=清空），历史空目标值记录不受影响（读侧 schema 不变、确认路径兼容历史清空型迁移）。AC：typecheck 3 工程 / lint / 全量 542 项通过（净增 3：shared 纯函数 1 + store 一律非空与编辑清空回归 2；interaction「新建确认失败」用例拆出空目标值客户端拦截用例、原确认失败路径改经「复制为新草案」直达起始章校验）；GUI 弹窗观感待人工复验。
 
-- 2026-10-15 [fix] 写作偏好审查问题修复：保存未选中小说的偏好只刷新书库，当前小说详情刷新以最新选中 ID 拦截迟到成功/失败响应；writeChapter 各阶段携带实际 stylePassScore，经 headless/shared 协议传给客户端，文风阶段警告与建议同审核阈值判定（旧消息默认 80、支持 0）；偏好加载失败显示原始错误与取消按钮、隐藏保存入口。新增 10 项回归，App 与 PreviewPane 使用真实 React/DOM，覆盖非当前保存、当前刷新、切换期间迟到响应、会话阈值与详情不一致、协议兼容和加载失败；关键失败场景先红后绿。AC：typecheck 3 工程 / lint / 全量 539 项（52 文件）通过，独立复审无新增问题；本次未调用真实模型。
-
 ## 历史归档
+
+- 2026-10-15 写作偏好审查修复已归档：迟到详情响应隔离、文风会话阈值透传、加载失败反馈与真实React回归，验收见Git历史及同日DECISIONS。
 
 - 2026-10-14 [feat] 伏笔最终回收与正文审校已归档：按最晚回收章完成真相揭露，写作/修订/eval 同源约束；实现和验收详见 workflows/PROGRESS.md 与 Git 历史。
 

@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-16 [feat] 伏笔多幕回收规划：大纲必填多幕计划；章节输入补完整当前树，优先安排本幕既有伏笔，确认前强校验覆盖、引用及先后。新增 foreshadow-plan.ts 负责计划解析与安全恢复合并，foreshadow-refinement.ts 处理已确认空章计划在暂停期间变为已有章时的受限细化；未确认重跑刷新清单，确认时固定序号，细化单独缓存。入库先处理既有绑定再新增，跨幕追加不覆盖，用户编辑优先；后续计划幕未细化时写作/审校保持阶段回收。跨模块主记录见根 PROGRESS.md。AC：typecheck / lint / 全量627项通过、独立复审通过；包含真实两幕交错恢复与细化确认后DB失败零重问回归，未调用真实模型。
+
 - 2026-10-15 [feat] 三条创作主流程接入 workflow-cache / resume-workflow：确认产物先缓存，节点入库与步骤标记共事务，失败建卡重新 diff，继续补完角色/伏笔；create outlined 状态不再提前跳过未完成收尾，plan 已建章可继续，regen 不重复升版，版本漂移拒绝。绑定保持原序号→ID，执行时重读伏笔并保留暂停期间编辑。主步骤恢复，未完成子 Agent 从保存输入重跑；SDK 原生消息用于追溯。跨模块主记录见根 PROGRESS.md 同日「主流程缓存与恢复」。AC：全量 typecheck / lint / 590 项测试通过，含重开库恢复、事务回滚、用户编辑与版本隔离回归，独立复审通过。
 
 - 2026-10-15 [fix] 伏笔绑定命名 prompt 约束（用户指定仅先改 prompt）：大纲要求本次全书幕名唯一、跨部不重名；章节规划要求本幕章名唯一、允许不同幕重名；提交前检查并同步改写伏笔 actName / recoverActName / chapterName 引用，明确排序号不能消除按名称绑定的歧义。未增加 schema/数据库强校验，不能保证模型始终遵守。AC：typecheck / lint / 全量 545 项测试通过；未调用真实模型。主流程缓存与最小消息模型仍在需求讨论，不计为已实现。
@@ -16,9 +18,9 @@
 
 - 2026-10-15 [fix] 写作偏好反馈阈值一致性：writeChapter 的初稿/修订、三段审核开始/结束与保存事件均携带本次解析的 stylePassScore，经 headless → shared write-progress → 客户端章卡传递，警告与建议显示使用同审核阈值。协议新字段可选、旧消息默认 80，零阈值保留。扩展工作流默认 80 与小说覆盖 85 的全阶段/跨轮断言，客户端与协议新增回归见根 PROGRESS。AC：先红后绿，typecheck / lint / 全量 539 项通过，独立复审无新增问题。
 
-- 2026-10-14 [feat] 写作偏好两级配置（章节篇幅 + 文风合格线）：writeChapter 在组上下文前解析生效值——`providers/writing-prefs.ts` 的 resolveSystemWritingPrefs 读 NOVEL_CHAPTER_LENGTH_MIN/MAX + NOVEL_STYLE_PASS_SCORE（非法值静默归 null），shared resolveChapterLength / resolveStylePassScore 按「小说级 novels 行 > 系统级 > 内置默认 2000~3000 字 / 80 分」解析（篇幅 min/max 整体覆盖、半设乱序防御性跳过）；写作 prompt 篇幅条用生效值、chapter-review 文风合格线参数化（input.stylePassScore → 评分 prompt / isReportPassing / formatRevisionBlock，内置默认由 90 改为 80）、Options 增 systemWritingPrefs 注入（缺省读环境变量）、小说级覆盖生效时 notify 通报。AC：typecheck 3 工程 / lint / 全量 529 用例通过（本模块净增 writing-prefs 单测 3 + chapter-review 阈值用例 + write-chapter 偏好两态）；真实模型文学效果待人工验收。数据层 19→20 迁移、query CLI set-writing-prefs 与客户端设置入口见根 PROGRESS 与 DECISIONS 当日条目。
-
 ## 历史归档
+
+- 2026-10-14 写作偏好两级配置已归档：按小说/系统/默认解析篇幅与文风合格线，写作和审校同阈值；完整验收见根PROGRESS历史摘要与Git记录。
 
 - 2026-10-14 [feat] 伏笔最终回收判断与 eval 已归档：基于目标版本全书章序识别最终回收，阶段回收与最终揭露分别约束，写作和内容审校同源；实现/测试详见 foreshadow-context.ts 与 Git 历史。
 

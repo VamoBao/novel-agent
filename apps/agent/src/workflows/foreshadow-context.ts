@@ -1,3 +1,4 @@
+import { recoveryActIds } from "./foreshadow-plan";
 import { readDocumentArtifact } from "../output/document-writer";
 import type { CharacterStore } from "../state/character-store";
 import type { DocumentStore } from "../state/document-store";
@@ -39,6 +40,8 @@ function describeRecoveryStage(
   recoverChapterIds: readonly string[],
   order: ReadonlyMap<string, number>,
   outlineStore: OutlineStore,
+  plannedActIds: readonly string[],
+  novelId: string,
 ): string[] {
   let finalChapterId: string | null = null;
   let finalOrder = 0;
@@ -52,6 +55,30 @@ function describeRecoveryStage(
     if (stepOrder > finalOrder) {
       finalOrder = stepOrder;
       finalChapterId = id;
+    }
+  }
+  // 尚有更晚的计划回收幕时，不能把目前已绑定的最晚章当作最终章。
+  // 用所属部的树版本和部/幕 sort 比较，避免跨部局部 sort 与归档版本混排。
+  if (plannedActIds.length > 0 && finalChapterId) {
+    const actPosition = (actId: string) => {
+      const act = outlineStore.getOutlineNode(actId);
+      const part = act?.node.parentId ? outlineStore.getOutlineNode(act.node.parentId) : undefined;
+      return act?.novelId === novelId && act.node.type === "act" && part?.novelId === novelId && part.node.type === "part"
+        ? { act, part, version: part.node.version } : undefined;
+    };
+    const finalChapter = outlineStore.getOutlineNode(finalChapterId);
+    const lastPosition = finalChapter?.node.parentId ? actPosition(finalChapter.node.parentId) : undefined;
+    const positions = plannedActIds.map(actPosition);
+    if (!lastPosition || positions.some(p => !p || p.version !== lastPosition.version)) {
+      return ["   回收阶段：无法确定（计划回收幕缺失或不属于本章大纲版本）；不得擅自认定当前章为最终收尾章。"];
+    }
+    const pending = positions.filter(p => p && (p.part.node.sort > lastPosition.part.node.sort
+      || (p.part.node.sort === lastPosition.part.node.sort && p.act.node.sort > lastPosition.act.node.sort)));
+    if (pending.length > 0) {
+      return [
+        "   回收阶段：阶段回收；后续仍有计划回收幕，按本章概述推进线索或局部揭示，保留核心真相，不得提前完整揭露隐藏真相或宣称最终收尾。",
+        `   后续回收幕：${pending.map(p => `《${p!.act.node.name}》`).join("、")}（回收章尚未规划或绑定）`,
+      ];
     }
   }
   const finalName = finalChapterId ? outlineStore.getOutlineNode(finalChapterId)?.node.name : undefined;
@@ -148,7 +175,7 @@ export function buildChapterForeshadowContext(
         ? `，服务：${card.characterIds.map((id) => resolveCharacterName(id, characterNames)).join("、")}`
         : "";
       const headline = `表面行为：${card.surfaceAction} / 隐藏真相：${card.hiddenTruth}（注意度 ${card.attentionLevel}/10${service}）`;
-      const stageLines = describeRecoveryStage(chapterNodeId, card.recoverChapterIds ?? [], order, outlineStore);
+      const stageLines = describeRecoveryStage(chapterNodeId, card.recoverChapterIds ?? [], order, outlineStore, recoveryActIds(s), novelId);
 
       // 同章种收：登场即回收，不注入任何章内容
       if (card.appearChapterId === chapterNodeId) {

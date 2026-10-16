@@ -35,11 +35,12 @@ const SYSTEM_PROMPT = `你是一名资深小说编辑。你的任务：把给定
 5. 章节概述尽量点名出场角色，与 characters 清单保持一致。
 
 伏笔梳理要求：
-1. 若「本幕未绑登场章的伏笔」清单中的伏笔会在你规划的章节中出现，必须在 foreshadowBindings 中输出绑定（index = 清单序号，chapterName = 登场章名——必须是本次规划中的真实章名）；不在本幕出现的伏笔不要绑定；
-2. 若「本幕待回收伏笔」清单中的伏笔（真相揭晓幕 = 本幕）会在你规划的章节中揭晓或回收，必须在 foreshadowRecoverBindings 中输出回收绑定（index = 清单序号，chapterName = 回收章名——必须是本次规划中的真实章名，且在该伏笔登场章之后）；一个伏笔跨多章多步回收时输出多条（同 index 不同章）；不在本幕揭晓的伏笔不要绑定；
-3. 规划中发现新的伏笔时列入 newForeshadows（surfaceAction / hiddenTruth / attentionLevel 1-10 / characterNames 服务角色名 / chapterName 登场章名）；
-4. 章节概述尽量体现伏笔的表面行为，让正文写作有据可依；章节概述也尽量体现回收伏笔的真相揭晓；
-5. 各清单内 surfaceAction / 登场绑定序号不得重复，回收绑定内同序号同章的组合不得重复；确认后新伏笔自动入库、登场与回收绑定自动生效。
+1. 必须先完整安排「本幕未绑登场章的伏笔」清单，每项在 foreshadowBindings 中输出一次绑定（index = 原清单序号，chapterName = 本次规划中的真实登场章名），不得遗漏或另造替代伏笔；
+2. 必须完整安排「本幕待回收伏笔」清单，每项在 foreshadowRecoverBindings 中至少输出一条回收绑定（index = 原清单序号，chapterName = 本次规划中的真实回收章名）；同一伏笔可在不同章、多幕逐步回收，按清单标记的「阶段回收」仅推进线索/局部揭示并保留核心真相，最后计划回收幕才完整揭露核心真相；具体回收章必须严格晚于登场章。同幕后种收必须使用不同章；后幕先规划时，如已知埋设幕更早，可先绑跨幕回收，登场章留待埋设幕规划；
+3. 完成本幕既有伏笔任务后再发现新伏笔，列入 newForeshadows（surfaceAction / hiddenTruth / attentionLevel 1-10 / characterNames / chapterName），每条必须附非空 recoveryPlan: [{ actName, chapterNames }]。回收幕只允许本幕或后幕且不能重复：本幕章名必须来自本次规划且严格晚于登场章；已规划的后幕必须填写其已有真实章名；尚未规划的后幕 chapterNames 必须为空数组，等待该幕规划细化，不得虚构未来章名或引用前幕。请参照完整全书大纲及已规划章节安排回收；
+4. attentionLevel 沿用 1 最易发现、10 最难发现；越难发现可越晚回收，按故事节奏安排，不按分数机械指定跨度；
+5. 章节概述尽量体现伏笔的表面行为，让正文写作有据可依；章节概述也尽量体现回收伏笔的真相揭晓；
+6. 各清单内 surfaceAction / 登场绑定序号不得重复，回收绑定内同序号同章的组合不得重复；确认后新伏笔自动入库、登场与回收绑定自动生效。
 
 地点梳理要求：
 1. 本章概述中作为剧情发生地的真实地理场所（城市、山脉、宗门驻地、秘境等），不在地点库中的列入 save_chapters 的 newLocations：name 为地点名，description 为一句话定位（如「第2章主战场·东部边境要塞」）；清单内名字不得重复，地点库已有地点不得列入（可用 list_locations 工具查询地点库现状）；
@@ -60,6 +61,16 @@ export interface PlanChaptersInput {
   actName: string;
   actSummary: string;
   keyPlotPoints: ReadonlyArray<string>;
+  /** 当前版本全书按部、幕排序的上下文；未规划幕 chapters 为空。 */
+  fullOutline?: {
+    id: string;
+    partName: string;
+    partSummary?: string;
+    name: string;
+    summary: string;
+    keyPlotPoints: string[];
+    chapters: { id: string; name: string; summary: string }[];
+  }[];
 }
 
 /** 章节 Agent 的注入项：角色与地点库查询按 novelId 进行，store 可替换（测试） */
@@ -94,6 +105,105 @@ export const saveChaptersInputSchema = chapterPlanSchema.extend({
     .array(newLocationSchema)
     .refine((list) => new Set(list.map((l) => l.name)).size === list.length, "新增地点清单内名字不得重复"),
 });
+
+/** 确认前的上下文校验：真实引用、既有任务覆盖以及伏笔登场/回收顺序。 */
+export function validateChapterForeshadowPlan(
+  plan: z.infer<typeof saveChaptersInputSchema>,
+  input: PlanChaptersInput,
+  options: Pick<PlanChaptersAgentOptions, "unboundForeshadows" | "recoverableForeshadows">,
+): string[] {
+  const errors: string[] = [];
+  const acts = input.fullOutline ?? [{ id: "", name: input.actName, partName: input.partName,
+    summary: input.actSummary, keyPlotPoints: [...input.keyPlotPoints], chapters: [] }];
+  const currentMatches = acts.filter((act) => act.name === input.actName);
+  if (currentMatches.length !== 1) return ["全书大纲中的目标幕必须真实且名字唯一，无法验证歧义引用"];
+  const currentIndex = acts.indexOf(currentMatches[0]!);
+  const chapterIndex = new Map(plan.chapters.map((chapter, index) => [chapter.name, index]));
+  const uniqueChapterIndex = (name: string) => plan.chapters.filter((chapter) => chapter.name === name).length === 1
+    ? chapterIndex.get(name) : undefined;
+  type Position = readonly [number, number];
+  const positions = new Map<string, Position>();
+  acts.forEach((act, actIndex) => act.chapters.forEach((chapter, index) => positions.set(chapter.id, [actIndex, index])));
+  const isAfter = (later: Position, earlier: Position) => later[0] > earlier[0]
+    || (later[0] === earlier[0] && later[1] > earlier[1]);
+  const unbound = options.unboundForeshadows ?? [];
+  const recoverable = options.recoverableForeshadows;
+  unbound.forEach((_, index) => {
+    if (!plan.foreshadowBindings.some((binding) => binding.index === index + 1)) {
+      errors.push(`本幕登场伏笔序号 ${index + 1} 遗漏，必须完整安排既有伏笔`);
+    }
+  });
+  recoverable.forEach((_, index) => {
+    if (!plan.foreshadowRecoverBindings.some((binding) => binding.index === index + 1)) {
+      errors.push(`本幕回收伏笔序号 ${index + 1} 遗漏，必须完整安排既有伏笔`);
+    }
+  });
+  const plannedAppearances = new Map<string, Position>();
+  for (const binding of plan.foreshadowBindings) {
+    const target = unbound[binding.index - 1];
+    const chapter = uniqueChapterIndex(binding.chapterName);
+    if (!target) errors.push(`伏笔登场绑定序号 ${binding.index} 不存在`);
+    if (chapter === undefined) errors.push(`伏笔登场章「${binding.chapterName}」不是本次规划的名字唯一的真实章节`);
+    if (!target || chapter === undefined) continue;
+    const appearance: Position = [currentIndex, chapter];
+    plannedAppearances.set(target.id, appearance);
+    for (const id of target.foreshadow.recoverChapterIds ?? []) {
+      const recovery = positions.get(id);
+      if (!recovery || !isAfter(recovery, appearance)) {
+        errors.push(`伏笔「${target.foreshadow.surfaceAction}」登场章必须早于已有回收章`);
+      }
+    }
+  }
+  for (const binding of plan.foreshadowRecoverBindings) {
+    const target = recoverable[binding.index - 1];
+    const chapter = uniqueChapterIndex(binding.chapterName);
+    if (!target) errors.push(`伏笔回收绑定序号 ${binding.index} 不存在`);
+    if (chapter === undefined) errors.push(`伏笔回收章「${binding.chapterName}」不是本次规划的名字唯一的真实章节`);
+    if (!target || chapter === undefined) continue;
+    const appearance = plannedAppearances.get(target.id)
+      ?? (target.foreshadow.appearChapterId ? positions.get(target.foreshadow.appearChapterId) : undefined);
+    if (appearance) {
+      if (!isAfter([currentIndex, chapter], appearance)) errors.push(`伏笔「${target.foreshadow.surfaceAction}」回收章必须严格晚于登场章`);
+    } else {
+      const plantingAct = acts.findIndex((act) => act.id === target.actNodeId);
+      if (plantingAct < 0 || plantingAct >= currentIndex) {
+        errors.push(`伏笔「${target.foreshadow.surfaceAction}」尚未安排登场章，且无法确定埋设幕早于本幕`);
+      }
+    }
+  }
+  for (const foreshadow of plan.newForeshadows) {
+    const appearance = uniqueChapterIndex(foreshadow.chapterName);
+    if (appearance === undefined) errors.push(`新伏笔登场章「${foreshadow.chapterName}」不是本次规划的名字唯一的真实章节`);
+    for (const recovery of foreshadow.recoveryPlan) {
+      const matches = acts.filter((act) => act.name === recovery.actName);
+      const act = matches.length === 1 ? matches[0] : undefined;
+      const actIndex = act ? acts.indexOf(act) : -1;
+      if (!act || actIndex < currentIndex) {
+        errors.push(`新伏笔回收幕「${recovery.actName}」必须是名字唯一的真实本幕或后续幕`);
+        continue;
+      }
+      if (new Set(recovery.chapterNames).size !== recovery.chapterNames.length) {
+        errors.push(`回收幕「${recovery.actName}」的回收章引用不得重复`);
+      }
+      if (actIndex === currentIndex) {
+        if (recovery.chapterNames.length === 0) errors.push("本幕回收计划必须指定真实回收章");
+        for (const name of recovery.chapterNames) {
+          const index = uniqueChapterIndex(name);
+          if (index === undefined) errors.push(`本幕回收章「${name}」不是本次规划的名字唯一的真实章节`);
+          else if (appearance !== undefined && index <= appearance) errors.push(`新伏笔回收章「${name}」必须严格晚于登场章`);
+        }
+      } else if (act.chapters.length > 0) {
+        if (recovery.chapterNames.length === 0) errors.push(`已规划幕「${act.name}」必须指定已有真实回收章`);
+        for (const name of recovery.chapterNames) {
+          if (act.chapters.filter((chapter) => chapter.name === name).length !== 1) errors.push(`回收章「${name}」不是幕「${act.name}」的名字唯一的已有真实章节`);
+        }
+      } else if (recovery.chapterNames.length > 0) {
+        errors.push(`幕「${act.name}」尚未规划，回收章须留空，不得虚构未来章名`);
+      }
+    }
+  }
+  return errors;
+}
 
 /** 章节 Agent 的最终产物：确认通过的规划本体（含逐章登场角色清单）与随规划连带确认的新伏笔清单、既有伏笔登场/回收绑定指令与新增地点清单。
  *  新增角色清单不再由模型单独输出——由编排层经 collectChapterCharacters + filterNewCharacters 从逐章清单对角色库派生（单一事实源）。 */
@@ -150,7 +260,11 @@ export async function planChapters(
       "章节规划完成后调用此工具保存（参数 = 完整规划——含每章登场角色清单 + newForeshadows 新伏笔与 foreshadowBindings / foreshadowRecoverBindings 登场与回收绑定 + newLocations 新增地点清单）。会把本幕梗概、关键情节点、推荐的章节列表（含登场角色）与各清单展示给用户做最终确认：用户确认后保存完成；用户提出修改意见时，需根据反馈调整规划后重新调用。",
     inputSchema: saveChaptersInputSchema,
     execute: async (inputPlan) => {
-      const { newForeshadows, foreshadowBindings, foreshadowRecoverBindings, newLocations, ...plan } = inputPlan;
+      const parsed = saveChaptersInputSchema.safeParse(inputPlan);
+      if (!parsed.success) return { ok: false as const, error: parsed.error.message, note: "请修订伏笔回收计划后重新提交" };
+      const errors = validateChapterForeshadowPlan(parsed.data, input, options);
+      if (errors.length > 0) return { ok: false as const, error: errors.join("；"), note: "请补齐既有伏笔任务并修订非法引用后重新提交，不要请求用户确认无效方案" };
+      const { newForeshadows, foreshadowBindings, foreshadowRecoverBindings, newLocations, ...plan } = parsed.data;
       // 「本次规划新增角色」由逐章登场清单对角色库派生（单一事实源）——确认门所见 = 入库所得
       const newCharacters: NewCharacterOutline[] = filterNewCharacters(
         collectChapterCharacters(plan),
@@ -185,6 +299,17 @@ export async function planChapters(
   });
 
   const libraryRows = characterStore.listCharacters(novelId);
+  const describeRecovery = (foreshadow: StoredForeshadow): string => {
+    const recoveryIds = foreshadow.recoverActNodeIds?.length > 0 ? foreshadow.recoverActNodeIds
+      : foreshadow.recoverActNodeId ? [foreshadow.recoverActNodeId] : [];
+    const outline = input.fullOutline ?? [];
+    const indexes = recoveryIds.map((id) => outline.findIndex((act) => act.id === id));
+    const currentIndex = outline.findIndex((act) => act.name === input.actName);
+    const final = indexes.length > 0 && indexes.every((index) => index >= 0)
+      && currentIndex === Math.max(...indexes);
+    const names = recoveryIds.map((id) => outline.find((act) => act.id === id)?.name ?? "未定位回收幕");
+    return `全部回收幕：${names.join(" → ") || "未指定"}；本幕：${final ? "最终回收幕，完整揭露核心真相" : "阶段回收，推进线索并保留核心真相"}`;
+  };
 
   const result = await runReactAgent({
     system: SYSTEM_PROMPT,
@@ -198,6 +323,7 @@ export async function planChapters(
       `目标幕：${input.actName}`,
       `本幕梗概：${input.actSummary}`,
       `本幕关键情节点：\n${input.keyPlotPoints.map((p, i) => `${i + 1}. ${p}`).join("\n")}`,
+      ...(input.fullOutline ? [`全书大纲（按全书顺序，含已规划真实章节；chapters 为空的幕尚未规划）：\n${JSON.stringify(input.fullOutline, null, 2)}`] : []),
       libraryRows.length > 0
         ? `角色库已有角色：${libraryRows.map((r) => `${r.character.basicInfo.name}（${r.character.core.narrativeRole}）`).join("、")}`
         : "角色库暂无角色",
@@ -210,10 +336,10 @@ export async function planChapters(
         : []),
       ...(options.recoverableForeshadows && options.recoverableForeshadows.length > 0
         ? [
-            `本幕待回收伏笔（真相揭晓幕=本幕且回收章未绑；序号. 表面行为——隐藏真相，登场章为空表示尚未绑定登场章）：\n${options.recoverableForeshadows
+            `本幕待回收伏笔（本幕尚未安排回收章，其他幕可能已有回收章；序号. 表面行为——隐藏真相，登场章为空表示尚未绑定登场章）：\n${options.recoverableForeshadows
               .map(
                 (f, i) =>
-                  `${i + 1}. ${f.foreshadow.surfaceAction}——${f.foreshadow.hiddenTruth}（登场：${f.foreshadow.appearChapterId ?? "未绑定"}）`,
+                  `${i + 1}. ${f.foreshadow.surfaceAction}——${f.foreshadow.hiddenTruth}（埋设幕：${input.fullOutline?.find((act) => act.id === f.actNodeId)?.name ?? "未绑定"}，登场章：${f.foreshadow.appearChapterId ?? "未绑定"}；${describeRecovery(f)}）`,
               )
               .join("\n")}`,
           ]

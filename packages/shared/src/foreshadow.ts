@@ -93,22 +93,30 @@ export const newForeshadowSchema = z.object({
 
 export type NewForeshadow = z.infer<typeof newForeshadowSchema>;
 
-/** 大纲阶段变体：埋设幕名（入库时解析为幕节点 ID）；recoverActName 回收幕名（可选——
- *  真相在后续某幕揭晓的伏笔携带，须为真实幕名且在埋设幕之后，入库解析为回收幕节点） */
+/** 大纲阶段新增伏笔必须包含真实回收幕；同幕或后续多幕的顺序约束由 Agent 校验。 */
 export const outlineNewForeshadowSchema = newForeshadowSchema.extend({
   actName: z.string().min(1).describe("埋设幕名（必须是大纲中真实的幕名）"),
-  recoverActName: z
-    .string()
-    .min(1)
-    .optional()
-    .describe("回收幕名（真相揭晓的幕；必须是大纲中真实的幕名且在埋设幕之后）；大纲期看不到回收点则省略"),
+  recoverActNames: z.array(z.string().trim().min(1)).min(1)
+    .refine((names) => new Set(names).size === names.length, "回收幕名不可重复")
+    .describe("回收幕名清单（至少一幕，不重复；必须为埋设幕或后续真实幕名）"),
 });
 
 export type OutlineNewForeshadow = z.infer<typeof outlineNewForeshadowSchema>;
 
-/** 章节规划阶段变体：登场章名（入库时解析为章节点 ID） */
+/** 已规划幕指定真实章，未规划的后续幕留空，待规划该幕时细化。 */
+export const foreshadowRecoveryPlanEntrySchema = z.object({
+  actName: z.string().trim().min(1).describe("回收幕名（必须为本幕或后续真实幕名）"),
+  chapterNames: z.array(z.string().trim().min(1))
+    .describe("回收章名（已规划幕必须引用真实章节；尚未规划的后续幕为空数组）"),
+});
+export type ForeshadowRecoveryPlanEntry = z.infer<typeof foreshadowRecoveryPlanEntrySchema>;
+
+/** 章节规划阶段新增伏笔必须带多幕回收计划；章序与全书引用由 Agent 校验。 */
 export const chapterNewForeshadowSchema = newForeshadowSchema.extend({
   chapterName: z.string().min(1).describe("登场章名（必须是本次规划中的真实章名）"),
+  recoveryPlan: z.array(foreshadowRecoveryPlanEntrySchema).min(1)
+    .refine((plan) => new Set(plan.map((entry) => entry.actName)).size === plan.length, "回收计划的幕名不可重复")
+    .describe("回收计划（至少一幕；每幕出现一次，携带真实回收章或未规划幕的空章清单）"),
 });
 
 export type ChapterNewForeshadow = z.infer<typeof chapterNewForeshadowSchema>;

@@ -91,8 +91,8 @@ const outlineFixture = {
     { name: "林恒", role: "误标已有角色（应被兜底 diff 剔除）" },
   ],
   newForeshadows: [
-    { surfaceAction: "宗主赐下断脉散", hiddenTruth: "药中掺了追踪灵脉的蛊种", attentionLevel: 6, characterNames: ["林恒", "萧无咎"], actName: "第1幕" },
-    { surfaceAction: "幕名漂移的伏笔", hiddenTruth: "不会入库", attentionLevel: 3, characterNames: ["林恒"], actName: "不存在的幕" },
+    { surfaceAction: "宗主赐下断脉散", hiddenTruth: "药中掺了追踪灵脉的蛊种", attentionLevel: 6, characterNames: ["林恒", "萧无咎"], actName: "第1幕", recoverActNames: ["第2幕", "第5幕"] },
+    { surfaceAction: "幕名漂移的伏笔", hiddenTruth: "不会入库", attentionLevel: 3, characterNames: ["不存在的角色"], actName: "第1幕", recoverActNames: ["第2幕"] },
   ],
   newLocations: [{ name: "青云城", description: "东部边境要塞·主角初战的战场" }],
   parts: [

@@ -143,9 +143,15 @@ function ForeshadowPreview({
   const recoverNames = (entry.recoverChapterIds ?? []).map(
     (cid) => detail.outlineNodes.find((n) => n.id === cid)?.name ?? cid,
   );
-  const recoverActName = entry.recoverActNodeId
-    ? detail.outlineNodes.find((n) => n.id === entry.recoverActNodeId)?.name ?? entry.recoverActNodeId
-    : null;
+  const recoverActIds = entry.recoverActNodeIds ?? (entry.recoverActNodeId ? [entry.recoverActNodeId] : []);
+  const recoveryPlan = recoverActIds.map((actId) => ({
+    actId,
+    actName: detail.outlineNodes.find((node) => node.id === actId)?.name ?? "（回收幕已归档）",
+    chapterNames: (entry.recoverChapterIds ?? []).flatMap((chapterId) => {
+      const chapter = detail.outlineNodes.find((node) => node.id === chapterId);
+      return chapter?.parentId === actId ? [chapter.name] : [];
+    }),
+  }));
   const nameById = new Map(detail.characters.map((c) => [c.id, c.basicInfo.name]));
   if (editing) {
     return (
@@ -179,9 +185,13 @@ function ForeshadowPreview({
         <p className="outline-summary">
           回收章：{recoverNames.length > 0 ? recoverNames.join("、") : "（未规划）"}
         </p>
-        {recoverActName && recoverNames.length === 0 ? (
-          <p className="outline-summary">回收幕：{recoverActName}（待该幕章节规划时绑定回收章）</p>
-        ) : null}
+        {recoveryPlan.map((recovery) => (
+          <p key={recovery.actId} className="outline-summary">
+            回收幕：{recovery.actName}：{recovery.chapterNames.length > 0
+              ? `已绑定回收章：${recovery.chapterNames.join("、")}`
+              : "待细化（尚未绑定回收章）"}
+          </p>
+        ))}
         <p className="outline-summary">
           服务角色：
           {(entry.characterIds ?? []).map((cid) => nameById.get(cid) ?? cid).join("、") || "（无）"}

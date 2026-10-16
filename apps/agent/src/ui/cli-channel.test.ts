@@ -130,7 +130,7 @@ describe("renderView", () => {
   test("outline confirm：携带 newForeshadows 时渲染伏笔区块，缺失不渲染", () => {
     const withFs = renderView({
       kind: "outline", detail: "confirm", outline,
-      newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], actName: "第一幕" }],
+      newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], actName: "第一幕", recoverActNames: ["第三幕"] }],
     } as never);
     expect(withFs).toContain("本次大纲伏笔");
     expect(withFs).toContain("[第一幕] 送信伏笔");
@@ -156,7 +156,7 @@ describe("renderView", () => {
           { name: "第一章·雨夜", summary: "概述", characters: [{ name: "林恒", role: "本章主视角" }] },
         ],
       },
-      newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], chapterName: "第一章·雨夜" }],
+      newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], chapterName: "第一章·雨夜", recoveryPlan: [{ actName: "第三幕", chapterNames: [] }] }],
       foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }],
     };
     const rendered = renderView(view as never);
@@ -167,17 +167,42 @@ describe("renderView", () => {
     expect(renderView({ ...view, newForeshadows: undefined, foreshadowBindings: undefined } as never)).not.toContain("伏笔");
   });
 
-  test("outline confirm：伏笔携带 recoverActName 时行内显示回收幕，缺失不显示", () => {
+  test("outline confirm：伏笔单回收幕计划行内显示，缺失伏笔清单不显示", () => {
     const withRecover = renderView({
       kind: "outline", detail: "confirm", outline,
-      newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], actName: "第一幕", recoverActName: "第三幕" }],
+      newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], actName: "第一幕", recoverActNames: ["第三幕"] }],
     } as never);
-    expect(withRecover).toContain("回收：第三幕");
+    expect(withRecover).toContain("回收幕：第三幕");
     const withoutRecover = renderView({
       kind: "outline", detail: "confirm", outline,
-      newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 4, characterNames: ["林恒"], actName: "第一幕" }],
     } as never);
-    expect(withoutRecover).not.toContain("回收：");
+    expect(withoutRecover).not.toContain("回收幕：");
+  });
+
+  test("outline confirm：展示每个计划回收幕", () => {
+    const text = renderView({
+      kind: "outline", detail: "confirm", outline,
+      newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 8,
+        characterNames: ["林恒"], actName: "第一幕", recoverActNames: ["第三幕", "终局幕"] }],
+    } as never);
+    expect(text).toContain("回收幕：第三幕、终局幕");
+  });
+
+  test("chapter-plan：新增伏笔展示多幕具体回收章与待细化计划", () => {
+    const text = renderView({
+      kind: "chapter-plan", actName: "第一幕", actSummary: "梗概", keyPlotPoints: [],
+      plan: { chapters: [{ name: "起行章", summary: "概述", characters: [{ name: "林恒", role: "主角" }] }] },
+      newForeshadows: [{ surfaceAction: "送信伏笔", hiddenTruth: "暗示投敌", attentionLevel: 8,
+        characterNames: ["林恒"], chapterName: "起行章", recoveryPlan: [
+          { actName: "第三幕", chapterNames: ["解铃章", "证词章"] },
+          { actName: "终局幕", chapterNames: [] },
+        ] }],
+      foreshadowRecoverBindings: [{ index: 2, chapterName: "破局章" }],
+    } as never);
+    expect(text).toContain("第三幕：解铃章、证词章");
+    expect(text).toContain("终局幕：待细化");
+    expect(text).toContain("♻ 伏笔回收绑定（确认后生效）");
+    expect(text).toContain("2) → 破局章");
   });
 
   test("chapter-plan：携带 foreshadowRecoverBindings 时渲染回收绑定区块，缺失或空不渲染", () => {

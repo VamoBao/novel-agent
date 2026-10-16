@@ -99,6 +99,8 @@ export const foreshadowEntrySchema = foreshadowSchema.extend({
     .min(1)
     .nullable()
     .describe("埋设幕节点 ID（outlines 表 act 节点）；未绑幕 / 旧数据为 null"),
+  recoverActNodeIds: z.array(z.string().min(1)).optional()
+    .describe("多幕回收计划的幕节点 ID（旧载荷缺失时回退 recoverActNodeId）"),
   recoverActNodeId: z
     .string()
     .min(1)

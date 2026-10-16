@@ -500,8 +500,8 @@ describe("newForeshadowSchema 及变体", () => {
 
   test("基础项通过；大纲变体带 actName、章节变体带 chapterName 各自通过", () => {
     expect(newForeshadowSchema.parse(base).attentionLevel).toBe(4);
-    expect(outlineNewForeshadowSchema.parse({ ...base, actName: "第1幕" }).actName).toBe("第1幕");
-    expect(chapterNewForeshadowSchema.parse({ ...base, chapterName: "第一章·雨夜" }).chapterName).toBe("第一章·雨夜");
+    expect(outlineNewForeshadowSchema.parse({ ...base, actName: "第1幕", recoverActNames: ["第1幕", "第3幕"] }).actName).toBe("第1幕");
+    expect(chapterNewForeshadowSchema.parse({ ...base, chapterName: "第一章·雨夜", recoveryPlan: [{ actName: "第3幕", chapterNames: [] }] }).chapterName).toBe("第一章·雨夜");
   });
 
   test("注意度越界 / 非整数、characterNames 空数组或缺字段被拒绝", () => {
@@ -517,14 +517,22 @@ describe("newForeshadowSchema 及变体", () => {
     expect(() => chapterNewForeshadowSchema.parse(base)).toThrow();
   });
 
-  test("大纲变体 recoverActName 两态：缺省合法、携带合法（回收幕名）", () => {
-    expect(outlineNewForeshadowSchema.parse({ ...base, actName: "第1幕" }).recoverActName).toBeUndefined();
-    expect(
-      outlineNewForeshadowSchema.parse({ ...base, actName: "第1幕", recoverActName: "第3幕" }).recoverActName,
-    ).toBe("第3幕");
-    expect(() =>
-      outlineNewForeshadowSchema.parse({ ...base, actName: "第1幕", recoverActName: "" }),
-    ).toThrow();
+  test("大纲新伏笔必须带非空且 trim 后唯一的回收幕名，旧单幕不能代替", () => {
+    for (const recoverActNames of [undefined, [], [""], ["  "], ["第2幕", " 第2幕 "]]) {
+      expect(() => outlineNewForeshadowSchema.parse({ ...base, actName: "第1幕", recoverActName: "第2幕", recoverActNames })).toThrow();
+    }
+    const parsed = outlineNewForeshadowSchema.parse({ ...base, actName: "第1幕", recoverActNames: [" 第1幕 ", "第3幕"], recoverActName: "旧字段" });
+    expect(parsed.recoverActNames).toEqual(["第1幕", "第3幕"]);
+    expect(parsed).not.toHaveProperty("recoverActName");
+  });
+
+  test("章节新伏笔必须带非空回收计划，幕名 trim 唯一，未规划幕可空章清单", () => {
+    for (const recoveryPlan of [undefined, [], [{ actName: " ", chapterNames: [] }], [{ actName: "第2幕" }], [{ actName: "第2幕", chapterNames: [" "] }], [{ actName: "第2幕", chapterNames: [] }, { actName: " 第2幕 ", chapterNames: [] }]]) {
+      expect(() => chapterNewForeshadowSchema.parse({ ...base, chapterName: "第一章", recoveryPlan })).toThrow();
+    }
+    expect(chapterNewForeshadowSchema.parse({ ...base, chapterName: "第一章", recoveryPlan: [
+      { actName: " 第1幕 ", chapterNames: [" 第二章 "] }, { actName: "第3幕", chapterNames: [] },
+    ] }).recoveryPlan).toEqual([{ actName: "第1幕", chapterNames: ["第二章"] }, { actName: "第3幕", chapterNames: [] }]);
   });
 
   test("chapter-plan 视图携带 foreshadowRecoverBindings 通过；缺失仍通过（旧消息兼容）；同 index 多条合法（多步回收）", () => {
@@ -624,7 +632,7 @@ describe("两确认视图的伏笔可选字段", () => {
   };
 
   test("outline 视图携带 newForeshadows 通过；缺失仍通过", () => {
-    expect(outlineViewSchema.parse({ ...baseOutlineView, newForeshadows: [{ ...fs, actName: "第一幕" }] }).newForeshadows).toHaveLength(1);
+    expect(outlineViewSchema.parse({ ...baseOutlineView, newForeshadows: [{ ...fs, actName: "第一幕", recoverActNames: ["第一幕"] }] }).newForeshadows).toHaveLength(1);
     expect(outlineViewSchema.parse(baseOutlineView).newForeshadows).toBeUndefined();
   });
 
@@ -638,7 +646,7 @@ describe("两确认视图的伏笔可选字段", () => {
     };
     const view = chapterPlanViewSchema.parse({
       ...base,
-      newForeshadows: [{ ...fs, chapterName: "第一章·雨夜" }],
+      newForeshadows: [{ ...fs, chapterName: "第一章·雨夜", recoveryPlan: [{ actName: "第1幕", chapterNames: ["第二章"] }] }],
       foreshadowBindings: [{ index: 1, chapterName: "第一章·雨夜" }],
     });
     expect(view.foreshadowBindings).toHaveLength(1);
