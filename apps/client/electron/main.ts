@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeTheme } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, nativeTheme } from "electron";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -187,6 +187,9 @@ app.commandLine.appendSwitch("disable-gpu");
 app.commandLine.appendSwitch("no-sandbox");
 // GPU 子进程在本环境启动即崩（error_code=1002），并入主进程以软件渲染运行
 app.commandLine.appendSwitch("in-process-gpu");
+// 隐藏系统菜单栏（File/Edit/View 等——本地工具用不到；菜单内建快捷键 F11/Ctrl+R
+// 随之失效，开发期刷新走 HMR、DevTools 需代码调用）
+Menu.setApplicationMenu(null);
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -194,6 +197,7 @@ function createWindow(): BrowserWindow {
     width: 1100,
     height: 820,
     title: "novel-agent",
+    autoHideMenuBar: true,
     webPreferences: {
       // electron-vite 4 的 preload 产物为 ESM（.mjs；需 sandbox:false，Electron ≥28 支持）
       preload: path.join(__dirname, "../preload/index.mjs"),

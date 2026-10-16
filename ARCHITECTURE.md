@@ -175,7 +175,7 @@ packages/shared/src/     # @novel/shared：双端共享纯 zod 层——领域 s
 
 apps/client/             # @novel/client：Electron 客户端（electron-vite 三段式 + React）
 ├── electron/
-│   ├── main.ts          # 主进程：窗口 + AgentProcess 适配（注入spawn bun headless——AgentStartOptions
+│   ├── main.ts          # 主进程：窗口（隐藏系统菜单栏——本地工具用不到）+ AgentProcess 适配（注入spawn bun headless——AgentStartOptions
 │   │                    #   映射 argv（create / resume / plan-chapters / regen-outline /
 │   │                    #   polish-character 含表单载荷 / write-chapter 章节正文生成）、
 │   │                    #   消息 zod 复验转发、hello 版本校验、退出回收）
