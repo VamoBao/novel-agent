@@ -1,3 +1,14 @@
+## 2026-10-16 模型 provider 显式选择并调用官方 SDK（替代统一 OpenAI 兼容接口）
+
+- **背景**：用户报错——`generateObject` 的中文业务 prompt（如「请提取角色名字」）在 DeepSeek 上返回 400。SDK 请求拦截确认：通用兼容接口只发 `response_format=json_object`，不在消息里注入 JSON 指令，而 DeepSeek 服务端要求该模式下 prompt 必须出现 json 字样。用户同时要求设置弹窗提供 OpenAI / DeepSeek / Claude 三种接口类型，各自使用对应的官方 AI SDK provider。
+- **备选**：①保持通用接口，在各业务 prompt 里零散追加 JSON 指令——只解当前单一报错，无法支持 Claude 原生协议，也不满足 provider 选择要求；②按模型名或域名自动选择——无法可靠识别代理与自定义端点，且会静默改变协议；③显式选择并调用官方 provider（采纳）。
+- **结论（用户确认）**：两族模型各显式选择 provider（`openai` / `deepseek` / `claude`，新增 `AGENT_MODEL_PROVIDER` / `WRITING_MODEL_PROVIDER` 与设置弹窗下拉框），由 `providers/model-factory.ts` 分别调用 `@ai-sdk/openai`（显式 `chat(model)` 走 Chat Completions，保留自定义地址）/ `@ai-sdk/deepseek`（结构化输出自动注入 JSON 指令与 schema，即本次缺陷的根因修复）/ `@ai-sdk/anthropic`（Messages 协议与鉴权）。依赖去掉 `@ai-sdk/openai-compatible` 并连带把 `ai` 升到同一 provider 单副本。
+- **迁移与默认**：没有显式 provider 的历史配置按**有效地址**迁移（DeepSeek 官方地址 → deepseek，其余现有 OpenAI 兼容地址 → openai）；全新 Agent 默认 DeepSeek（保留开箱体验），独立写作默认 OpenAI。设置层刻意不按地址推断 provider——否则「设置里留空」会遮蔽 `.env` / 继承环境里已配置的值；由 agent 侧按最终生效地址迁移，弹窗用同一对 shared 纯函数回显生效选项。Base URL 留空按 provider 取官方默认；模型名留空仅 DeepSeek 有默认值（其余按所接服务填写）。
+- **错误与回落**：非法 provider 值不静默换协议——Agent 侧由入口启动检查报错退出，写作侧在正文生成前抛可读错误；写作模型三字段（模型名 / Key / Base URL）仍须齐全才启用，不因新增默认 provider 而意外启用，任一未配置继续回落同一 Agent 实例。
+- **行为变更**：非 DeepSeek 接口类型不再有默认模型名（旧实现无条件回落到 `deepseek-flash`）——「自定义地址 + 未填模型名」的历史配置由「带错模型名发请求」改为启动即报错，属更早失败、更清晰的同向变更；DeepSeek 侧默认模型名与默认地址不变。
+- **弹窗语义（独立审查后修正）**：下拉框回显的是**生效**接口类型（`settings:get` 回传 `effectiveProviders`，经三级优先级解析，可能来自 `.env` / 继承环境变量），保存时未触碰下拉框则写回设置文件原值——否则任何一次保存（哪怕只改主题）都会把推断值固化进设置文件、遮蔽下层已配置的 provider。
+- **规格**：docs/superpowers/specs/2026-10-16-model-provider-selection-design.md。
+
 ## 2026-10-15 叙事视角作为第五项创作条件放创作流程（不放设置）
 
 ## 2026-10-16 伏笔自动规划多幕回收与全书上下文
@@ -42,13 +53,14 @@
 - 迁移信息采用用户选定的完整历史范围：同大纲版本已确认、早于本章结束的全部记录，以及本章进行中/结束计划。历史包含角色/字段/旧值→目标/章节区间/诱因/过渡/序号/修订，未来、草案、取消不注入。历史计划区间结束不代表正文已兑现；不新增兑现状态表。
 - 写作与内容审校复用同源上下文，不新增 schema 版本或数据库列。方案见 docs/superpowers/plans/2026-10-14-character-context-completion.md。
 
-## 2026-10-14 Agent 模型统一 OpenAI 兼容接口
+## 2026-10-14 Agent 模型统一 OpenAI 兼容接口（2026-10-16 已被「模型 provider 显式选择」替代）
 
 - **背景**：早期 Agent 绑定 DeepSeek 便于开发，现在需要和写作模型一样配置任意兼容服务的 Key、模型名与 Base URL；用户已确认设计并要求开始。
 - **备选**：沿用 DeepSeek 命名会误导配置含义；增加多 provider 选择器会为同一种接口引入额外分支。
 - **结论**：复用现有 @ai-sdk/openai-compatible，Agent 采用 agent-model.ts / AGENT_MODEL_* / agentModel 设置组，移除专用 provider 依赖。保留旧变量和旧设置组读取，模型名与地址默认值保持 DeepSeek 体验。
 - **兼容边界**：按来源优先级逐字段解析，同来源通用变量优先。新设置组存在时不从旧组恢复已清空字段。JSON 使用通用 json_object，由 SDK 校验结果，不强制端点支持严格 JSON Schema。独立写作模型仍可配置，审校固定走通用 Agent 模型。
 - **规格**：docs/superpowers/specs/2026-10-14-agent-openai-compatible-design.md。
+- **后续（2026-10-16）**：该方案未能覆盖 DeepSeek 的 JSON 输出要求与 Claude 原生协议，已由「模型 provider 显式选择并调用官方 SDK」替代——provider 由配置显式选择，JSON 指令由专用 provider 注入；本条的 `AGENT_MODEL_*` 字段命名、三级优先级与旧变量兼容约定继续有效。
 
 ## 2026-10-13 固定角色基准与角色迁移：基准不可覆盖、变化经迁移表达、阶段按目标章计算
 

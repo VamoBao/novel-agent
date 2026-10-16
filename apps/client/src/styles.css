@@ -998,13 +998,18 @@ button.ghost {
   margin-bottom: 2px;
 }
 
-.settings-dialog .field input {
+/* provider 下拉框（接口类型）与输入框同款观感 */
+.settings-dialog .field input,
+.settings-dialog .field select {
   width: 100%;
   box-sizing: border-box;
   padding: 6px 8px;
   font-size: 13px;
+  font-family: inherit;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--fg-default);
 }
 
 .settings-hint {

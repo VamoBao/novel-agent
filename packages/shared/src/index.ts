@@ -91,6 +91,17 @@ export {
   type NovelWritingPrefs,
   type ChapterLength,
 } from "./writing-prefs";
+export {
+  MODEL_PROVIDERS,
+  MODEL_PROVIDER_BASE_URLS,
+  modelProviderSchema,
+  parseModelProvider,
+  isDeepSeekOfficialBaseUrl,
+  inferModelProvider,
+  resolveAgentModelProvider,
+  resolveWritingModelProvider,
+  type ModelProvider,
+} from "./model-provider";
 export { audienceSuggestionSchema, type AudienceSuggestion } from "./audience";
 export {
   fieldSummaryViewSchema,

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AppSettings } from "./settings";
+import type { AppSettings, EffectiveProviders } from "./settings";
 import type {
   AgentMessage,
   AgentStartOptions,
@@ -91,8 +91,9 @@ contextBridge.exposeInMainWorld("agent", {
     ipcRenderer.invoke("library:updateStyle", novelId, styleId, style),
   deleteStyle: (styleId: string): Promise<{ deleted: string }> =>
     ipcRenderer.invoke("library:deleteStyle", styleId),
-  /** 模型设置读写（设置弹窗）：明文 JSON 于 userData（优先级 设置 > .env > 继承环境变量） */
-  getSettings: (): Promise<{ settings: AppSettings; filePath: string }> =>
+  /** 模型设置读写（设置弹窗）：明文 JSON 于 userData（优先级 设置 > .env > 继承环境变量）；
+   *  读取一并回传两族模型生效的接口类型（弹窗回显真实生效值） */
+  getSettings: (): Promise<{ settings: AppSettings; filePath: string; effectiveProviders: EffectiveProviders }> =>
     ipcRenderer.invoke("settings:get"),
   saveSettings: (settings: AppSettings): Promise<{ settings: AppSettings; filePath: string }> =>
     ipcRenderer.invoke("settings:save", settings),

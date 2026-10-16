@@ -51,7 +51,7 @@ export function App() {
   /** 弹框确认中的重生成目标（非 null 时渲染 OutlineRegenDialog） */
   const [regenConfirm, setRegenConfirm] = useState<OutlineRegenTarget | null>(null);
   const [outlineRegen, setOutlineRegen] = useState<OutlineRegenTarget | null>(null);
-  /** 模型设置弹窗（非 null 时渲染 SettingsDialog） */
+  /** 设置弹窗（非 null 时渲染 SettingsDialog：外观 / 两族模型 / 写作偏好默认） */
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** 写作偏好弹窗目标（书库右键「📏 写作偏好」，非 null 时渲染 WritingPrefsDialog） */
   const [writingPrefs, setWritingPrefs] = useState<{ novelId: string; novelName: string } | null>(null);
@@ -369,7 +369,7 @@ export function App() {
           <h1>📖 novel-agent</h1>
         </div>
         <div className="header-actions">
-          <button className="icon-btn" onClick={() => setSettingsOpen(true)} title="模型设置">
+          <button className="icon-btn" onClick={() => setSettingsOpen(true)} title="设置">
             ⚙️
           </button>
           <button className="primary" onClick={() => setCreating(true)}>

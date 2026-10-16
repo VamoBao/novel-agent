@@ -27,10 +27,12 @@ import {
 } from "@novel/shared";
 import {
   readSettingsFile,
+  resolveEffectiveProviders,
   resolveModelEnv,
   resolveWritingEnv,
   writeSettingsFile,
   type AppSettings,
+  type EffectiveProviders,
 } from "./settings";
 
 /** 仓库根（dev：app 路径为 apps/client，上两级即根；打包分发形态 v2 再调整） */
@@ -268,11 +270,23 @@ ipcMain.handle("agent:stop", async () => {
   await agentProcess.kill();
 });
 
-/** 模型设置读写（设置弹窗）：明文 JSON 于 userData，保存结果原样回传（含规范化后的值） */
-ipcMain.handle("settings:get", (): { settings: AppSettings; filePath: string } => ({
-  settings: readSettingsFile(settingsFilePath()),
-  filePath: settingsFilePath(),
-}));
+/**
+ * 模型设置读写（设置弹窗）：明文 JSON 于 userData，保存结果原样回传（含规范化后的值）。
+ * 读取时一并回传两族模型**生效**的接口类型（经 `.env` / 继承环境变量的三级优先级解析，
+ * 与子进程注入同源）——弹窗回显真实生效值，且未触碰下拉框时保存不把推断值固化进设置文件。
+ */
+ipcMain.handle("settings:get", (): {
+  settings: AppSettings;
+  filePath: string;
+  effectiveProviders: EffectiveProviders;
+} => {
+  const settings = readSettingsFile(settingsFilePath());
+  return {
+    settings,
+    filePath: settingsFilePath(),
+    effectiveProviders: resolveEffectiveProviders(settings, loadEnvFile(path.join(resolveRepoRoot(), ".env")), process.env),
+  };
+});
 
 ipcMain.handle("settings:save", (_event, settings: AppSettings): { settings: AppSettings; filePath: string } => {
   const saved = writeSettingsFile(settingsFilePath(), settings);

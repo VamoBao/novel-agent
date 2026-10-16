@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-16 [feat] 模型 provider 显式选择（跨模块需求，主记录与验收见根 PROGRESS.md 同日条目）：本模块 `write-chapter.ts` 消费的写作模型改由 `providers/writing-model.ts` 按 `WRITING_MODEL_PROVIDER` 所选接口类型调用对应官方 SDK（模型名 / Key / Base URL 三字段齐才启用、未配置回落 Agent 模型、非法 provider 抛可读错误），写作初稿 prompt 与校验链路零改动；本模块 ARCHITECTURE.md 的写作模型描述同步。AC：全量 657 项通过（本模块用例零改动、全数保留）。
+
 - 2026-10-16 [feat] 伏笔多幕回收规划：大纲必填多幕计划；章节输入补完整当前树，优先安排本幕既有伏笔，确认前强校验覆盖、引用及先后。新增 foreshadow-plan.ts 负责计划解析与安全恢复合并，foreshadow-refinement.ts 处理已确认空章计划在暂停期间变为已有章时的受限细化；未确认重跑刷新清单，确认时固定序号，细化单独缓存。入库先处理既有绑定再新增，跨幕追加不覆盖，用户编辑优先；后续计划幕未细化时写作/审校保持阶段回收。跨模块主记录见根 PROGRESS.md。AC：typecheck / lint / 全量627项通过、独立复审通过；包含真实两幕交错恢复与细化确认后DB失败零重问回归，未调用真实模型。
 
 - 2026-10-15 [feat] 三条创作主流程接入 workflow-cache / resume-workflow：确认产物先缓存，节点入库与步骤标记共事务，失败建卡重新 diff，继续补完角色/伏笔；create outlined 状态不再提前跳过未完成收尾，plan 已建章可继续，regen 不重复升版，版本漂移拒绝。绑定保持原序号→ID，执行时重读伏笔并保留暂停期间编辑。主步骤恢复，未完成子 Agent 从保存输入重跑；SDK 原生消息用于追溯。跨模块主记录见根 PROGRESS.md 同日「主流程缓存与恢复」。AC：全量 typecheck / lint / 590 项测试通过，含重开库恢复、事务回滚、用户编辑与版本隔离回归，独立复审通过。

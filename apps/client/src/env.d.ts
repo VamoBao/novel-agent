@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import type { AppSettings } from "../electron/settings";
+import type { AppSettings, EffectiveProviders } from "../electron/settings";
 import type {
   AgentMessage,
   AgentStartOptions,
@@ -57,7 +57,7 @@ declare global {
         style: { name: string; content: string; enabled: boolean },
       ) => Promise<StyleReferenceEntry>;
       deleteStyle: (styleId: string) => Promise<{ deleted: string }>;
-      getSettings: () => Promise<{ settings: AppSettings; filePath: string }>;
+      getSettings: () => Promise<{ settings: AppSettings; filePath: string; effectiveProviders: EffectiveProviders }>;
       saveSettings: (settings: AppSettings) => Promise<{ settings: AppSettings; filePath: string }>;
       isAutostart: () => boolean;
       autoSelectNovelId: () => string | null;

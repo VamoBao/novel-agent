@@ -2,18 +2,27 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   chapterLengthBoundSchema,
+  parseModelProvider,
+  resolveAgentModelProvider,
+  resolveWritingModelProvider,
   stylePassScoreSchema,
+  type ModelProvider,
 } from "@novel/shared";
 
 /**
  * 客户端应用配置（主进程持有，agent 子进程经环境变量注入读取）：
  * VS Code 式**明文 JSON**（用户决策）存于 Electron userData 目录
  * （settings.json，不进仓库、不入 git）——外观主题（system / light / dark，
- * main 侧 applyTheme 设 nativeTheme.themeSource）、Agent 会话模型（OpenAI 接口
- * 兼容：Key + 模型名 + Base URL）、写作模型（OpenAI 接口兼容：模型名 + Key +
- * Base URL，三项需同时配置，留空回落 Agent 模型）与**写作偏好系统级默认**
- * （章节篇幅 min/max + 文风合格线，null=未设置回落内置默认 2000~3000 / 80；
+ * main 侧 applyTheme 设 nativeTheme.themeSource）、Agent 会话模型（Key + 模型名 +
+ * Base URL + **接口类型 provider**：openai / deepseek / claude）、写作模型（同四字段，
+ * 模型名 / Key / Base URL 三项需同时配置，留空回落 Agent 模型）与**写作偏好系统级
+ * 默认**（章节篇幅 min/max + 文风合格线，null=未设置回落内置默认 2000~3000 / 80；
  * 单本小说可在书库右键「写作偏好」单独覆盖，优先级更高）。
+ *
+ * provider 为空串表示**历史配置未设置**：agent 侧按有效地址迁移（DeepSeek 官方
+ * 地址 → deepseek，其余 → openai；Agent 地址留空沿用 DeepSeek，独立写作落 OpenAI），
+ * 设置弹窗按同一规则回显生效选项。此处刻意**不按地址推断**——否则「设置里留空的
+ * provider」会遮蔽 `.env` / 继承环境里已配置的值。
  *
  * 优先级（resolveModelEnv / resolveWritingEnv）：设置文件 > 根目录 `.env` >
  * 继承的环境变量；模型解析结果仍以 `AGENT_MODEL_*` / `WRITING_MODEL_*` 注入
@@ -35,29 +44,30 @@ export interface WritingPrefsSettings {
   stylePassScore: number | null;
 }
 
+/** 模型连接配置（Agent 与写作模型同形态）：provider 空串 = 历史配置未设置（agent 侧按有效地址迁移） */
+export interface ModelSettings {
+  provider: ModelProvider | "";
+  apiKey: string;
+  modelName: string;
+  baseUrl: string;
+}
+
 export interface AppSettings {
   /** 外观主题：跟随系统（默认）/ 浅色 / 深色；main 侧经 applyTheme 设 nativeTheme.themeSource */
   theme: ThemeSetting;
-  /** Agent 会话模型（OpenAI 接口兼容）：世界观 / 角色 / 大纲 / 章节规划等工作流共用 */
-  agentModel: {
-    apiKey: string;
-    modelName: string;
-    baseUrl: string;
-  };
-  /** 写作模型（OpenAI 接口兼容端点）：章节正文生成专用；三项留空回落 Agent 模型 */
-  writingModel: {
-    modelName: string;
-    apiKey: string;
-    baseUrl: string;
-  };
+  /** Agent 会话模型：世界观 / 角色 / 大纲 / 章节规划 / 正文校验等工作流共用 */
+  agentModel: ModelSettings;
+  /** 写作模型：章节正文生成专用；三项留空回落 Agent 模型 */
+  writingModel: ModelSettings;
   /** 写作偏好（章节正文生成）的系统级默认；单本小说的「写作偏好」覆盖优先级更高 */
   writing: WritingPrefsSettings;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "system",
-  agentModel: { apiKey: "", modelName: "", baseUrl: "" },
-  writingModel: { modelName: "", apiKey: "", baseUrl: "" },
+  // provider 留空：agent 侧按有效地址迁移（全新配置的 Agent 落 DeepSeek、独立写作落 OpenAI）
+  agentModel: { provider: "", apiKey: "", modelName: "", baseUrl: "" },
+  writingModel: { provider: "", modelName: "", apiKey: "", baseUrl: "" },
   writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
 };
 
@@ -74,6 +84,20 @@ function normalizeGroup<K extends string>(raw: unknown, keys: readonly K[]): Rec
     result[key] = normalizeString(source[key]);
   }
   return result;
+}
+
+/** provider 还原：三合法值透传，缺省 / 手改非法值归空串（= 历史配置未设置） */
+function normalizeProvider(value: unknown): ModelProvider | "" {
+  return parseModelProvider(value) ?? "";
+}
+
+/** 模型组字段（Agent 与写作模型同形态：Key + 模型名 + Base URL） */
+const MODEL_FIELDS = ["apiKey", "modelName", "baseUrl"] as const;
+
+/** 模型组还原：provider 单独归一（不推断），其余字符串字段 trim / 非字符串归空串 */
+function normalizeModelGroup(raw: unknown): ModelSettings {
+  const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return { provider: normalizeProvider(source.provider), ...normalizeGroup(source, MODEL_FIELDS) };
 }
 
 /** 主题枚举还原：非三合法值（缺省 / 手改 settings.json 写错）一律回「跟随系统」 */
@@ -101,16 +125,15 @@ function normalizeWritingGroup(raw: unknown): WritingPrefsSettings {
   };
 }
 
-/** 还原为合法设置对象：未知字段忽略（前向兼容手工编辑）、字符串 trim / 非字符串归空串、theme 枚举非法归 system、写作偏好非法值归 null */
+/** 还原为合法设置对象：未知字段忽略（前向兼容手工编辑）、字符串 trim / 非字符串归空串、theme 枚举非法归 system、provider 非法归空串、写作偏好非法值归 null */
 export function normalizeSettings(raw: unknown): AppSettings {
   const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return {
     theme: normalizeTheme(source.theme),
-    agentModel: normalizeGroup(
+    agentModel: normalizeModelGroup(
       Object.hasOwn(source, "agentModel") ? source.agentModel : source.deepseek,
-      ["apiKey", "modelName", "baseUrl"],
     ),
-    writingModel: normalizeGroup(source.writingModel, ["modelName", "apiKey", "baseUrl"]),
+    writingModel: normalizeModelGroup(source.writingModel),
     writing: normalizeWritingGroup(source.writing),
   };
 }
@@ -136,9 +159,11 @@ export function writeSettingsFile(filePath: string, settings: AppSettings): AppS
 
 /** 模型相关环境变量清单（settings.json 字段 → 注入子进程的变量名） */
 const MODEL_ENV_ENTRIES = [
+  ["agentModel", "provider", "AGENT_MODEL_PROVIDER", undefined],
   ["agentModel", "apiKey", "AGENT_MODEL_API_KEY", "DEEPSEEK_API_KEY"],
   ["agentModel", "modelName", "AGENT_MODEL_NAME", "DEEPSEEK_MODEL_NAME"],
   ["agentModel", "baseUrl", "AGENT_MODEL_BASE_URL", undefined],
+  ["writingModel", "provider", "WRITING_MODEL_PROVIDER", undefined],
   ["writingModel", "modelName", "WRITING_MODEL_NAME", undefined],
   ["writingModel", "apiKey", "WRITING_MODEL_API_KEY", undefined],
   ["writingModel", "baseUrl", "WRITING_MODEL_BASE_URL", undefined],
@@ -156,9 +181,11 @@ function firstNonEmpty(...candidates: Array<string | undefined>): string {
 
 /**
  * 三级优先级解析为注入子进程的环境变量：设置文件 > `.env`（调用方解析的
- * 键值表）> 继承的父进程环境变量。返回恰好含六个模型变量的键值表，
+ * 键值表）> 继承的父进程环境变量。返回恰好含八个模型变量的键值表，
  * **空串表示三层均未配置**（调用方须从子进程 env 中删除该键——空串会让
- * provider 侧「未配置」判定与默认值逻辑失真）。
+ * provider 侧「未配置」判定与默认值逻辑失真）。provider 同款逐层下探：
+ * 没有显式配置 provider 的来源不遮蔽下一层已配置的值（由 agent 侧按
+ * 最终生效的地址迁移）。
  */
 export function resolveModelEnv(
   settings: AppSettings,
@@ -208,4 +235,27 @@ export function resolveWritingEnv(
     }
   }
   return env;
+}
+
+/** 两族模型各自最终生效的接口类型（设置弹窗回显用——与 agent 侧同一对纯函数，所见即所用） */
+export interface EffectiveProviders {
+  agent: ModelProvider;
+  writing: ModelProvider;
+}
+
+/**
+ * 解析两族模型**生效**的接口类型：先按三级优先级解析模型变量（与 childEnv 同一
+ * 函数），再交 shared 的生效 provider 纯函数推断——因此弹窗回显的是 agent 子进程
+ * 真正会用的接口类型（可能来自 `.env` / 继承环境变量），而不只是设置文件里的值。
+ */
+export function resolveEffectiveProviders(
+  settings: AppSettings,
+  dotenv: Readonly<Record<string, string>>,
+  inherited: Readonly<NodeJS.ProcessEnv>,
+): EffectiveProviders {
+  const env = resolveModelEnv(settings, dotenv, inherited);
+  return {
+    agent: resolveAgentModelProvider(env.AGENT_MODEL_PROVIDER, env.AGENT_MODEL_BASE_URL ?? ""),
+    writing: resolveWritingModelProvider(env.WRITING_MODEL_PROVIDER, env.WRITING_MODEL_BASE_URL ?? ""),
+  };
 }

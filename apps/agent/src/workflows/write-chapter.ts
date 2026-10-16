@@ -60,7 +60,7 @@ export interface WriteChapterOptions {
   novelId: string;
   /** 目标章的 outlines 表节点 ID */
   chapterNodeId: string;
-  /** 写作模型实例；缺省 getWritingModel()（OpenAI 接口兼容端点，环境变量配置，测试注入替身） */
+  /** 写作模型实例；缺省 getWritingModel()（按 WRITING_MODEL_PROVIDER 所选接口类型调用对应官方 SDK，测试注入替身） */
   model?: LanguageModelV4;
   /** 校验模型实例（三段校验独立调用）；缺省 Agent 会话模型——配置了独立写作模型时天然「他评」 */
   reviewModel?: LanguageModelV4;

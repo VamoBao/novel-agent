@@ -17,21 +17,21 @@
 - **人机确认门**：世界观提交、角色卡整卡确认、大纲确认、章节规划确认均设用户确认环节，拒绝后按反馈修订重提
 - **伏笔回收规划**：大纲伏笔必须安排一个或多个回收幕；章节规划获得完整大纲，优先处理本幕伏笔，再为新增伏笔安排回收。未规划后幕先定幕、规划时再定章；多幕回收逐步推进，最后计划幕收尾，难发现的伏笔可安排更长跨度
 - **章节规划**：大纲确认入库后会话即收尾，章节规划由客户端幕节点「规划本幕章节」入口逐幕手动发起（推荐章节数量与概述，确认后幕下入库）
-- **章节正文生成**：章节点「✍️ 生成本章正文」入口，由**写作模型**（OpenAI 接口兼容端点，与 Agent 会话模型解耦、可配置为任意第三方服务）结合世界观 / 角色 / 所属部幕梗概 / 同幕前后章概述单轮生成正文（无确认门，生成后即入库展示）
+- **章节正文生成**：章节点「✍️ 生成本章正文」入口，由**写作模型**（与 Agent 会话模型解耦，可分别选择 OpenAI / DeepSeek / Claude 接口类型与自定义地址）结合世界观 / 角色 / 所属部幕梗概 / 同幕前后章概述单轮生成正文（无确认门，生成后即入库展示）
 - **正文文件存储**：正文内容不进数据库，按层级落盘 `output/<小说名>-<创作ID前8位>/<部名>/<章名>.md`（可直接阅读编辑；同名小说经 ID 段去重不共享文件夹），SQLite `documents` 表只留 `file_path` 元数据与字数，章节点经 `document_id` 绑定；小说改名/删除联动迁移/清理文件
 - **大纲重生成**：「📖 大纲」组头刷新入口——幕数/部数表单 → 新版本大纲预览确认 → 版本切换入库（旧版与旧章归档为历史版本）
 - **角色管理**：浏览页编辑 / 新增角色（13 字段表单 + 必填校验 + AI 润色回填），编辑经版本化更新（旧卡快照归档 `character_versions`，主行 ID 稳定）
 - **SQLite 持久化**：小说、世界观、角色基准与迁移、大纲、正文元数据、地点、伏笔、文风及流程缓存按外键关联；领域主键为应用层生成的 UUIDv7；schema 以 `PRAGMA user_version` 版本化增量迁移（当前 23，包含主流程缓存与多幕回收计划）
 - **双运行模式**：终端交互模式（CLI）与 stdio JSON 行协议模式（`headless`，支持新建小说 / 单幕章节规划 / 大纲重生成 / 角色润色 / 章节正文生成，以及按运行标识恢复）
 - **库查询与管理**：一次性查询 CLI（`query.ts`）：`list` / `get`（含世界观 + 角色 + 大纲节点 + 章节正文）查询 + `rename` / `pin` / `unpin` / `favorite` / `unfavorite` / `delete` / `add-character` / `update-character` 管理
-- **Electron 客户端**：三栏浏览主页（书库 / 结构树 / 预览，右键菜单管理，删除需输入小说名强确认）↔ 独立创作页 / 章节规划页 / 大纲重生成页，正文与润色走内联会话；「⚙️ 模型设置」弹窗配置两族模型（Agent / 写作模型），存 userData 明文 JSON、优先级高于 `.env`，保存后下一次会话生效（agent 子进程仍经环境变量注入读取，零协议改动）
+- **Electron 客户端**：三栏浏览主页（书库 / 结构树 / 预览，右键菜单管理，删除需输入小说名强确认）↔ 独立创作页 / 章节规划页 / 大纲重生成页，正文与润色走内联会话；「⚙️ 设置」弹窗配置两族模型（Agent / 写作模型，各含接口类型下拉框），存 userData 明文 JSON、优先级高于 `.env`，保存后下一次会话生效（agent 子进程仍经环境变量注入读取，零协议改动）
 - **产物落盘**：大纲按创作 ID 保存为 `output/<id>.json`（留存与 theme 读取）；章节正文为上述 Markdown 层级文件（人类可直接阅读编辑）
 
 ## 技术栈
 
 - 运行时：Bun 1.4（`bun.lock` 锁定依赖）
 - 语言：TypeScript 6（`strict`、`noUncheckedIndexedAccess` 等严格选项）
-- LLM 接入：Vercel AI SDK 7（`ai`）+ 官方 `@ai-sdk/openai-compatible`（Agent 会话与写作模型均使用 OpenAI 兼容接口），工具参数 schema 用 zod 4
+- LLM 接入：Vercel AI SDK 7（`ai`）+ 官方 `@ai-sdk/openai` / `@ai-sdk/deepseek` / `@ai-sdk/anthropic`（Agent 会话与写作模型各自按接口类型选择 provider），工具参数 schema 用 zod 4
 - 数据库：SQLite（Bun 内置 `bun:sqlite`）
 - 桌面端：Electron + electron-vite + React
 - 静态检查：ESLint 10 + typescript-eslint 8（扁平配置）
@@ -42,16 +42,17 @@
 ### 环境要求
 
 - [Bun](https://bun.com) 1.4+
-- OpenAI 兼容服务的 API Key（Agent 会话与正文校验使用；模型名与 Base URL 可配置）
-- 写作模型服务（可选，章节正文生成时才需要）：任意 OpenAI 接口兼容端点
+- 模型服务 API Key（Agent 会话与正文校验使用）：OpenAI / DeepSeek / Claude 任一，接口类型、模型名与 Base URL 均可配置
+- 写作模型服务（可选，章节正文生成时才需要）：同样是上述三家之一，可与 Agent 用不同厂商
 
 ### 安装与配置
 
 ```bash
 bun install
 cp .env.example .env   # 编辑 .env，填入 AGENT_MODEL_API_KEY；
+                       # 接口类型 AGENT_MODEL_PROVIDER（openai / deepseek / claude）留空按地址迁移；
                        # 接入其他服务时填 AGENT_MODEL_NAME / AGENT_MODEL_BASE_URL；
-                       # 可选 WRITING_MODEL_* 三项配置独立写作模型
+                       # 可选 WRITING_MODEL_* 四项配置独立写作模型
 ```
 
 ### 运行
@@ -88,9 +89,11 @@ bun run dev:client
 
 | 变量 | 必填 | 说明 | 默认值 |
 | --- | --- | --- | --- |
+| `AGENT_MODEL_PROVIDER` | 否 | Agent 接口类型（`openai` / `deepseek` / `claude`） | 按有效地址迁移（见下） |
 | `AGENT_MODEL_API_KEY` | 是* | Agent API Key（所有会话与正文校验） | — |
-| `AGENT_MODEL_NAME` | 否 | Agent 会话模型名 | `deepseek-flash` |
-| `AGENT_MODEL_BASE_URL` | 否 | Agent 接口 Base URL（OpenAI Chat Completions 兼容） | `https://api.deepseek.com` |
+| `AGENT_MODEL_NAME` | 否 | Agent 会话模型名（`openai` / `claude` 无默认值，需填写） | `deepseek-flash`（仅 DeepSeek） |
+| `AGENT_MODEL_BASE_URL` | 否 | Agent 接口 Base URL | 按接口类型取官方默认（见下） |
+| `WRITING_MODEL_PROVIDER` | 否 | 独立写作模型接口类型（同上三选） | 按有效地址迁移（默认 `openai`） |
 | `WRITING_MODEL_NAME` | 否 | 独立写作模型名（正文生成专用） | — |
 | `WRITING_MODEL_API_KEY` | 否 | 独立写作模型 API Key | — |
 | `WRITING_MODEL_BASE_URL` | 否 | 独立写作模型接口 Base URL | — |
@@ -100,11 +103,21 @@ bun run dev:client
 | `NOVEL_DB_PATH` | 否 | SQLite 库文件路径 | `data/novel.db` |
 | `NOVEL_OUTPUT_DIR` | 否 | 产物输出目录 | `output` |
 
-\* 三处来源任一配置即可；客户端「⚙️ 模型设置」的 Agent 组支持 API Key、模型名与 Base URL，保存后下一次会话生效。接入其他服务时填写对应模型名与地址（例如 `https://api.example.com/v1`）。所选服务与模型需支持工具调用及 JSON 输出。
+\* 三处来源任一配置即可；客户端「⚙️ 设置」的 Agent 组支持**接口类型下拉框** + API Key + 模型名 + Base URL，保存后下一次会话生效。接入其他服务时填写对应模型名与地址（例如 `https://api.example.com/v1`）；自定义地址必须支持所选接口协议。所选服务与模型需支持工具调用及 JSON 输出。
+
+**接口类型（provider）**决定调用哪家官方 SDK 与协议，Agent 与写作模型各自独立选择：
+
+| 选项 | SDK | 接口 | Base URL 留空时的默认地址 |
+| --- | --- | --- | --- |
+| `openai` | `@ai-sdk/openai` | Chat Completions（`chat(model)`） | `https://api.openai.com/v1` |
+| `deepseek` | `@ai-sdk/deepseek` | DeepSeek Chat（含 JSON 输出指令注入） | `https://api.deepseek.com` |
+| `claude` | `@ai-sdk/anthropic` | Anthropic Messages | `https://api.anthropic.com/v1` |
+
+留空时按**有效地址**迁移：DeepSeek 官方地址用 `deepseek`，其余现有 OpenAI 兼容地址用 `openai`（Agent 地址留空沿用 DeepSeek 官方默认，独立写作默认 `openai`）；自定义 DeepSeek 代理请显式选择 `deepseek`。填了非法值启动即报错，不会静默换协议。
 
 旧 `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL_NAME` 仍可使用；同一来源内优先使用 `AGENT_MODEL_*`，不同来源仍按上述优先级逐字段解析。历史客户端 `deepseek` 设置组读取时迁移为 `agentModel`，新组已存在时以新组为准。
 
-写作模型三项需同时配置才启用；任一未配置时正文生成回落到 Agent 模型。即使配置了独立写作模型，正文校验仍使用 Agent 模型。
+写作模型三项（模型名 / Key / Base URL）需同时配置才启用；任一未配置时正文生成回落到 Agent 模型。即使配置了独立写作模型，正文校验仍使用 Agent 模型。
 
 写作偏好（章节篇幅范围与文风合格线）按「小说级 > 系统级 > 内置默认」解析：系统级在客户端「⚙️ 设置 → 写作偏好（默认）」维护（亦可经上述三个 `NOVEL_*` 变量配置，优先级同模型配置），内置默认为篇幅 2000~3000 字、合格线 80 分；单本小说在书库右键「📏 写作偏好」单独覆盖，留空项回落系统设置。
 

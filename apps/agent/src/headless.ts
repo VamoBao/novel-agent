@@ -1,4 +1,4 @@
-import { resolveAgentModelConfig } from "./providers/agent-model";
+import { describeAgentModelConfigError, resolveAgentModelConfig } from "./providers/agent-model";
 import * as path from "node:path";
 import { characterSchema, PROTOCOL_VERSION, type AgentMessage, type Character } from "@novel/shared";
 import { createNovel, planActChapters, polishCharacter, regenerateOutline, writeChapter, resumeWorkflow } from "./workflows";
@@ -116,6 +116,12 @@ async function runSession(session: Session, channel: ProtocolChannel, send: (mes
 
 async function main(): Promise<void> {
   const session = parseSession(process.argv.slice(2));
+  // provider 非法值 / 非 DeepSeek 缺模型名：启动即报错，不静默换协议
+  const configError = describeAgentModelConfigError();
+  if (configError) {
+    process.stderr.write(`NOVEL_AGENT_FATAL: ${configError}\n`);
+    process.exit(1);
+  }
   // 所有会话（包括正文校验）均需要 Agent 模型 API Key。
   if (!resolveAgentModelConfig().apiKey) {
     process.stderr.write("NOVEL_AGENT_FATAL: 未设置 AGENT_MODEL_API_KEY（兼容旧 DEEPSEEK_API_KEY）\n");

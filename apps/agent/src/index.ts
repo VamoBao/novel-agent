@@ -1,12 +1,18 @@
 import { createNovel, resumeWorkflow } from "./workflows";
 import { UserAbortedError } from "./ui/aborted";
 import { CliChannel } from "./ui/cli-channel";
-import { resolveAgentModelConfig } from "./providers/agent-model";
+import { describeAgentModelConfigError, resolveAgentModelConfig } from "./providers/agent-model";
 
 async function main(): Promise<void> {
+  // provider 非法值 / 非 DeepSeek 缺模型名：启动即报错，不静默换协议
+  const configError = describeAgentModelConfigError();
+  if (configError) {
+    console.error(`❌ ${configError}`);
+    process.exit(1);
+  }
   if (!resolveAgentModelConfig().apiKey) {
     console.error(
-      "❌ 未设置 AGENT_MODEL_API_KEY。请在项目根目录 .env 中配置 API Key、AGENT_MODEL_NAME 和 AGENT_MODEL_BASE_URL（模型与地址留空默认使用 DeepSeek；兼容旧 DEEPSEEK_API_KEY）。",
+      "❌ 未设置 AGENT_MODEL_API_KEY。请在项目根目录 .env 中配置 API Key、AGENT_MODEL_PROVIDER（openai / deepseek / claude，留空按地址迁移）、AGENT_MODEL_NAME 和 AGENT_MODEL_BASE_URL（地址留空按 provider 取官方默认；兼容旧 DEEPSEEK_API_KEY）。",
     );
     process.exit(1);
   }
