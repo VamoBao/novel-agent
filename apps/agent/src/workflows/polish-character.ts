@@ -6,6 +6,12 @@ import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
 import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
 import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
 
+/** 润色要求补齐全部字段；使用独立输出契约，兼容 OpenAI 严格 schema，
+ * 角色卡的存储与输入仍允许省略可选字段。 */
+const polishedCharacterSchema = characterSchema.extend({
+  basicInfo: characterSchema.shape.basicInfo.required(),
+}).required();
+
 export interface PolishCharacterOptions {
   /** 交互通道（终端 / 协议 / 测试替身），业务交互的唯一出口 */
   channel: UiChannel;
@@ -62,7 +68,7 @@ export async function polishCharacter(options: PolishCharacterOptions): Promise<
   );
   const { object: polished } = await generateObject({
     model,
-    schema: characterSchema,
+    schema: polishedCharacterSchema,
     prompt: [
       "你是一名专业的小说角色设定编辑。请结合下面的小说世界观，对用户填写的角色卡做全字段润色。",
       "",

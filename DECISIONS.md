@@ -1,3 +1,9 @@
+## 2026-10-16 Provider 审查修复：润色全字段输出与连接编辑快照
+
+- **背景**：OpenAI strict 结构化输出要求所有属性列入 required，角色卡输入允许 optional，而角色润色要求补齐全部字段；另外只跟踪下拉框是否改变，会让编辑自定义地址后的实际 provider 与界面显示不一致。
+- **结论**：只为润色建立全字段必填的本地输出 schema，包含 basicInfo 子字段；不全局关闭 strict，不改变角色输入/持久化 schema。设置表单按模型组跟踪接口类型、Key、模型名和 Base URL，任一连接字段编辑即保存当前显示 provider；未编辑连接组时保留原 provider，主题和写作偏好保存继续尊重环境配置。
+- **验收**：先复现 OpenAI required 拒绝与两组 provider 漂移，再经真实三家 SDK/SQLite 与 React 表单回归验证；全量结果见根 PROGRESS。
+
 ## 2026-10-16 模型 provider 显式选择并调用官方 SDK（替代统一 OpenAI 兼容接口）
 
 - **背景**：用户报错——`generateObject` 的中文业务 prompt（如「请提取角色名字」）在 DeepSeek 上返回 400。SDK 请求拦截确认：通用兼容接口只发 `response_format=json_object`，不在消息里注入 JSON 指令，而 DeepSeek 服务端要求该模式下 prompt 必须出现 json 字样。用户同时要求设置弹窗提供 OpenAI / DeepSeek / Claude 三种接口类型，各自使用对应的官方 AI SDK provider。

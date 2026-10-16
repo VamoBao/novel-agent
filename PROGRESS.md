@@ -4,9 +4,11 @@
 
 ## 进行中
 
-- 暂无。
+- （当前无进行中需求。）
 
 ## 已完成
+
+- 2026-10-16 [fix] 模型 provider 审查两项修复：角色润色使用本地全字段必填输出 schema（含 basicInfo），满足 OpenAI strict required，保留角色输入/存储可选字段与基准只读；设置弹窗按组跟踪接口类型/Key/模型名/Base URL 的编辑，保存当前显示的 provider，未编辑组和仅改主题/写作偏好仍保留环境优先级。新增三家真实 SDK + 内存 SQLite 润色协议回归（递归检查 OpenAI 严格 schema、返回全字段且基准不变）与 Agent/写作两组真实 React 仅改连接不改下拉框回归，原环境 provider 用例改为真实主题编辑。先红后绿，净增 5 项。AC：typecheck / lint / 全量 666 项（63 文件）通过，独立复审无阻塞；未调用真实模型。
 
 - 2026-10-16 [feat] 模型 provider 选择与 DeepSeek JSON 输出修复（复杂需求，设计规格 `docs/superpowers/specs/2026-10-16-model-provider-selection-design.md`，3 个串行任务逐一实现；决策见 DECISIONS）：①模型接入——shared 新增 `model-provider.ts`（provider 三选枚举 + 官方默认地址 + `parseModelProvider` / `isDeepSeekOfficialBaseUrl` / `inferModelProvider` 与 `resolveAgentModelProvider` / `resolveWritingModelProvider` 生效 provider 解析纯函数，agent 侧与客户端弹窗回显共用）；agent 新增 `providers/model-factory.ts` 的 `createProviderModel` 按 provider 调用官方 SDK——OpenAI 显式 `chat(model)` 走 Chat Completions、DeepSeek 官方包、Claude 走 Anthropic Messages，Base URL 留空按 provider 取官方默认；`agent-model.ts` 解析 `AGENT_MODEL_PROVIDER` + 三字段（缺省按有效地址迁移：官方地址 → deepseek、其余 → openai、地址留空沿用 DeepSeek 官方默认；模型名留空仅 DeepSeek 有默认值）并新增 `describeAgentModelConfigError` 交 index.ts / headless.ts 启动检查报非法 provider 与缺模型名，`writing-model.ts` 解析 `WRITING_MODEL_PROVIDER`（缺省迁移、独立写作默认 openai，非法值抛可读错误）且三字段齐才启用；依赖改用 `@ai-sdk/openai` / `@ai-sdk/deepseek` / `@ai-sdk/anthropic`（连带 `ai` 升至 7.0.142 统一 provider 单副本，移除 `@ai-sdk/openai-compatible`）；**根因修复**——通用兼容接口不注入 JSON 指令，DeepSeek 服务端对「prompt 不含 json 字样」的 json_object 请求返回 400，专用 provider 的 `convert-to-deepseek-chat-messages` 会自动注入 schema 指令。②设置与配置链路——settings.json 两族模型增 `provider` 字段（空串 = 历史配置未设置且**不做地址推断**，避免遮蔽 `.env` / 继承环境里已配置的值；旧 deepseek 组迁移保留）、`resolveModelEnv` 增两个 provider 变量（同款三级优先级、空串键删除）、SettingsDialog 两组各增接口类型下拉框（`.field select` 与输入框同款样式）、`.env.example` 与 README 环境变量表同步。**弹窗回显与保存语义（独立审查后修正）**：`settings:get` 新增回传 `effectiveProviders`（`resolveEffectiveProviders` 按三级优先级解析后交 shared 同一对纯函数推断），下拉框显示的是 agent 子进程真正会用的接口类型（可能来自 `.env` / 继承环境变量）；保存时**未触碰下拉框则写回设置文件原值**（空串保持「按地址迁移」），只把用户显式选择落盘——否则「只为改主题保存一次」就会把回显出的推断值固化进设置文件、遮蔽 `.env` 里的 provider；切换 provider 只换 Base URL 与模型名提示，不改写已填值。AC：typecheck 3 工程 / lint / 全量 661 项（63 文件）通过（净增 34：shared provider 纯函数 12 + agent 配置与协议回归 9 + 写作模型 provider 5 + 客户端设置（含生效 provider 解析）6 + 设置弹窗真实 React 交互 2）；真实 SDK 协议回归**经各家服务端约束模拟**校验——模拟端点对缺 Bearer / 缺 x-api-key 与 anthropic-version / 缺 max_tokens / system 混入 messages / 不完整 json_schema / DeepSeek json_object 缺 json 字样一律 400，十次调用零拒绝：DeepSeek 无 JSON 字样的业务 prompt 靠 SDK 注入的 JSON 指令拿到结构化对象、OpenAI 走自定义 Chat Completions 地址 + Bearer + 完整 `json_schema`、Claude 走 Messages 协议（x-api-key + anthropic-version + system 独立字段 + max_tokens + input_schema 工具 + `output_config` 结构化输出）、写作模型独立选 provider 且未配置回落同一 Agent 实例；另跑真实 socket 冒烟（本地 Bun.serve 模拟 DeepSeek 约束，`generateObject` 注入生效、结构化对象返回）；真实三家模型端到端待用户复验（未使用真实 Key、未发起付费调用）。
 
@@ -16,11 +18,9 @@
 
 - 2026-10-15 [feat] 主流程缓存与恢复：用户确认采用 AI SDK 原生 `ModelMessage[]`。SQLite 21→22 新增 workflow_runs / workflow_steps / agent_message_traces，主输入、已确认产物与节点结果持久化，同步数据库副作用和完成标记共事务；新建小说、单幕章节规划、大纲重生成按 runId 继续，已创建树/章/地点/角色不重复入库，自动建卡部分失败后按库内 diff 补齐伏笔收尾。SDK 按 step 留存工具调用/结果及 provider 元信息，system 单存，不保存模型连接配置。CLI/headless resume、query list-runs/详情 pendingRuns、客户端错误页与书库继续入口接通。恢复保留中断期间用户编辑的伏笔，版本漂移拒绝；Electron 宿主提取为可测试模块，停止/启动串行且 stdout 排空后才上报退出。AC：typecheck 三工程 / lint / 全量 590 项（59 文件）通过，后端与客户端独立复审通过；覆盖重开库、部分建卡、入库回滚、版本保护、真实 SDK 工具消息、CLI/协议、真实 React 与子进程竞态。第一期恢复主步骤，失败子 Agent 从缓存输入重跑，内部消息仅供追溯；正文与润色未接入，未调用真实模型。计划见 docs/superpowers/plans/2026-10-15-workflow-cache.md，决策见 DECISIONS。
 
-- 2026-10-15 [feat] 创作流程新增叙事视角设置（第五项创作条件；方案经用户确认：放 agent 创作流程「类型」之后而非设置——视角是故事身份而非生成过程参数，决策见 DECISIONS）：①shared——novelCreationParamsSchema 增 narrativePov（可空字符串）+ stage 枚举在 type 之后增 `pov` + 详情契约 novelDetail.novel 携带（旧载荷缺省 null）；②数据层 SCHEMA_VERSION 20→21——novels 增 narrative_pov 可空列（immediate 事务补列 + 锁内复查，旧行 NULL=未采集）+ NovelRecord / updateNovel 读写；③创作流程——createNovel 在「类型」后新增【2/6】叙事视角步骤（静态菜单 第一人称 / 第三人称限知 / 第三人称全知 / 多视角轮换 + 自定义，askSelect 选完即存，无确认门），后续步骤序号顺延为 x/6，NovelParams 增 narrativePov；④三处 prompt 注入——大纲 Agent system prompt 增视角要求（限知视角的信息遮蔽与揭示节奏、多视角轮换在幕梗概体现切换安排、全书不得漂移）且创作参数 JSON 自动携带（OutlineContext 增可选字段，regen-outline 复用库内值、历史省略）、章节规划 prompt 增视角行（概述与登场安排须与视角一致）、write-chapter prompt【小说】块增视角行（正文叙述全程保持该视角、人称与信息范围不漂移；未采集零注入）；⑤客户端 StageBar 六阶段→七阶段（类型 / 视角 / 受众 / 世界观 / 角色 / 冲突 / 大纲，LABELS 穷尽性强制）。AC：typecheck 3 工程 / lint / 全量 545 用例通过（净增 16：db 迁移 1 + write-chapter 注入 1 + 既有 create-novel / regen-outline / plan-act-chapters / protocol / query 用例随契约扩展，另含外部提交新增的客户端交互用例）；真实库副本 20→21 迁移实跑无损（10 表行数一致、旧小说 NULL、updateNovel 往返、重开不重复迁移）；真实模型视角遵循效果与 GUI 观感待用户复验。视角不做事后编辑入口（与类型/受众/核心冲突一致）、视角一致性校验维度留待后续需求。
-
 ## 历史归档
 
-- 2026-10-15 写作偏好审查修复已归档：迟到详情响应隔离、文风会话阈值透传、加载失败反馈与真实React回归，验收见Git历史及同日DECISIONS。
+- 2026-10-15 历史滚动摘要：2026-10-15 写作偏好审查修复已归档：迟到详情响应隔离、文风会话阈值透传、加载失败反馈与真实React回归，验收见Git历史及同日DECISIONS。；创作流程新增叙事视角设置（完整实现与验收见对应提交。）
 
 - 2026-10-14 [feat] 伏笔最终回收与正文审校已归档：按最晚回收章完成真相揭露，写作/修订/eval 同源约束；实现和验收详见 workflows/PROGRESS.md 与 Git 历史。
 

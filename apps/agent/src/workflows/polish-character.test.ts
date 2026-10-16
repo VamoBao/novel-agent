@@ -3,6 +3,7 @@ import { afterAll, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 // store / channel 不依赖 'ai'，可静态导入；被测模块（间接引 ai）须在 mock 注册后动态导入
 import { openDatabase } from "../state/db";
 import { NovelStore } from "../state/novel-store";
@@ -63,6 +64,98 @@ const polishedFixture = {
   endingDirection: "打破垄断后归隐",
   relationships: "与药铺掌柜为忘年交",
 } satisfies Character;
+
+test.each(["openai", "deepseek", "claude"])("%s 真实 SDK 润色全字段角色卡，严格 schema 合法且原基准不变", async (provider) => {
+  // 独立进程使用真实 AI SDK / 工作流 / SQLite，只替换 HTTP 边界。
+  const probe = `
+    import { openDatabase } from './src/state/db';
+    import { NovelStore } from './src/state/novel-store';
+    import { WorldviewStore } from './src/state/worldview-store';
+    import { CharacterStore } from './src/state/character-store';
+    import { FakeChannel } from './src/ui/fake-channel';
+    import { polishCharacter } from './src/workflows/polish-character';
+    globalThis.AI_SDK_LOG_WARNINGS = false;
+    const polished = JSON.parse(process.env.POLISH_RESULT);
+    const form = JSON.parse(process.env.POLISH_FORM);
+    const requests = [];
+    const db = openDatabase(':memory:');
+    const novelStore = new NovelStore(db);
+    const worldviewStore = new WorldviewStore(db);
+    const characterStore = new CharacterStore(db);
+    novelStore.createNovel({ id: 'polish-sdk' });
+    worldviewStore.saveWorldview('polish-sdk', { background: { geography: '九州大陆' }, taboos: ['不可出现现代科技'] });
+    const seed = characterStore.addCharacter('polish-sdk', form);
+    const before = characterStore.getCharacter(seed.id);
+    const schemaErrors = (schema, path = 'root') => {
+      const errors = [];
+      if (schema.properties) {
+        for (const [key, value] of Object.entries(schema.properties)) {
+          if (!schema.required?.includes(key)) errors.push(path + '.' + key + ' 未列入 required');
+          errors.push(...schemaErrors(value, path + '.' + key));
+        }
+        if (schema.additionalProperties !== false) errors.push(path + ' 需禁用 additionalProperties');
+      }
+      return errors;
+    };
+    globalThis.fetch = async (url, init) => {
+      const body = JSON.parse(init.body);
+      requests.push({ url: String(url), format: body.response_format?.type, strict: body.response_format?.json_schema?.strict });
+      if (body.response_format?.json_schema?.strict) {
+        const errors = schemaErrors(body.response_format.json_schema.schema);
+        if (errors.length) return Response.json({ error: { message: errors.join(';'), type: 'invalid_request_error' } }, { status: 400 });
+      }
+      if (String(url).endsWith('/messages')) {
+        return Response.json({
+          id: 'msg-1', type: 'message', role: 'assistant', model: body.model, stop_sequence: null,
+          content: [{ type: 'text', text: JSON.stringify(polished) }], stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      }
+      return Response.json({
+        id: 'chat-1', object: 'chat.completion', created: 1, model: body.model,
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(polished) } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+    };
+    try {
+      const result = await polishCharacter({
+        channel: new FakeChannel([]), novelId: 'polish-sdk', characterId: seed.id, form,
+        novelStore, worldviewStore, characterStore,
+      });
+      process.stdout.write(JSON.stringify({
+        result: result.character, requests, before,
+        after: characterStore.getCharacter(seed.id), count: characterStore.listCharacters('polish-sdk').length,
+      }));
+    } finally { db.close(); }
+  `;
+  const proc = Bun.spawn([process.execPath, "--eval", probe], {
+    cwd: fileURLToPath(new URL("../..", import.meta.url)),
+    env: {
+      ...process.env, AGENT_MODEL_PROVIDER: provider, AGENT_MODEL_API_KEY: "test-polish-key",
+      AGENT_MODEL_NAME: provider === "claude" ? "claude-sonnet-5" : "test-model",
+      AGENT_MODEL_BASE_URL: provider === "claude" ? "https://anthropic-test.example/v1" : "https://chat-test.example/v1",
+      POLISH_RESULT: JSON.stringify(polishedFixture), POLISH_FORM: JSON.stringify(formFixture),
+    }, stdout: "pipe", stderr: "pipe",
+  });
+  const [stdout, stderr, exit] = await Promise.all([
+    new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
+  ]);
+  expect(stderr).toBe("");
+  expect(exit).toBe(0);
+  const result = JSON.parse(stdout) as {
+    result: Character; requests: Array<{ url: string; format?: string; strict?: boolean }>; before: unknown; after: unknown; count: number;
+  };
+  expect(result.result).toEqual(polishedFixture);
+  expect(result.requests).toHaveLength(1);
+  if (provider === "openai") {
+    expect(result.requests[0]!.format).toBe("json_schema");
+    expect(result.requests[0]!.strict).toBe(true);
+  }
+  expect(result.requests[0]!.url).toBe(provider === "claude"
+    ? "https://anthropic-test.example/v1/messages" : "https://chat-test.example/v1/chat/completions");
+  expect(result.after).toEqual(result.before);
+  expect(result.count).toBe(1);
+});
 
 /** 建临时库：小说 + 世界观（+ 按需角色），返回各 store 与临时目录清理闭包 */
 async function setupDb(options: {

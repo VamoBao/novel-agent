@@ -5,6 +5,81 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { normalizeSettings, readSettingsFile, resolveModelEnv, writeSettingsFile } from "../../electron/settings";
 
+test.each(["agent", "writing"])("%s 只编辑连接字段后仍使用界面显示的 DeepSeek（不触碰下拉框）", async (group) => {
+  const dir = mkdtempSync(join(tmpdir(), "novel-settings-provider-edit-"));
+  const filePath = join(dir, "settings.json");
+  try {
+    // 写作组的历史地址使其初始显示 DeepSeek；Agent 空配置也默认显示 DeepSeek。
+    writeSettingsFile(filePath, normalizeSettings({
+      writingModel: { baseUrl: "https://api.deepseek.com" },
+    }));
+    const probe = `
+      import { Window } from 'happy-dom';
+      import { readSettingsFile, writeSettingsFile, resolveEffectiveProviders, resolveModelEnv } from './electron/settings';
+      const dom = new Window({ url: 'http://localhost' });
+      Object.assign(globalThis, { window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
+      const { act, createElement } = await import('react');
+      const { createRoot } = await import('react-dom/client');
+      const { SettingsDialog } = await import('./src/components/SettingsDialog');
+      const filePath = process.env.SETTINGS_PROBE_FILE;
+      dom.agent = {
+        getSettings: async () => {
+          const settings = readSettingsFile(filePath);
+          return { settings, filePath, effectiveProviders: resolveEffectiveProviders(settings, {}, {}) };
+        },
+        saveSettings: async (settings) => ({ settings: writeSettingsFile(filePath, settings), filePath }),
+      };
+      const container = dom.document.createElement('div');
+      dom.document.body.append(container);
+      const root = createRoot(container);
+      await act(async () => root.render(createElement(SettingsDialog, { onClose: () => {} })));
+      const group = process.env.SETTINGS_TEST_GROUP;
+      const target = dom.document.querySelectorAll('.settings-group')[group === 'agent' ? 1 : 2];
+      const select = target.querySelector('select');
+      const shown = select.value;
+      const inputs = target.querySelectorAll('input');
+      const values = group === 'agent'
+        ? ['test-key', 'deepseek-flash', 'https://deepseek-proxy.example/v1']
+        : ['deepseek-flash', 'test-key', 'https://deepseek-proxy.example/v1'];
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, 'value').set;
+        values.forEach((value, index) => {
+          setter.call(inputs[index], value);
+          inputs[index].dispatchEvent(new dom.Event('input', { bubbles: true }));
+        });
+      });
+      const afterEdit = select.value;
+      await act(async () => dom.document.querySelector('button.primary').click());
+      const saved = readSettingsFile(filePath);
+      const env = resolveModelEnv(saved, {}, {});
+      process.stdout.write(JSON.stringify({
+        shown, afterEdit, effective: resolveEffectiveProviders(saved, {}, {})[group],
+        injected: env[group === 'agent' ? 'AGENT_MODEL_PROVIDER' : 'WRITING_MODEL_PROVIDER'],
+      }));
+      await act(async () => root.unmount());
+      await dom.happyDOM.close();
+    `;
+    const proc = Bun.spawn([process.execPath, "--eval", probe], {
+      cwd: fileURLToPath(new URL("../..", import.meta.url)),
+      env: { ...process.env, SETTINGS_PROBE_FILE: filePath, SETTINGS_TEST_GROUP: group },
+      stdout: "pipe", stderr: "pipe",
+    });
+    const [stdout, stderr, exit] = await Promise.all([
+      new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
+    ]);
+    expect(stderr).toBe("");
+    expect(exit).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({
+      shown: "deepseek", afterEdit: "deepseek", effective: "deepseek", injected: "deepseek",
+    });
+    const saved = readSettingsFile(filePath);
+    expect(saved[group === "agent" ? "agentModel" : "writingModel"].provider).toBe("deepseek");
+    expect(saved[group === "agent" ? "writingModel" : "agentModel"].provider).toBe("");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("Agent Base URL 从设置加载，编辑保存后重读并注入通用环境变量", async () => {
   const dir = mkdtempSync(join(tmpdir(), "novel-settings-ui-"));
   const filePath = join(dir, "settings.json");
@@ -191,7 +266,7 @@ test("历史配置（无 provider，DeepSeek 官方地址）在弹窗中回显�
   }
 });
 
-test("provider 来自 .env 时弹窗回显生效值，保存不把它固化进设置文件（不遮蔽下层）", async () => {
+test("只改主题时保留 .env 的 provider，不固化回显值", async () => {
   const dir = mkdtempSync(join(tmpdir(), "novel-settings-ui-dotenv-"));
   const filePath = join(dir, "settings.json");
   try {
@@ -224,6 +299,7 @@ test("provider 来自 .env 时弹窗回显生效值，保存不把它固化进�
         agentOptions: [...agentSelect.options].map((option) => option.value),
         urlPlaceholder: groups[1].querySelectorAll('input')[2].placeholder,
       };
+      await act(async () => { dom.document.querySelectorAll('.theme-options button')[2].click(); });
       await act(async () => { dom.document.querySelector('button.primary').click(); });
       await act(async () => root.unmount());
       await dom.happyDOM.close();
@@ -255,6 +331,7 @@ test("provider 来自 .env 时弹窗回显生效值，保存不把它固化进�
     });
     // 保存只落用户实际编辑的字段：provider 仍为空串，.env 的 claude 继续生效
     const saved = readSettingsFile(filePath);
+    expect(saved.theme).toBe("dark");
     expect(saved.agentModel.provider).toBe("");
     const env = resolveModelEnv(saved, { AGENT_MODEL_PROVIDER: "claude", AGENT_MODEL_BASE_URL: "https://api.anthropic.com/v1" }, {});
     expect(env.AGENT_MODEL_PROVIDER).toBe("claude");

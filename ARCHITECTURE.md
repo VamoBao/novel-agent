@@ -244,7 +244,7 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 │                        #   set-writing-prefs 直写库刷新详情）/ SettingsDialog（⚙️ 设置弹窗：Agent 与
 │                        #   写作模型两组字段——各含**接口类型下拉框**（openai / deepseek / claude，
 │                        #   回显生效值（可来自 .env / 继承环境），切换只换 Base URL 与模型名提示、
-│                        #   不改写已填值，未触碰时保存不写入该项）+ API Key + 模型名 + Base URL，
+│                        #   不改写已填值，仅未编辑该组连接时保留原 provider）+ API Key + 模型名 + Base URL，
 │                        #   另有「写作偏好（默认）」组
 │                        #   （三字段，留空=内置默认 2000~3000 / 80）+ 「外观」主题三选——默认跟随
 │                        #   系统，保存即生效；两弹窗共用 writing-prefs-form 表单解析）/
@@ -361,7 +361,7 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 
 `providers/model-factory.ts` 按所选 provider 调用对应官方 SDK：OpenAI 显式 `chat(model)` 走 Chat Completions（provider 默认的 Responses API 不适用于自定义兼容地址）、DeepSeek 用官方包（`convert-to-deepseek-chat-messages` 在 json 响应格式下自动注入 JSON 指令与 schema——通用兼容接口不注入，DeepSeek 服务端会以 400 拒绝「prompt 不含 json 字样」的 json_object 请求，即此前报错的根因）、Claude 走 Anthropic Messages 协议（鉴权 `x-api-key` + `anthropic-version`，结构化输出经 `output_config` 或强制 json 工具）。业务侧只见统一的 `LanguageModelV4`。
 
-配置解析：`resolveAgentModelConfig` 输出 `{ provider, apiKey, modelName, baseUrl }`——provider 显式值优先，缺省按有效地址迁移（`shared/model-provider.ts` 的 `resolveAgentModelProvider` / `resolveWritingModelProvider`，客户端弹窗回显生效选项用同一对纯函数）；地址留空按 provider 取官方默认；模型名留空仅 DeepSeek 有默认值。非法 provider / 非 DeepSeek 缺模型名的可读错误由 `describeAgentModelConfigError` 交 index.ts 与 headless.ts 的启动检查打印退出（module 级 `model` 常量创建于 import 期，故解析函数本身不抛错）；写作模型的非法 provider 在 `resolveWritingModelConfig` 直接抛错（正文生成前即报出）。客户端 settings 的 `agentModel` / `writingModel` 均为 `provider + 三字段`，provider 空串 = 历史配置未设置且**不做地址推断**（否则会遮蔽 `.env` / 继承环境里已配置的值）；`resolveModelEnv` 输出八个模型变量供 childEnv 注入，空串键删除。设置弹窗经 `settings:get` 回传的 `effectiveProviders`（`resolveEffectiveProviders`：先按三级优先级解析、再交 shared 同一对纯函数推断）显示**生效**接口类型；保存时未触碰下拉框则写回设置文件原值（空串保持「按地址迁移」），只把用户显式选择落盘——避免任何一次保存把推断值固化进设置文件。
+配置解析：`resolveAgentModelConfig` 输出 `{ provider, apiKey, modelName, baseUrl }`——provider 显式值优先，缺省按有效地址迁移（`shared/model-provider.ts` 的 `resolveAgentModelProvider` / `resolveWritingModelProvider`，客户端弹窗回显生效选项用同一对纯函数）；地址留空按 provider 取官方默认；模型名留空仅 DeepSeek 有默认值。非法 provider / 非 DeepSeek 缺模型名的可读错误由 `describeAgentModelConfigError` 交 index.ts 与 headless.ts 的启动检查打印退出（module 级 `model` 常量创建于 import 期，故解析函数本身不抛错）；写作模型的非法 provider 在 `resolveWritingModelConfig` 直接抛错（正文生成前即报出）。客户端 settings 的 `agentModel` / `writingModel` 均为 `provider + 三字段`，provider 空串 = 历史配置未设置且**不做地址推断**（否则会遮蔽 `.env` / 继承环境里已配置的值）；`resolveModelEnv` 输出八个模型变量供 childEnv 注入，空串键删除。设置弹窗经 `settings:get` 回传的 `effectiveProviders`（`resolveEffectiveProviders`：先按三级优先级解析、再交 shared 同一对纯函数推断）显示**生效**接口类型；保存时，编辑该组任一连接字段（接口类型 / Key / 模型名 / Base URL）即保存当前显示的 provider，防止自定义地址再次推断为其他协议；该组连接未编辑时写回设置文件原值（空串保持「按地址迁移」），仅修改外观或写作偏好不遮蔽环境配置。
 
 `@ai-sdk/openai` / `@ai-sdk/deepseek` / `@ai-sdk/anthropic` 与 `ai` 在 apps/agent 中**锁定具体版本**（不用 `^` 范围）：四者的 `@ai-sdk/provider` / `@ai-sdk/provider-utils` 依赖须落在同一副本上，且 DeepSeek 的 JSON 指令注入行为与版本绑定——升级需整组一起升并复跑 provider 协议回归。
 
@@ -396,3 +396,7 @@ shared `outlineNewForeshadowSchema` 要求 `recoverActNames` 非空且不重复�
 主流程恢复既保存确认产物，也固定确认时清单序号映射。未确认子步骤重跑刷新本幕两清单及当前大纲；已确认缓存沿用原映射。`foreshadow-plan.ts` 将普通编辑修订与工作流绑定追加区分：用户显式更新递增 `editRevision`，自动绑定指定 workflow 来源保持计数；只有核心设定不变、绑定单调增加且编辑版本一致的新快照可合并，旧无版本快照保守保护。原空章回收幕在暂停期间已规划时，通过受限细化步骤选择真实章，再确认并缓存后入库，不丢弃已确认伏笔。
 
 React/CLI 确认门展示全部回收计划，预览逐幕列已绑定章或待细化。`foreshadow-context.ts` 根据目标树版本与后续计划幕检查最终回收；仍有更晚计划幕未细化时只给阶段回收，写作和审校继续复用同源材料。工作流实现与边界详见模块 ARCHITECTURE.md。
+
+### Provider 审查修复（2026-10-16）
+
+角色润色使用本地 polishedCharacterSchema 输出契约：顶层与 basicInfo 的全部字段必填，满足 OpenAI strict json_schema 的 required 要求；输入与持久化仍使用原 characterSchema，可选字段语义保留，不关闭严格输出、不改写角色基准。协议回归经真实工作流、三家 SDK 和内存 SQLite 执行，仅替换网络边界。SettingsDialog 的 modelTouched 按模型组跟踪四个连接字段，编辑时固化当前显示的 provider；主题与写作偏好不触碰模型组。

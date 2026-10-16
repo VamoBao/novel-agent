@@ -58,7 +58,7 @@ interface FormState {
   stylePassScore: string;
 }
 
-/** 两族模型的 provider 字段（下拉框选中态 / 设置文件原值 / 用户是否显式选择过） */
+/** 两族模型的 provider 字段（下拉框选中态 / 设置文件原值 / 用户是否编辑过连接字段） */
 type ProviderField = "agent" | "writing";
 
 const EMPTY_FORM: FormState = {
@@ -98,12 +98,12 @@ interface SettingsDialogProps {
  */
 export function SettingsDialog({ onClose }: SettingsDialogProps) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  /** 设置文件里的 provider 原值（空串 = 历史未设置）：未显式选择时按原值保存，
+  /** 设置文件里的 provider 原值（空串 = 历史未设置）：未编辑该组模型连接时按原值保存，
    *  避免把「回显出来的生效值」固化进设置文件、遮蔽 `.env` / 继承环境里的 provider */
   const [storedProvider, setStoredProvider] = useState<Record<ProviderField, ModelProvider | "">>({
     agent: "", writing: "",
   });
-  const [providerTouched, setProviderTouched] = useState<Record<ProviderField, boolean>>({
+  const [modelTouched, setModelTouched] = useState<Record<ProviderField, boolean>>({
     agent: false, writing: false,
   });
   const [loading, setLoading] = useState(true);
@@ -146,6 +146,13 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
 
   const setField = (field: keyof FormState, value: string): void => {
     setForm((prev) => ({ ...prev, [field]: value }));
+    // 编辑连接字段表示正在配置该模型，必须保留界面显示的接口类型。
+    const group = field === "agentProvider" || field === "agentApiKey" || field === "agentModelName" || field === "agentBaseUrl"
+      ? "agent"
+      : field === "writingProvider" || field === "writingModelName" || field === "writingModelApiKey" || field === "writingModelBaseUrl"
+        ? "writing"
+        : null;
+    if (group) setModelTouched((prev) => ({ ...prev, [group]: true }));
   };
 
   const save = (): void => {
@@ -160,17 +167,17 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
     }
     setSaving(true);
     setError(null);
-    // 未显式选择过 provider 时写回设置文件原值（空串 = 保持「按地址迁移」语义）
+    // 未编辑该组连接时写回设置文件原值（空串 = 保持「按地址迁移」语义）
     const settings: AppSettings = {
       theme: form.theme,
       agentModel: {
-        provider: providerTouched.agent ? form.agentProvider : storedProvider.agent,
+        provider: modelTouched.agent ? form.agentProvider : storedProvider.agent,
         apiKey: form.agentApiKey,
         modelName: form.agentModelName,
         baseUrl: form.agentBaseUrl,
       },
       writingModel: {
-        provider: providerTouched.writing ? form.writingProvider : storedProvider.writing,
+        provider: modelTouched.writing ? form.writingProvider : storedProvider.writing,
         modelName: form.writingModelName,
         apiKey: form.writingModelApiKey,
         baseUrl: form.writingModelBaseUrl,
@@ -187,7 +194,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
   };
 
   /** provider 下拉框（两族模型共用；option 键序即 MODEL_PROVIDERS 顺序）；
-   *  用户改动即记为显式选择（未改动则保存时保持设置文件原值） */
+   *  下拉框与连接字段的改动均记为显式选择，其他设置不固化推断值 */
   const renderProviderSelect = (field: ProviderField): ReactElement => (
     <div className="field">
       <label>接口类型</label>
@@ -196,7 +203,6 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
         disabled={saving}
         onChange={(e) => {
           setField(field === "agent" ? "agentProvider" : "writingProvider", e.target.value as ModelProvider);
-          setProviderTouched((prev) => ({ ...prev, [field]: true }));
         }}
       >
         {PROVIDER_OPTIONS.map((option) => (
@@ -302,7 +308,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
               </div>
               <p className="settings-hint">
                 三项需同时配置才启用独立写作模型（接口类型可与上面的 Agent 模型不同）；留空则正文生成回落 Agent 模型。
-                接口类型未改动时保存不写入该项，仍沿用 .env / 环境变量里的配置。
+                编辑本组连接信息会保存当前接口类型；仅修改外观或写作偏好时，继续沿用已有接口类型配置。
               </p>
             </div>
             <div className="settings-group">

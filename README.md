@@ -115,6 +115,8 @@ bun run dev:client
 
 留空时按**有效地址**迁移：DeepSeek 官方地址用 `deepseek`，其余现有 OpenAI 兼容地址用 `openai`（Agent 地址留空沿用 DeepSeek 官方默认，独立写作默认 `openai`）；自定义 DeepSeek 代理请显式选择 `deepseek`。填了非法值启动即报错，不会静默换协议。
 
+编辑某组模型的 Key、模型名或 Base URL 时，会一并保存该组当前显示的接口类型；仅修改外观或写作偏好时，保留接口类型的环境配置优先级。
+
 旧 `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL_NAME` 仍可使用；同一来源内优先使用 `AGENT_MODEL_*`，不同来源仍按上述优先级逐字段解析。历史客户端 `deepseek` 设置组读取时迁移为 `agentModel`，新组已存在时以新组为准。
 
 写作模型三项（模型名 / Key / Base URL）需同时配置才启用；任一未配置时正文生成回落到 Agent 模型。即使配置了独立写作模型，正文校验仍使用 Agent 模型。

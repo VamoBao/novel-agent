@@ -326,3 +326,7 @@ writeChapter 在会话开始解析一次 stylePassScore，所有 WriteProgressEv
 6. `foreshadow-context.describeRecoveryStage` 同时考虑全部计划回收幕。后续幕尚未细化时，当前已知最晚回收章仍是阶段回收；计划幕缺失或跨版本时不猜最终章。写作与内容审核继续复用同源上下文。
 
 新增计划解析模块依赖 shared 和 state 类型，不进行模型调用；存储/迁移、查询与展示协议的主说明见根 ARCHITECTURE.md。具体设计和验收矩阵见 docs/superpowers/specs/2026-10-16-foreshadow-recovery-plan-design.md。
+
+## 角色润色输出契约（2026-10-16）
+
+polish-character.ts 的 polishedCharacterSchema 在 characterSchema 基础上将顶层与 basicInfo 全部字段设为必填，与现有全字段补全要求一致，兼容 OpenAI 严格结构化输出；角色输入、存储与固定基准的 schema 保持可选字段不变。polish-character.test.ts 另经独立子进程加载真实 AI SDK / 工作流 / 内存 SQLite，模拟 OpenAI 对 strict required 的递归检查，并验证 DeepSeek / Claude 正常润色与基准零改动。跨模块修复与验收见根 PROGRESS.md。
