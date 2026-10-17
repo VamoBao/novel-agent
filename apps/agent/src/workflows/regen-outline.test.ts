@@ -246,9 +246,12 @@ describe("regenerateOutline（FakeChannel + mock LLM 集成）", () => {
     expect(all.filter((n) => n.node.version === 1).every((n) => !n.node.isCurrentVersion)).toBe(true);
     expect(all.some((n) => n.node.name === "旧章" && !n.node.isCurrentVersion)).toBe(true);
 
-    // 产物覆盖与 description 回填
-    expect(existsSync(join(world.dir, "output", `${NOVEL_ID}.json`))).toBe(true);
-    expect(world.novelStore.getNovel(NOVEL_ID)?.description).toBe("散修少年重夺灵脉的新版故事线");
+    // 大纲不落 JSON 产物（只入库）；description 与 theme 回填 novels 行
+    expect(existsSync(join(world.dir, "output", `${NOVEL_ID}.json`))).toBe(false);
+    expect(world.novelStore.getNovel(NOVEL_ID)).toMatchObject({
+      description: "散修少年重夺灵脉的新版故事线",
+      theme: "破而后立",
+    });
 
     // 新版本大纲的新增角色自动入库；确认循环用例（拒绝→再确认）清单为空、无自动创建轮
     const characterStore = new CharacterStore(world.db);

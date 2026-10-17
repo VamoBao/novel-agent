@@ -42,7 +42,8 @@ const PROVIDER_HINTS: Record<ModelProvider, { baseUrl: string; modelName: string
   claude: { baseUrl: MODEL_PROVIDER_BASE_URLS.claude, modelName: "如 claude-sonnet-5" },
 };
 
-/** 表单态：主题 + 两族模型各四字段（provider + Key + 模型名 + Base URL）+ 写作偏好三字段（空串 = 未设置） */
+/** 表单态：主题 + 两族模型各四字段（provider + Key + 模型名 + Base URL）+ 写作偏好三字段
+ *  （空串 = 未设置）+ 产物输出目录（空串 = 场景默认目录） */
 interface FormState {
   theme: ThemeSetting;
   agentProvider: ModelProvider;
@@ -56,6 +57,7 @@ interface FormState {
   chapterLengthMin: string;
   chapterLengthMax: string;
   stylePassScore: string;
+  outputDir: string;
 }
 
 /** 两族模型的 provider 字段（下拉框选中态 / 设置文件原值 / 用户是否编辑过连接字段） */
@@ -75,6 +77,7 @@ const EMPTY_FORM: FormState = {
   chapterLengthMin: "",
   chapterLengthMax: "",
   stylePassScore: "",
+  outputDir: "",
 };
 
 interface SettingsDialogProps {
@@ -109,14 +112,19 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 产物目录的场景默认（设置项留空时的落点）：placeholder 与提示展示用 */
+  const [defaultOutputDir, setDefaultOutputDir] = useState("");
+  /** 目录选择器进行中（防止重复唤起系统对话框） */
+  const [picking, setPicking] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     window.agent
       .getSettings()
-      .then(({ settings, effectiveProviders }) => {
+      .then(({ settings, effectiveProviders, defaultOutputDir: fallback }) => {
         if (cancelled) return;
         setStoredProvider({ agent: settings.agentModel.provider, writing: settings.writingModel.provider });
+        setDefaultOutputDir(fallback);
         setForm({
           theme: settings.theme,
           // 下拉框回显**生效值**（含 .env / 继承环境变量的贡献），与 agent 侧同一规则
@@ -131,6 +139,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           chapterLengthMin: settings.writing.chapterLengthMin?.toString() ?? "",
           chapterLengthMax: settings.writing.chapterLengthMax?.toString() ?? "",
           stylePassScore: settings.writing.stylePassScore?.toString() ?? "",
+          outputDir: settings.outputDir,
         });
       })
       .catch((e: unknown) => {
@@ -183,6 +192,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
         baseUrl: form.writingModelBaseUrl,
       },
       writing: parsed.prefs,
+      outputDir: form.outputDir,
     };
     window.agent
       .saveSettings(settings)
@@ -191,6 +201,26 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
         setError(e instanceof Error ? e.message : String(e));
         setSaving(false);
       });
+  };
+
+  /** 目录选择：主进程系统选择器 + 可写性探针——选中且可写才回填；不可写回显错误不采纳；
+   *  用户取消静默（非错误）。路径不经手写输入，保证落库目录都经过探针验证 */
+  const pickOutputDir = (): void => {
+    setPicking(true);
+    setError(null);
+    window.agent
+      .pickOutputDirectory()
+      .then((result) => {
+        if (result.ok) {
+          setForm((prev) => ({ ...prev, outputDir: result.dir }));
+        } else if (!result.canceled && result.error) {
+          setError(result.error);
+        }
+      })
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => setPicking(false));
   };
 
   /** provider 下拉框（两族模型共用；option 键序即 MODEL_PROVIDERS 顺序）；
@@ -346,6 +376,34 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
               <p className="settings-hint">
                 留空使用内置默认：篇幅 {DEFAULT_CHAPTER_LENGTH_MIN}~{DEFAULT_CHAPTER_LENGTH_MAX} 字、文风合格线 {DEFAULT_STYLE_PASS_SCORE} 分；
                 单本小说可在书库右键「写作偏好」单独设置，优先级高于此处。
+              </p>
+            </div>
+            <div className="settings-group">
+              <p className="settings-group-label">产物输出目录——章节正文文件</p>
+              <div className="field">
+                <label>输出目录</label>
+                <input
+                  value={form.outputDir}
+                  readOnly
+                  disabled={saving}
+                  placeholder={`默认：${defaultOutputDir}`}
+                />
+              </div>
+              <div className="field-actions">
+                <button type="button" disabled={saving || picking} onClick={pickOutputDir}>
+                  {picking ? "选择中…" : "浏览…"}
+                </button>
+                <button
+                  type="button"
+                  disabled={saving || form.outputDir.length === 0}
+                  onClick={() => setForm((prev) => ({ ...prev, outputDir: "" }))}
+                >
+                  恢复默认
+                </button>
+              </div>
+              <p className="settings-hint">
+                正文按「输出目录/小说 ID/部名/章名.md」分文件夹存放；留空使用默认：{defaultOutputDir || "（加载中）"}。
+                选择时自动验证目录可写；更换目录后已生成的正文保留在原位置仍可阅读，新正文写入新目录；保存后下一次会话生效。
               </p>
             </div>
             {error ? <p className="form-error">{error}</p> : null}

@@ -10,7 +10,7 @@ interface ChapterRow {
   name: string;
 }
 
-/** documents 表行结构（列名蛇形；file_path 为正文文件相对路径，内容不进库） */
+/** documents 表行结构（列名蛇形；file_path 为正文文件绝对路径，内容不进库） */
 interface DocumentRow {
   id: string;
   novel_id: string;
@@ -42,10 +42,11 @@ function rowToDocument(row: DocumentRow): Document {
 
 /**
  * 章节正文持久化（元数据）：documents 表一章一份（chapter_id 唯一索引保证），
- * **正文内容存文件系统**（output/document-writer 写 `<output>/<小说名>/<部名>/<章名>.md`），
- * 库内只留 file_path（相对 output 根）与字数。`saveChapterDocument` 单事务完成
- * 「插入元数据 + 章节点回写 document_id 并置 status=completed」——文件先写、
- * 库后入（由工作流编排，库失败时回滚删除文件），两处指向同一份文件。
+ * **正文内容存文件系统**（output/document-writer 写 `<output>/<小说ID>/<部名>/<章名>.md`），
+ * 库内只留 file_path（绝对路径，历史旧行可能存相对路径由读取层兼容解析）与字数。
+ * `saveChapterDocument` 单事务完成「插入元数据 + 章节点回写 document_id 并置
+ * status=completed」——文件先写、库后入（由工作流编排，库失败时回滚删除文件），
+ * 两处指向同一份文件。
  */
 export class DocumentStore {
   /** 共享数据库连接构造（与其他 store 同库不同表） */
@@ -159,22 +160,6 @@ export class DocumentStore {
   listDocuments(novelId: string): Document[] {
     const rows = this.db.prepare(LIST_SQL).all(novelId) as DocumentRow[];
     return rows.map(rowToDocument);
-  }
-
-  /** 批量更新正文文件路径（事务原子）：小说改名后文件迁移的库内联动 */
-  updateFilePaths(updates: ReadonlyArray<{ id: string; filePath: string }>): void {
-    if (updates.length === 0) return;
-    const update = this.db.transaction((list: ReadonlyArray<{ id: string; filePath: string }>) => {
-      const stmt = this.db.prepare(
-        "UPDATE documents SET file_path = ?, updated_at = ? WHERE id = ?;",
-      );
-      const now = new Date().toISOString();
-      for (const item of list) {
-        const { filePath } = documentSchema.pick({ filePath: true }).parse(item);
-        stmt.run(filePath, now, item.id);
-      }
-    });
-    update(updates);
   }
 
   close(): void {

@@ -1034,3 +1034,24 @@ button.ghost {
   border-color: var(--accent-emphasis);
   color: var(--fg-on-emphasis);
 }
+
+/* 设置弹窗字段附属动作行（产物输出目录：浏览 / 恢复默认）：小号描边钮，语义变量配色 */
+.settings-dialog .field-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.settings-dialog .field-actions button {
+  padding: 4px 12px;
+  font-size: 12px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  border-radius: 6px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.settings-dialog .field-actions button:hover:not(:disabled) {
+  background: var(--bg-subtle);
+}

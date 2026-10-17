@@ -9,6 +9,7 @@ import {
   readSettingsFile,
   resolveEffectiveProviders,
   resolveModelEnv,
+  resolveOutputDir,
   resolveWritingEnv,
   writeSettingsFile,
 } from "./settings";
@@ -86,6 +87,7 @@ describe("normalizeSettings provider（接口类型）", () => {
       agentModel: { provider: "deepseek", apiKey: "sk", modelName: "deepseek-flash", baseUrl: "" },
       writingModel: { provider: "claude", modelName: "claude-sonnet-5", apiKey: "sk-w", baseUrl: "" },
       writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
+      outputDir: "",
     });
     expect(readSettingsFile(filePath)).toEqual(saved);
     expect(readSettingsFile(filePath).writingModel.provider).toBe("claude");
@@ -103,6 +105,7 @@ describe("settings 文件读写", () => {
       agentModel: { provider: "", apiKey: " sk-main ", modelName: "", baseUrl: "" },
       writingModel: { provider: "", modelName: "m", apiKey: "k", baseUrl: "https://x/v1" },
       writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
+      outputDir: "",
     });
     expect(saved.agentModel.apiKey).toBe("sk-main");
     expect(existsSync(filePath)).toBe(true);
@@ -151,6 +154,7 @@ describe("resolveModelEnv 三级优先级", () => {
         agentModel: { provider: "", apiKey: "sk-settings", modelName: "", baseUrl: "" },
         writingModel: { provider: "", modelName: "", apiKey: "", baseUrl: "" },
         writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
+        outputDir: "",
       },
       { DEEPSEEK_API_KEY: "sk-dotenv", DEEPSEEK_MODEL_NAME: "from-dotenv", WRITING_MODEL_NAME: "wm-dotenv" },
       { DEEPSEEK_API_KEY: "sk-inherited", WRITING_MODEL_NAME: "wm-inherited", WRITING_MODEL_API_KEY: "wm-key-inherited" },
@@ -278,6 +282,7 @@ describe("normalizeSettings theme", () => {
       agentModel: { provider: "", apiKey: "", modelName: "", baseUrl: "" },
       writingModel: { provider: "", modelName: "", apiKey: "", baseUrl: "" },
       writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
+      outputDir: "",
     });
     expect(readSettingsFile(filePath).theme).toBe("dark");
   });
@@ -309,6 +314,7 @@ describe("normalizeSettings writing（写作偏好系统级默认）", () => {
       agentModel: { provider: "", apiKey: "", modelName: "", baseUrl: "" },
       writingModel: { provider: "", modelName: "", apiKey: "", baseUrl: "" },
       writing: { chapterLengthMin: 2500, chapterLengthMax: 4000, stylePassScore: 90 },
+      outputDir: "",
     });
     expect(saved.writing).toEqual({ chapterLengthMin: 2500, chapterLengthMax: 4000, stylePassScore: 90 });
     expect(readSettingsFile(filePath).writing).toEqual(saved.writing);
@@ -338,5 +344,25 @@ describe("resolveWritingEnv 三级优先级", () => {
       {},
     );
     expect(Object.keys(allEmpty)).toHaveLength(0);
+  });
+});
+
+describe("resolveOutputDir 三级优先级", () => {
+  test("设置 > .env > 继承环境变量 > 场景默认；空白逐层下探；normalize 非法值归空串", () => {
+    const withDir = normalizeSettings({ outputDir: " /custom/output " });
+    expect(withDir.outputDir).toBe("/custom/output");
+    expect(
+      resolveOutputDir(withDir, { NOVEL_OUTPUT_DIR: "/dotenv-output" }, { NOVEL_OUTPUT_DIR: "/inherited-output" }, "/default/output"),
+    ).toBe("/custom/output");
+    expect(
+      resolveOutputDir(DEFAULT_SETTINGS, { NOVEL_OUTPUT_DIR: " /dotenv-output " }, { NOVEL_OUTPUT_DIR: "/inherited-output" }, "/default/output"),
+    ).toBe("/dotenv-output");
+    expect(
+      resolveOutputDir(DEFAULT_SETTINGS, { NOVEL_OUTPUT_DIR: " " }, { NOVEL_OUTPUT_DIR: "/inherited-output" }, "/default/output"),
+    ).toBe("/inherited-output");
+    // 三层全未配置：永远有生效值，回落调用方场景默认（打包 userData/output、开发仓库 output/）
+    expect(resolveOutputDir(DEFAULT_SETTINGS, {}, {}, "/default/output")).toBe("/default/output");
+    // 手改 settings.json 写错类型（非字符串）归空串 = 未设置
+    expect(normalizeSettings({ outputDir: 123 }).outputDir).toBe("");
   });
 });

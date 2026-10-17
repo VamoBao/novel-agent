@@ -1,6 +1,5 @@
 import { unlinkSync } from "node:fs";
 import { WorkflowRunStore } from "./state/workflow-run-store";
-import { join } from "node:path";
 import {
   characterEntrySchema,
   characterMigrationEntrySchema,
@@ -43,12 +42,7 @@ import { ForeshadowStore, type StoredForeshadow } from "./state/foreshadow-store
 import { LocationStore } from "./state/location-store";
 import { StyleReferenceStore } from "./state/style-reference-store";
 import { OUTPUT_DIR, outlineFilePath } from "./output/outline-writer";
-import {
-  moveDocumentArtifact,
-  readDocumentArtifact,
-  removeDocumentArtifact,
-  sanitizePathSegment,
-} from "./output/document-writer";
+import { readDocumentArtifact, removeDocumentArtifact } from "./output/document-writer";
 
 /**
  * 库查询与管理入口（一次性 CLI）：Electron 客户端等宿主经
@@ -179,36 +173,18 @@ export function buildNovelDetail(
 }
 
 /** rename 载荷：更新名称（trim 非空校验），返回更新后列表项。
- *  正文按小说名落盘层级存储，改名连带迁移该小说的全部正文文件
- *  （逐文件移动到新名首段，库内 file_path 同步；文件缺失时只更新路径） */
+ *  正文按小说 ID 落盘（顶层文件夹即创作 ID，file_path 为绝对路径），改名零文件联动；
+ *  历史相对路径行（小说名-ID 结构）也不再移动——绝对化迁移已按文件真实位置回填 */
 export function renameNovel(
   db: ReturnType<typeof openDatabase>,
   novelId: string,
   name: string,
-  outputDir: string = OUTPUT_DIR,
 ): NovelListItem {
   const trimmed = name.trim();
   if (trimmed.length === 0) {
     throw new Error("小说名称不能为空");
   }
-  const documentStore = new DocumentStore(db);
-  const documents = documentStore.listDocuments(novelId);
   const updated = new NovelStore(db).updateNovel(novelId, { name: trimmed });
-  if (documents.length > 0) {
-    const newSegment = `${sanitizePathSegment(trimmed, "未命名小说")}-${novelId.slice(0, 8)}`;
-    const moves = documents
-      .map((document) => {
-        const segments = document.filePath.split(/[\\/]/);
-        if (segments.length < 2) return null;
-        const rest = segments.slice(1).join("/");
-        return { id: document.id, from: document.filePath, to: join(newSegment, rest) };
-      })
-      .filter((move): move is { id: string; from: string; to: string } => move !== null);
-    for (const move of moves) {
-      moveDocumentArtifact(move.from, move.to, outputDir);
-    }
-    documentStore.updateFilePaths(moves.map(({ id, to }) => ({ id, filePath: to })));
-  }
   return toListItem(updated);
 }
 
@@ -255,8 +231,9 @@ export function setNovelFavorite(
   return toListItem(new NovelStore(db).setNovelFavorite(novelId, favorite));
 }
 
-/** delete 载荷：级联删除关联数据 + best-effort 清理 output 产物（大纲 JSON 与
- *  章节正文文件——正文文件按 documents 登记的 file_path 逐一删除，缺失不报错） */
+/** delete 载荷：级联删除关联数据 + best-effort 清理 output 产物（章节正文文件按
+ *  documents 登记的 file_path 逐一删除——绝对路径直接定位，历史相对行按 output 根
+ *  解析；大纲 JSON 为历史版本残留产物，顺手清理；缺失不报错） */
 export function deleteNovel(
   db: ReturnType<typeof openDatabase>,
   novelId: string,

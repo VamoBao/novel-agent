@@ -177,8 +177,8 @@ afterAll(async () => {
 describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
   test("指定幕规划成功：上下文取自库，确认视图与通知齐备，章节挂幕入库", async () => {
     const world = await seed();
-    // 叙事视角（创作条件）：随规划上下文进章节 Agent prompt
-    world.novelStore.updateNovel(NOVEL_ID, { narrativePov: "第三人称限知" });
+    // 叙事视角与主题（创作条件）：随规划上下文进章节 Agent prompt（theme 自 novels 行读取，不再读 JSON 产物）
+    world.novelStore.updateNovel(NOVEL_ID, { narrativePov: "第三人称限知", theme: "反抗垄断" });
     const secondAct = world.actNodes[1]!;
     agentPrompts = [];
     // 第一幕预置章节：回收伏笔的登场章（全局章序在第二幕章之前）
@@ -300,8 +300,9 @@ describe("planActChapters（FakeChannel + mock LLM 集成）", () => {
     // 未绑伏笔回传清单进 prompt：章节 Agent（首个 LLM 调用）的 prompt 含序号清单块
     expect(agentPrompts[0]).toContain("本幕未绑登场章的伏笔");
     expect(agentPrompts[0]).toContain("1. 宗主赐下断脉散——药中掺了追踪灵脉的蛊种");
-    // 叙事视角行进 prompt（创作条件与规划一致）
+    // 叙事视角与主题行进 prompt（创作条件与规划一致）
     expect(agentPrompts[0]).toContain("叙事视角：第三人称限知");
+    expect(agentPrompts[0]).toContain("主题：反抗垄断");
     // 待回收伏笔清单进 prompt（带登场章信息）
     expect(agentPrompts[0]).toContain("本幕待回收伏笔");
     expect(agentPrompts[0]).toContain("1. 断脉散中的蛊种——蛊种成熟时宗主将借体夺舍");

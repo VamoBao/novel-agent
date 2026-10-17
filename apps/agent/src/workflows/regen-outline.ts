@@ -6,7 +6,6 @@ import { getDefaultCharacterStore, type CharacterStore } from "../state/characte
 import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
 import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
 import { getDefaultLocationStore, type LocationStore } from "../state/location-store";
-import { saveOutline } from "../output/outline-writer";
 import { createOutline } from "./agents/outline-agent";
 import { autoCreateCharacters, filterNewCharacters } from "./agents/auto-character-agent";
 import { plantOutlineForeshadows } from "./foreshadow-intake";
@@ -126,9 +125,11 @@ export async function regenerateOutline(options: RegenOutlineOptions): Promise<R
     channel.notify(
       `🗂 新版大纲已入库（第 ${version} 版：${partTotal} 部 / ${actTotal} 幕）；旧大纲与已生成章节已归档为历史版本`,
     );
-    const savedPath = await saveOutline(novelId, outline);
-    channel.notify(`🗂 大纲产物已更新：${savedPath}`);
-    cache.step("update-novel", () => novelStore.updateNovel(novelId, { description: outline.logline }));
+    // 大纲只入库不落 JSON 产物；theme 随 logline 一并回填 novels 行
+    cache.step("update-novel", () => novelStore.updateNovel(novelId, {
+      description: outline.logline,
+      theme: outline.theme ?? null,
+    }));
 
     // 新版大纲地点确定性入库（同 createNovel 收尾动作）：置于角色自动入库之前；地点只增
     // 不改——兜底 diff 对全库地点名，旧版入库地点保留不动。空清单（过滤后）整块跳过。

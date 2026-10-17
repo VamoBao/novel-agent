@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AppSettings, EffectiveProviders } from "./settings";
+import type { AppSettings, EffectiveProviders, PickOutputDirResult } from "./settings";
 import type {
   AgentMessage,
   AgentStartOptions,
@@ -92,11 +92,18 @@ contextBridge.exposeInMainWorld("agent", {
   deleteStyle: (styleId: string): Promise<{ deleted: string }> =>
     ipcRenderer.invoke("library:deleteStyle", styleId),
   /** 模型设置读写（设置弹窗）：明文 JSON 于 userData（优先级 设置 > .env > 继承环境变量）；
-   *  读取一并回传两族模型生效的接口类型（弹窗回显真实生效值） */
-  getSettings: (): Promise<{ settings: AppSettings; filePath: string; effectiveProviders: EffectiveProviders }> =>
-    ipcRenderer.invoke("settings:get"),
+   *  读取一并回传两族模型生效的接口类型（弹窗回显真实生效值）与产物目录的场景默认值 */
+  getSettings: (): Promise<{
+    settings: AppSettings;
+    filePath: string;
+    effectiveProviders: EffectiveProviders;
+    defaultOutputDir: string;
+  }> => ipcRenderer.invoke("settings:get"),
   saveSettings: (settings: AppSettings): Promise<{ settings: AppSettings; filePath: string }> =>
     ipcRenderer.invoke("settings:save", settings),
+  /** 产物输出目录选择：主进程系统目录选择器 + 可写性探针（不可写返回 error，取消 canceled） */
+  pickOutputDirectory: (): Promise<PickOutputDirResult> =>
+    ipcRenderer.invoke("dialog:pick-output-dir"),
   /** 诊断钩子：无头冒烟自动打开创作覆盖层（preload 沙箱关闭，可直接读环境变量） */
   isAutostart: (): boolean => process.env.NOVEL_CLIENT_AUTOSTART === "1",
   /** 诊断钩子：无头冒烟自动选中小说并预览首个可用节点 */

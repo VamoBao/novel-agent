@@ -61,6 +61,8 @@ export interface AppSettings {
   writingModel: ModelSettings;
   /** 写作偏好（章节正文生成）的系统级默认；单本小说的「写作偏好」覆盖优先级更高 */
   writing: WritingPrefsSettings;
+  /** 章节正文产物输出根目录；空串 = 未设置（打包态默认 userData/output、开发态默认仓库 output/） */
+  outputDir: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -69,6 +71,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agentModel: { provider: "", apiKey: "", modelName: "", baseUrl: "" },
   writingModel: { provider: "", modelName: "", apiKey: "", baseUrl: "" },
   writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
+  outputDir: "",
 };
 
 /** 单字段还原：非字符串一律空串，字符串 trim（粘贴的换行/空白无效化） */
@@ -135,6 +138,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
     ),
     writingModel: normalizeModelGroup(source.writingModel),
     writing: normalizeWritingGroup(source.writing),
+    outputDir: normalizeString(source.outputDir),
   };
 }
 
@@ -237,8 +241,28 @@ export function resolveWritingEnv(
   return env;
 }
 
-/** 两族模型各自最终生效的接口类型（设置弹窗回显用——与 agent 侧同一对纯函数，所见即所用） */
-export interface EffectiveProviders {
+/**
+ * 章节正文产物输出根目录解析：设置文件（「产物输出目录」）> `.env` 的
+ * NOVEL_OUTPUT_DIR > 继承环境变量 > 调用方给的场景默认目录（打包态
+ * userData/output、开发态仓库 output/）。与写作偏好不同——产物目录永远
+ * 有生效值，返回非空绝对路径（defaultDir 由调用方保证绝对）。
+ */
+export function resolveOutputDir(
+  settings: AppSettings,
+  dotenv: Readonly<Record<string, string>>,
+  inherited: Readonly<NodeJS.ProcessEnv>,
+  defaultDir: string,
+): string {
+  return firstNonEmpty(settings.outputDir, dotenv.NOVEL_OUTPUT_DIR, inherited.NOVEL_OUTPUT_DIR, defaultDir);
+}
+
+/** 目录选择 IPC（dialog:pick-output-dir）结果：ok=true 携带经可写探针验证的目录；
+ *  用户取消 canceled=true；选中但不可写 canceled=false 且带 error（弹窗回显、不采纳） */
+export type PickOutputDirResult =
+  | { ok: true; dir: string }
+  | { ok: false; canceled: boolean; error?: string };
+
+/** 两族模型各自最终生效的接口类型（设置弹窗回显用——与 agent 侧同一对纯函数，所见即所用） */export interface EffectiveProviders {
   agent: ModelProvider;
   writing: ModelProvider;
 }

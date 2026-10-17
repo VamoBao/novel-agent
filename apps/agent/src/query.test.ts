@@ -301,27 +301,27 @@ describe("query CLI 管理命令（rename / pin / favorite / delete）", () => {
     db.close();
   });
 
-  test("rename 连带迁移按小说名落盘的正文文件与 file_path", async () => {
+  test("rename 零文件联动：正文按小说 ID 落盘（绝对 file_path），文件与库路径原样保留", async () => {
     const { db, outputDir } = await newFixture();
     const id = "aaaaaaaa-0000-7000-8000-000000000016";
     new NovelStore(db).createNovel({ id, name: "旧名" });
     const documentStore = new DocumentStore(db);
-    // 种子：一章 + 正文文件（旧名首段）
+    // 种子：一章 + 正文文件（小说 ID 首段、库内绝对路径）
     new OutlineStore(db).saveOutlineTree(id, [
       { name: "部一", summary: "梗概", acts: [{ name: "幕一", summary: "幕梗概", keyPlotPoints: ["点"] }] },
     ]);
     const actNode = new OutlineStore(db).listOutlineNodes(id, { currentOnly: true }).find((n) => n.node.type === "act")!;
     const chapter = new OutlineStore(db).saveChapters(id, actNode.id, [{ name: "章一", summary: "概述" }])[0]!;
-    documentStore.saveChapterDocument(id, chapter.id, "旧名/部一/章一.md", 5);
-    await writeDocumentArtifact("旧名/部一/章一.md", "正文内容。", outputDir);
+    await writeDocumentArtifact(join(id, "部一", "章一.md"), "正文内容。", outputDir);
+    documentStore.saveChapterDocument(id, chapter.id, join(outputDir, id, "部一", "章一.md"), 5);
 
-    renameNovel(db, id, "新名", outputDir);
+    const renamed = renameNovel(db, id, "新名");
 
-    // 文件移动到新名首段，库内 file_path 同步，读取可达
-    expect(existsSync(join(outputDir, "旧名", "部一", "章一.md"))).toBe(false);
-    expect(existsSync(join(outputDir, "新名-aaaaaaaa", "部一", "章一.md"))).toBe(true);
+    // 改名只动 novels.name：文件原地不动、file_path 不变（documents.updated_at 亦不动）
+    expect(renamed.name).toBe("新名");
+    expect(existsSync(join(outputDir, id, "部一", "章一.md"))).toBe(true);
     const detail = buildNovelDetail(db, id, outputDir);
-    expect(detail.documents[0]?.filePath).toBe(join("新名-aaaaaaaa", "部一", "章一.md"));
+    expect(detail.documents[0]?.filePath).toBe(join(outputDir, id, "部一", "章一.md"));
     expect(detail.documents[0]?.content).toBe("正文内容。");
     db.close();
   });

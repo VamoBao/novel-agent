@@ -168,10 +168,10 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
       locationStore: new LocationStore(db),
     });
 
-    // 最终状态与产物
+    // 最终状态与产物：大纲只入库不落 JSON（title/logline/theme 回填 novels 行）
     expect(state.status).toBe("outlined");
     expect(state.outline?.title).toBe("灵脉遗孤");
-    expect(existsSync(join(tempDir, "output", `${state.id}.json`))).toBe(true);
+    expect(existsSync(join(tempDir, "output", `${state.id}.json`))).toBe(false);
 
     // 交互轨迹：视图按预期顺序（worldview 展示 → 7 字段摘要 + 整卡 → 冲突 → 大纲确认 + 全量），
     // 章节规划不再自动衔接（无 chapter-plan 视图）
@@ -198,6 +198,7 @@ describe("createNovel（FakeChannel + mock LLM 集成）", () => {
     const novelStore = new NovelStore(db);
     expect(novelStore.getNovel(state.id)?.name).toBe("灵脉遗孤");
     expect(novelStore.getNovel(state.id)?.description).toBe(outlineFixture.logline);
+    expect(novelStore.getNovel(state.id)?.theme).toBe("反抗垄断");
     expect(novelStore.getNovel(state.id)).toMatchObject({
       genre: "仙侠",
       narrativePov: "第三人称限知",

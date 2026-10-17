@@ -147,32 +147,17 @@ describe("DocumentStore", () => {
     expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(2);
   });
 
-  test("updateFilePaths：批量更新路径（小说改名迁移联动），空路径被拒绝", async () => {
+  test("file_path 落库为传入原值（绝对路径语义由调用方保证），空路径被拒绝", async () => {
     const ctx = await setupDb();
     cleanups.push(ctx.cleanup);
-    const first = ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, "旧名/部/章.md", 6);
-    const second = ctx.documentStore.saveChapterDocument(
-      NOVEL_ID,
-      ctx.secondChapterNodeId,
-      "旧名/部/章2.md",
-      6,
-    );
-
-    ctx.documentStore.updateFilePaths([
-      { id: first.id, filePath: "新名/部/章.md" },
-      { id: second.id, filePath: "新名/部/章2.md" },
-    ]);
-    const paths = ctx.documentStore
-      .listDocuments(NOVEL_ID)
-      .map((d) => d.filePath)
-      .sort();
-    expect(paths).toEqual(["新名/部/章.md", "新名/部/章2.md"].sort());
+    const absolute = join(tmpdir(), "novel-docs", "novel-id", "部", "章.md");
+    const saved = ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, absolute, 6);
+    expect(saved.filePath).toBe(absolute);
+    expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.filePath).toBe(absolute);
 
     expect(() =>
-      ctx.documentStore.updateFilePaths([{ id: first.id, filePath: "" }]),
+      ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.secondChapterNodeId, "", 6),
     ).toThrow();
-    // 事务原子：非法项拒绝后，第一条路径不被部分更新
-    expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.filePath).toBe("新名/部/章.md");
   });
 
   test("整本删除级联清理正文元数据（deleteNovel 单事务）", async () => {

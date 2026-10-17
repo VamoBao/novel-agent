@@ -213,7 +213,7 @@ describe("writeChapter", () => {
     });
 
     // 正文按「小说名/部名/章名.md」层级落文件，内容为生成文本
-    const artifact = join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    const artifact = join(ctx.outputDir, "eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章.md");
     expect(existsSync(artifact)).toBe(true);
     expect(readFileSync(artifact, "utf8")).toBe(PROSE.trim());
 
@@ -237,7 +237,9 @@ describe("writeChapter", () => {
     expect(chapter.node.status).toBe("completed");
     expect(result.wordCount).toBe(38);
     const stored = ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!;
-    expect(stored.filePath).toBe(join("灵脉拾遗-eeeeeeee", "第一部", "第一章.md"));
+    expect(stored.filePath).toBe(
+      join(ctx.outputDir, "eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章.md"),
+    );
 
     // 通知：启动与保存路径统计
     expect(channel.notifies.some((n) => n.includes("正文生成中"))).toBeTrue();
@@ -517,7 +519,7 @@ describe("writeChapter", () => {
     ]);
     const thirdChapter = ctx.outlineStore.getOutlineNode(ctx.thirdChapterNodeId)!;
     const prose = "第三章的结尾：碎片映出旧日影像。";
-    const relative = "灵脉拾遗-eeeeeeee/第一部/第三章.md";
+    const relative = "eeeeeeee-4444-7444-8555-666677778888/第一部/第三章.md";
     writeDocumentArtifact(relative, prose, ctx.outputDir);
     ctx.documentStore.saveChapterDocument(NOVEL_ID, thirdChapter.id, relative, 16);
 
@@ -590,7 +592,7 @@ describe("writeChapter", () => {
     // 回落实例即 agent-model.ts 的 model；正文照常落文件入库
     expect(generateTextCalls).toHaveLength(1);
     expect(generateTextCalls[0]!.model).toBe(agentModel);
-    expect(existsSync(join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md"))).toBe(true);
+    expect(existsSync(join(ctx.outputDir, "eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章.md"))).toBe(true);
     expect(result.documentId).toBeDefined();
   });
 
@@ -601,7 +603,7 @@ describe("writeChapter", () => {
     generateTextResult = PROSE;
 
     // 预置同名文件（模拟上一版大纲的同名章正文残留）
-    const legacy = join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    const legacy = join(ctx.outputDir, "eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章.md");
     await Bun.write(legacy, "旧版同名章的正文。");
 
     const result = await writeChapter({
@@ -613,11 +615,11 @@ describe("writeChapter", () => {
 
     // 旧文件原样保留，新正文落到 -2 后缀文件
     expect(readFileSync(legacy, "utf8")).toBe("旧版同名章的正文。");
-    const newPath = join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章-2.md");
+    const newPath = join(ctx.outputDir, "eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章-2.md");
     expect(existsSync(newPath)).toBe(true);
     expect(readFileSync(newPath, "utf8")).toBe(PROSE.trim());
     expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.filePath).toBe(
-      join("灵脉拾遗-eeeeeeee", "第一部", "第一章-2.md"),
+      join(ctx.outputDir, "eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章-2.md"),
     );
     expect(result.documentId).toBeDefined();
   });
@@ -645,7 +647,7 @@ describe("writeChapter", () => {
         documentStore: failingStore,
       }),
     ).rejects.toThrow("模拟库写入失败");
-    expect(existsSync(join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md"))).toBe(false);
+    expect(existsSync(join(ctx.outputDir, "eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章.md"))).toBe(false);
     expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(0);
   });
 
@@ -833,7 +835,7 @@ describe("writeChapter", () => {
 
     // 登场章 = 第一章（写正文文件 + 登记元数据）；另一条伏笔登场章 = 第三章（未写正文）
     const prose = "　　少年把碎片藏进袖中，指腹擦过那道细如发丝的刻痕。\n\n　　宗门的告示贴在市集口，墨迹未干。";
-    const rel = join("灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    const rel = join("eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章.md");
     writeDocumentArtifact(rel, prose, ctx.outputDir);
     ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, rel, 52);
     ctx.foreshadowStore.addForeshadow(NOVEL_ID, {
@@ -940,7 +942,7 @@ describe("writeChapter", () => {
     });
     expect(events.find(event => event.phase === "saving")?.report).toMatchObject({ passed: true, round: 2 });
     const stored = ctx.documentStore.getDocumentByChapter(ctx.thirdChapterNodeId)!;
-    const saved = readFileSync(join(ctx.outputDir, stored.filePath), "utf8");
+    const saved = readFileSync(stored.filePath, "utf8");
     expect(saved).toContain(revised);
     expect(saved).not.toContain(draft);
   });
@@ -1037,7 +1039,7 @@ describe("writeChapter", () => {
     expect(saving.report).toMatchObject({ passed: true, round: 2 });
 
     // 入库的是修订稿；通知含修订轮次与通过轮次
-    const artifact = join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    const artifact = join(ctx.outputDir, "eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章.md");
     expect(readFileSync(artifact, "utf8")).toContain("矛盾已统一为五个字");
     expect(channel.notifies.some((n) => n.includes("♻️ 第 2 轮：上一版未达标准"))).toBeTrue();
     expect(channel.notifies.some((n) => n.includes("✅ 校验通过（第 2 轮）"))).toBeTrue();
@@ -1072,7 +1074,7 @@ describe("writeChapter", () => {
     expect(events.filter((event) => event.phase === "revising")).toHaveLength(2);
 
     // 照常落盘入库（最后一版）
-    const artifact = join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    const artifact = join(ctx.outputDir, "eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章.md");
     expect(existsSync(artifact)).toBe(true);
     expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.id).toBe(result.documentId);
 
@@ -1138,7 +1140,7 @@ describe("writeChapter", () => {
         ...ctx,
       }),
     ).rejects.toThrow("校验模型超时");
-    expect(existsSync(join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章.md"))).toBe(false);
+    expect(existsSync(join(ctx.outputDir, "eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章.md"))).toBe(false);
     expect(ctx.documentStore.listDocuments(NOVEL_ID)).toHaveLength(0);
     expect(ctx.outlineStore.getOutlineNode(ctx.chapterNodeId)!.node.documentId).toBeNull();
   });
@@ -1147,7 +1149,7 @@ describe("writeChapter", () => {
     const ctx = await setupDb();
     cleanupAll.push(ctx.cleanup);
     // 预置旧正文（行 + 文件）
-    const oldRel = join("灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    const oldRel = join("eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章.md");
     writeDocumentArtifact(oldRel, "旧版正文内容。", ctx.outputDir);
     const old = ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, oldRel, 7);
     generateTextCalls = [];
@@ -1171,7 +1173,7 @@ describe("writeChapter", () => {
 
     // 旧文件清理、新文件落盘（旧名被旧文件占用 → 新文件 -2 后缀）
     expect(existsSync(join(ctx.outputDir, oldRel))).toBe(false);
-    const newRel = join("灵脉拾遗-eeeeeeee", "第一部", "第一章-2.md");
+    const newRel = join("eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章-2.md");
     expect(readFileSync(join(ctx.outputDir, newRel), "utf8")).toBe(PROSE.trim());
 
     // 生成与校验流程与新生成一致（1 生成 + 2 校验，无文风），notify 区分重生成
@@ -1185,7 +1187,7 @@ describe("writeChapter", () => {
   test("重新生成库故障：回滚删新文件，旧正文行与文件零影响", async () => {
     const ctx = await setupDb();
     cleanupAll.push(ctx.cleanup);
-    const oldRel = join("灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    const oldRel = join("eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章.md");
     writeDocumentArtifact(oldRel, "旧版正文内容。", ctx.outputDir);
     const old = ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, oldRel, 7);
     generateTextCalls = [];
@@ -1212,13 +1214,13 @@ describe("writeChapter", () => {
     // 旧正文行与文件原样保留；新文件（-2）无残留
     expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.id).toBe(old.id);
     expect(readFileSync(join(ctx.outputDir, oldRel), "utf8")).toBe("旧版正文内容。");
-    expect(existsSync(join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章-2.md"))).toBe(false);
+    expect(existsSync(join(ctx.outputDir, "eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章-2.md"))).toBe(false);
   });
 
   test("重新生成校验抛错：终止会话，旧正文行与文件零影响", async () => {
     const ctx = await setupDb();
     cleanupAll.push(ctx.cleanup);
-    const oldRel = join("灵脉拾遗-eeeeeeee", "第一部", "第一章.md");
+    const oldRel = join("eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章.md");
     writeDocumentArtifact(oldRel, "旧版正文内容。", ctx.outputDir);
     const old = ctx.documentStore.saveChapterDocument(NOVEL_ID, ctx.chapterNodeId, oldRel, 7);
     generateTextCalls = [];
@@ -1237,6 +1239,6 @@ describe("writeChapter", () => {
     // 旧正文原样保留（保存段未到达，新文件未写）
     expect(ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!.id).toBe(old.id);
     expect(readFileSync(join(ctx.outputDir, oldRel), "utf8")).toBe("旧版正文内容。");
-    expect(existsSync(join(ctx.outputDir, "灵脉拾遗-eeeeeeee", "第一部", "第一章-2.md"))).toBe(false);
+    expect(existsSync(join(ctx.outputDir, "eeeeeeee-4444-7444-8555-666677778888", "第一部", "第一章-2.md"))).toBe(false);
   });
 });

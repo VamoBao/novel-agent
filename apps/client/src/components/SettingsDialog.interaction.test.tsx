@@ -25,7 +25,7 @@ test.each(["agent", "writing"])("%s 只编辑连接字段后仍使用界面显�
       dom.agent = {
         getSettings: async () => {
           const settings = readSettingsFile(filePath);
-          return { settings, filePath, effectiveProviders: resolveEffectiveProviders(settings, {}, {}) };
+          return { settings, filePath, effectiveProviders: resolveEffectiveProviders(settings, {}, {}), defaultOutputDir: "/default/output" };
         },
         saveSettings: async (settings) => ({ settings: writeSettingsFile(filePath, settings), filePath }),
       };
@@ -102,7 +102,7 @@ test("Agent Base URL 从设置加载，编辑保存后重读并注入通用环�
       dom.agent = {
         getSettings: async () => {
           const settings = readSettingsFile(filePath);
-          return { settings, filePath, effectiveProviders: resolveEffectiveProviders(settings, dotenv, {}) };
+          return { settings, filePath, effectiveProviders: resolveEffectiveProviders(settings, dotenv, {}), defaultOutputDir: "/default/output" };
         },
         saveSettings: async (settings) => ({ settings: writeSettingsFile(filePath, settings), filePath }),
       };
@@ -194,6 +194,84 @@ test("Agent Base URL 从设置加载，编辑保存后重读并注入通用环�
   }
 });
 
+test("产物输出目录：浏览回填经探针验证的目录并保存落盘；不可写回显错误不采纳；恢复默认清空", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "novel-settings-output-"));
+  const filePath = join(dir, "settings.json");
+  try {
+    writeSettingsFile(filePath, normalizeSettings({}));
+    const probe = `
+      import { Window } from 'happy-dom';
+      import { readSettingsFile, resolveEffectiveProviders, writeSettingsFile } from './electron/settings';
+      const dom = new Window({ url: 'http://localhost' });
+      Object.assign(globalThis, { window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
+      const { act, createElement } = await import('react');
+      const { createRoot } = await import('react-dom/client');
+      const { SettingsDialog } = await import('./src/components/SettingsDialog');
+      const filePath = process.env.SETTINGS_PROBE_FILE;
+      // pickOutputDirectory 脚本：第一次返回不可写目录（探针失败），其后返回可写目录
+      let pickCount = 0;
+      dom.agent = {
+        getSettings: async () => {
+          const settings = readSettingsFile(filePath);
+          return { settings, filePath, effectiveProviders: resolveEffectiveProviders(settings, {}, {}), defaultOutputDir: "/default/output" };
+        },
+        saveSettings: async (settings) => ({ settings: writeSettingsFile(filePath, settings), filePath }),
+        pickOutputDirectory: async () => {
+          pickCount += 1;
+          return pickCount === 1
+            ? { ok: false, canceled: false, error: "目录不可写（/readonly）：permission denied" }
+            : { ok: true, dir: "/custom/output" };
+        },
+      };
+      const container = dom.document.createElement('div');
+      dom.document.body.append(container);
+      const root = createRoot(container);
+      await act(async () => { root.render(createElement(SettingsDialog, { onClose: () => {} })); });
+      const group = dom.document.querySelectorAll('.settings-group')[4];
+      const input = group.querySelector('input');
+      const placeholder = input.placeholder;
+      // 第一次浏览：探针失败 → 错误回显、目录不采纳（保持空 = 默认）
+      await act(async () => { group.querySelectorAll('.field-actions button')[0].click(); });
+      const errorAfterProbe = dom.document.querySelector('.form-error')?.textContent ?? null;
+      const valueAfterProbe = input.value;
+      // 第二次浏览：可写目录回填 → 恢复默认可用，点击后清空回落默认
+      await act(async () => { group.querySelectorAll('.field-actions button')[0].click(); });
+      const valueAfterPick = input.value;
+      await act(async () => { group.querySelectorAll('.field-actions button')[1].click(); });
+      const valueAfterReset = input.value;
+      // 再选一次并保存：outputDir 落盘
+      await act(async () => { group.querySelectorAll('.field-actions button')[0].click(); });
+      await act(async () => { dom.document.querySelector('button.primary').click(); });
+      const saved = readSettingsFile(filePath);
+      await act(async () => root.unmount());
+      await dom.happyDOM.close();
+      process.stdout.write(JSON.stringify({
+        placeholder, errorAfterProbe, valueAfterProbe, valueAfterPick, valueAfterReset, saved: saved.outputDir,
+      }));
+    `;
+    const proc = Bun.spawn([process.execPath, "--eval", probe], {
+      cwd: fileURLToPath(new URL("../..", import.meta.url)),
+      env: { ...process.env, SETTINGS_PROBE_FILE: filePath }, stdout: "pipe", stderr: "pipe",
+    });
+    const [stdout, stderr, exit] = await Promise.all([
+      new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
+    ]);
+    expect(stderr).toBe("");
+    expect(exit).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({
+      placeholder: "默认：/default/output",
+      // 探针失败：错误回显、目录不采纳（保持默认空值）
+      errorAfterProbe: "目录不可写（/readonly）：permission denied",
+      valueAfterProbe: "",
+      valueAfterPick: "/custom/output",
+      valueAfterReset: "",
+      saved: "/custom/output",
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("历史配置（无 provider，DeepSeek 官方地址）在弹窗中回显为 DeepSeek 并保存为新格式", async () => {
   const dir = mkdtempSync(join(tmpdir(), "novel-settings-ui-legacy-"));
   const filePath = join(dir, "settings.json");
@@ -217,7 +295,7 @@ test("历史配置（无 provider，DeepSeek 官方地址）在弹窗中回显�
       dom.agent = {
         getSettings: async () => {
           const settings = readSettingsFile(filePath);
-          return { settings, filePath, effectiveProviders: resolveEffectiveProviders(settings, dotenv, {}) };
+          return { settings, filePath, effectiveProviders: resolveEffectiveProviders(settings, dotenv, {}), defaultOutputDir: "/default/output" };
         },
         saveSettings: async (settings) => ({ settings: writeSettingsFile(filePath, settings), filePath }),
       };
@@ -284,7 +362,7 @@ test("只改主题时保留 .env 的 provider，不固化回显值", async () =>
       dom.agent = {
         getSettings: async () => {
           const settings = readSettingsFile(filePath);
-          return { settings, filePath, effectiveProviders: resolveEffectiveProviders(settings, dotenv, {}) };
+          return { settings, filePath, effectiveProviders: resolveEffectiveProviders(settings, dotenv, {}), defaultOutputDir: "/default/output" };
         },
         saveSettings: async (settings) => ({ settings: writeSettingsFile(filePath, settings), filePath }),
       };

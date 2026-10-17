@@ -38,6 +38,7 @@ import {
   buildChapterDocumentPath,
   countWords,
   removeDocumentArtifact,
+  resolveArtifactPath,
   writeDocumentArtifact,
 } from "../output/document-writer";
 
@@ -432,33 +433,32 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
     ...(report ? { report } : {}),
   });
 
-  // 正文落盘（小说名-<id前8位>/部名/章名层级，同名小说不共享文件夹），库绑定失败时回滚删除文件
+  // 正文落盘（<小说ID>/部名/章名层级，顶层文件夹即创作 ID），file_path 落库为绝对
+  // 路径（用户中途更换输出目录后旧正文仍指向真实位置）；库绑定失败时回滚删除文件
   const relativePath = buildChapterDocumentPath(
     {
-      novelName: novel.name ?? "未命名小说",
       novelId,
       partName: part.node.name,
       chapterName: chapter.node.name,
     },
     outputDir,
   );
+  const filePath = resolveArtifactPath(relativePath, outputDir);
   let document: Document;
   try {
     writeDocumentArtifact(relativePath, content, outputDir);
+  } catch (error) {
+    // 文件未写成，无回滚可做；包一层可读上下文（目录不可写 / 磁盘故障）供 fatal error 直达用户
+    throw new Error(
+      `正文文件写入失败——输出目录不可写或磁盘故障（${outputDir}）：${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  try {
     // 重生成走覆盖替换（单事务删旧行插新行），首次生成走既有保存
     document = isRegen
-      ? documentStore.replaceChapterDocument(
-          novelId,
-          chapterNodeId,
-          relativePath,
-          countWords(content),
-        )
-      : documentStore.saveChapterDocument(
-          novelId,
-          chapterNodeId,
-          relativePath,
-          countWords(content),
-        );
+      ? documentStore.replaceChapterDocument(novelId, chapterNodeId, filePath, countWords(content))
+      : documentStore.saveChapterDocument(novelId, chapterNodeId, filePath, countWords(content));
   } catch (error) {
     removeDocumentArtifact(relativePath, outputDir);
     throw error;

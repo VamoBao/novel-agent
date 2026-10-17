@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   CHARACTER_FIELD_PATHS,
   characterSchema,
@@ -14,7 +14,7 @@ export const DEFAULT_DB_PATH = process.env.NOVEL_DB_PATH ?? "data/novel.db";
 
 /** schema 版本：结构变更时递增；4→5 起 client 书库已投产，仅做保数据的增量迁移，
  *  DROP 重建仅保留给开发期旧库（<4）与异常版本的兜底 */
-const SCHEMA_VERSION = 23;
+const SCHEMA_VERSION = 25;
 
 /** 工作流执行、完成步骤与原生 SDK 消息日志：业务写入和步骤标记共用同一连接。 */
 const CREATE_WORKFLOW_CACHE_SQL = `
@@ -594,8 +594,44 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
         }
         db.exec("PRAGMA user_version = 23;");
       }).immediate();
+      // 23→24：novels 增列 theme（大纲主题——大纲 JSON 产物退役，确认后随 name/description
+      // 回填一并入库）。NULL=未采集（历史小说 / 大纲未给主题），消费端按缺省省略。
+      // 补列与版本同 immediate 事务原子提交、锁内复查防并发；表缺失或列已存在时只写
+      // 版本标记。段内显式写 24（非 SCHEMA_VERSION）
+      db.transaction(() => {
+        const lockedVersion = db.query("PRAGMA user_version").get() as { user_version: number };
+        if (lockedVersion.user_version >= 24) return;
+        const novelCols = db.query("PRAGMA table_info(novels)").all() as Array<{ name: string }>;
+        if (novelCols.length > 0 && !novelCols.some((col) => col.name === "theme")) {
+          db.exec("ALTER TABLE novels ADD COLUMN theme TEXT;");
+        }
+        db.exec("PRAGMA user_version = 24;");
+      }).immediate();
+      // 24→25：documents.file_path 存量绝对化——相对路径以 output 根（NOVEL_OUTPUT_DIR，
+      // 与 migrateDocumentsToFile 同源默认 output/）resolve 成绝对路径回填，用户中途更换
+      // 输出目录后旧正文仍指向真实位置；已是绝对路径的行（新写入 / 重复迁移）跳过。
+      // documents 表或 file_path 列缺失（低版本直升链，表由下方 CREATE 幂等补建）时只写
+      // 版本标记。读取侧对未迁移的相对行保留兼容解析（document-writer resolveArtifactPath）
+      db.transaction(() => {
+        const lockedVersion = db.query("PRAGMA user_version").get() as { user_version: number };
+        if (lockedVersion.user_version >= 25) return;
+        const docCols = db.query("PRAGMA table_info(documents)").all() as Array<{ name: string }>;
+        if (docCols.some((col) => col.name === "file_path")) {
+          const outputRoot = process.env.NOVEL_OUTPUT_DIR ?? "output";
+          const rows = db.prepare("SELECT id, file_path FROM documents;").all() as Array<{
+            id: string;
+            file_path: string;
+          }>;
+          const update = db.prepare("UPDATE documents SET file_path = ? WHERE id = ?;");
+          for (const row of rows) {
+            if (isAbsolute(row.file_path)) continue;
+            update.run(resolve(outputRoot, row.file_path), row.id);
+          }
+        }
+        db.exec("PRAGMA user_version = 25;");
+      }).immediate();
     } else {
-      // 开发期旧库（<4，无客户端投产数据）或异常版本（>23 的库被旧代码打开）：重建兜底
+      // 开发期旧库（<4，无客户端投产数据）或异常版本（>25 的库被旧代码打开）：重建兜底
       db.exec("DROP TABLE IF EXISTS agent_message_traces;");
       db.exec("DROP TABLE IF EXISTS workflow_steps;");
       db.exec("DROP TABLE IF EXISTS workflow_runs;");
@@ -622,6 +658,7 @@ export function openDatabase(path: string = DEFAULT_DB_PATH): Database {
       audience TEXT,
       core_conflict TEXT,
       narrative_pov TEXT,
+      theme TEXT,
       chapter_length_min INTEGER,
       chapter_length_max INTEGER,
       style_pass_score INTEGER,

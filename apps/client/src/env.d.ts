@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import type { AppSettings, EffectiveProviders } from "../electron/settings";
+import type { AppSettings, EffectiveProviders, PickOutputDirResult } from "../electron/settings";
 import type {
   AgentMessage,
   AgentStartOptions,
@@ -57,8 +57,15 @@ declare global {
         style: { name: string; content: string; enabled: boolean },
       ) => Promise<StyleReferenceEntry>;
       deleteStyle: (styleId: string) => Promise<{ deleted: string }>;
-      getSettings: () => Promise<{ settings: AppSettings; filePath: string; effectiveProviders: EffectiveProviders }>;
+      getSettings: () => Promise<{
+        settings: AppSettings;
+        filePath: string;
+        effectiveProviders: EffectiveProviders;
+        defaultOutputDir: string;
+      }>;
       saveSettings: (settings: AppSettings) => Promise<{ settings: AppSettings; filePath: string }>;
+      /** 产物输出目录选择：主进程系统目录选择器 + 可写性探针（不可写返回 error，取消 canceled） */
+      pickOutputDirectory: () => Promise<PickOutputDirResult>;
       isAutostart: () => boolean;
       autoSelectNovelId: () => string | null;
     };

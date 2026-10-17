@@ -5,7 +5,7 @@ import { stylePassScoreSchema } from "./writing-prefs";
 import { viewSchema } from "./views";
 
 /** stdio JSON 行协议版本；hello 时不一致由 client 拒绝继续 */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** 创作流程阶段（client 侧 StageBar 进度展示用）；pov 为叙事视角步骤（类型之后），chapter 为单幕章节规划会话阶段，不进新建小说全流程 */
 export const stageSchema = z.enum([
@@ -87,10 +87,10 @@ export const agentMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("workflow-run"), runId: z.string().min(1), novelId: z.string().min(1) }),
   z.object({ type: z.literal("view"), view: viewSchema }),
   z.object({ type: z.literal("request"), id: z.number().int(), ask: askSchema }),
+  /** outputPath（大纲 JSON 产物路径）随大纲落盘退役移除；正文产物路径以 documents 表 file_path 为准 */
   z.object({
     type: z.literal("run_finished"),
     novelId: z.string(),
-    outputPath: z.string(),
   }),
   /** 角色润色结果：LLM 全字段润色后的完整角色卡（客户端回填表单，不自动入库） */
   z.object({ type: z.literal("polish-result"), character: characterSchema }),

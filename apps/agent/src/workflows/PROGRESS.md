@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-10-17 [feat] 数据布局改造（跨模块需求，主记录与验收见根 PROGRESS.md 同日条目）：本模块大纲 JSON 落盘退役——create-novel / regen-outline 确认后 title/logline/theme 回填 novels 行（不再写 `output/<id>.json`），plan-act-chapters 的 theme 改从 novels 行读取（readOutlineTheme 下线，依赖边界相应收缩）；write-chapter 正文落盘路径改 `<输出目录>/<小说ID>/<部名>/<章名>.md` 且 file_path 以绝对路径落库（写失败包「输出目录不可写」上下文），query.ts rename 零文件联动（moveDocumentArtifact / updateFilePaths 退役）。AC：全量 671 项通过（本模块 write-chapter / create-novel / regen-outline / plan-act-chapters 路径断言随新结构更新，净增 theme 库读断言）。
+
 - 2026-10-16 [fix] OpenAI 角色润色严格输出修复：polish-character.ts 使用本地 polishedCharacterSchema，将顶层和 basicInfo 的全部字段设为必填，角色输入/存储 characterSchema 保留原语义。新增 3 项独立子进程真实 SDK + 内存 SQLite 回归，模拟 OpenAI 递归 required/additionalProperties 校验，覆盖 DeepSeek/Claude 兼容及原基准不变。主记录见根 PROGRESS；AC：typecheck / lint / 全量 666 项通过，独立复审无阻塞。
 
 - 2026-10-16 [feat] 模型 provider 显式选择（跨模块需求，主记录与验收见根 PROGRESS.md 同日条目）：本模块 `write-chapter.ts` 消费的写作模型改由 `providers/writing-model.ts` 按 `WRITING_MODEL_PROVIDER` 所选接口类型调用对应官方 SDK（模型名 / Key / Base URL 三字段齐才启用、未配置回落 Agent 模型、非法 provider 抛可读错误），写作初稿 prompt 与校验链路零改动；本模块 ARCHITECTURE.md 的写作模型描述同步。AC：全量 657 项通过（本模块用例零改动、全数保留）。

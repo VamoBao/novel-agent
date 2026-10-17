@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeTheme } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme } from "electron";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -29,13 +29,16 @@ import {
   readSettingsFile,
   resolveEffectiveProviders,
   resolveModelEnv,
+  resolveOutputDir,
   resolveWritingEnv,
   writeSettingsFile,
   type AppSettings,
   type EffectiveProviders,
+  type PickOutputDirResult,
 } from "./settings";
 
-/** 仓库根（dev：app 路径为 apps/client，上两级即根；打包分发形态 v2 再调整） */
+/** 仓库根（dev：app 路径为 apps/client，上两级即根；打包态 appPath 为 asar 包内路径，
+ *  此值无意义——仅开发态数据落点与 .env 读取使用） */
 function resolveRepoRoot(): string {
   return path.resolve(app.getAppPath(), "..", "..");
 }
@@ -81,18 +84,41 @@ function loadEnvFile(file: string): Record<string, string> {
   }
 }
 
-/** agent / 查询 CLI 子进程共用环境：数据路径传绝对路径（相对路径会随 spawn cwd 漂移）。
+/** SQLite 库文件的场景默认：打包态 userData 标准数据目录（安装目录如 Program Files
+ *  不可写，数据不随应用走），开发态仓库 data/novel.db（开发体验不变） */
+function defaultDbPath(): string {
+  return app.isPackaged
+    ? path.join(app.getPath("userData"), "novel.db")
+    : path.join(resolveRepoRoot(), "data", "novel.db");
+}
+
+/** 章节正文产物输出根目录的场景默认（设置项「产物输出目录」未配置时的落点）：
+ *  打包态 userData/output，开发态仓库 output/ */
+function defaultOutputDir(): string {
+  return app.isPackaged
+    ? path.join(app.getPath("userData"), "output")
+    : path.join(resolveRepoRoot(), "output");
+}
+
+/** agent / 查询 CLI 子进程共用环境：数据路径传绝对路径（相对路径会随 spawn cwd 漂移）——
+ *  库文件走 defaultDbPath（打包态 userData、开发态仓库 data/），产物目录经 resolveOutputDir
+ *  三级优先级解析（设置「产物输出目录」> .env > 继承环境变量 > defaultOutputDir）。
+ *  打包态跳过仓库 .env 读取（repoRoot 不存在且无意义），模型配置走 settings.json。
  *  模型配置经 resolveModelEnv、写作偏好经 resolveWritingEnv 各自三级优先级注入
  *  （设置文件 > .env > 继承环境变量）；模型空串键删除——provider 侧据此走
  *  「未配置回落」与默认值逻辑；写作偏好只输出已解析到值的键 */
 function childEnv(): NodeJS.ProcessEnv {
-  const repoRoot = resolveRepoRoot();
-  const dotenv = loadEnvFile(path.join(repoRoot, ".env"));
+  const dotenv = app.isPackaged ? {} : loadEnvFile(path.join(resolveRepoRoot(), ".env"));
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...dotenv,
-    NOVEL_DB_PATH: path.join(repoRoot, "data", "novel.db"),
-    NOVEL_OUTPUT_DIR: path.join(repoRoot, "output"),
+    NOVEL_DB_PATH: defaultDbPath(),
+    NOVEL_OUTPUT_DIR: resolveOutputDir(
+      readSettingsFile(settingsFilePath()),
+      dotenv,
+      process.env,
+      defaultOutputDir(),
+    ),
   };
   const settings = readSettingsFile(settingsFilePath());
   const resolved = resolveModelEnv(settings, dotenv, process.env);
@@ -279,19 +305,47 @@ ipcMain.handle("settings:get", (): {
   settings: AppSettings;
   filePath: string;
   effectiveProviders: EffectiveProviders;
+  defaultOutputDir: string;
 } => {
   const settings = readSettingsFile(settingsFilePath());
   return {
     settings,
     filePath: settingsFilePath(),
     effectiveProviders: resolveEffectiveProviders(settings, loadEnvFile(path.join(resolveRepoRoot(), ".env")), process.env),
+    defaultOutputDir: defaultOutputDir(),
   };
 });
 
 ipcMain.handle("settings:save", (_event, settings: AppSettings): { settings: AppSettings; filePath: string } => {
   const saved = writeSettingsFile(settingsFilePath(), settings);
-  applyTheme(); // 主题保存即生效（模型配置仍为下一次会话生效，两者语义不同）
+  applyTheme(); // 主题保存即生效（模型配置与产物目录仍为下一次会话生效，两者语义不同）
   return { settings: saved, filePath: settingsFilePath() };
+});
+
+/**
+ * 目录选择（设置弹窗「产物输出目录」）：系统目录选择器 + 可写性探针——选中即
+ * 写删临时文件验证，不可写返回错误不采纳（避免用户设一个正文生成时才失败的目录）；
+ * 用户取消返回 canceled，不视为错误。
+ */
+ipcMain.handle("dialog:pick-output-dir", async (): Promise<PickOutputDirResult> => {
+  const result = await dialog.showOpenDialog({
+    title: "选择正文产物输出目录",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  const picked = result.canceled ? undefined : result.filePaths[0];
+  if (picked === undefined || picked.length === 0) return { ok: false, canceled: true };
+  const probe = path.join(picked, `.novel-output-probe-${Date.now()}`);
+  try {
+    fs.writeFileSync(probe, "");
+    fs.rmSync(probe, { force: true });
+  } catch (error) {
+    return {
+      ok: false,
+      canceled: false,
+      error: `目录不可写（${picked}）：${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  return { ok: true, dir: picked };
 });
 
 ipcMain.handle("library:list", async (): Promise<NovelListItem[]> => {

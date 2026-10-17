@@ -13,7 +13,6 @@ import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
 import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
 import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
 import { getDefaultLocationStore, type LocationStore } from "../state/location-store";
-import { saveOutline } from "../output/outline-writer";
 import { collectWorldview } from "./agents/worldview-agent";
 import { createCharacter } from "./agents/character-agent";
 import { createOutline } from "./agents/outline-agent";
@@ -247,7 +246,8 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
     const outline = submission.outline;
     channel.present({ kind: "outline", detail: "full", outline });
 
-    // 确认后入库（outlines 表两级树，梗概与关键情节点随节点入列）并落盘 output/<id>.json
+    // 确认后入库（outlines 表两级树，梗概与关键情节点随节点入列）；大纲不再落 JSON 产物
+    //（title/logline/theme 均回填 novels 行，正文产物按小说 ID 分文件夹另存）
     const treeNodes = cache.step("save-outline-tree", () => {
       if (outlineStore.listOutlineNodes(id, { currentOnly: true }).length > 0) {
         throw new Error("大纲版本已变更，无法将新建任务写入已有大纲");
@@ -263,16 +263,15 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
     const partTotal = treeNodes.filter((n) => n.node.type === "part").length;
     const actTotal = treeNodes.filter((n) => n.node.type === "act").length;
     channel.notify(`🗂 大纲树已入库（含梗概与关键情节点）：${partTotal} 部 / ${actTotal} 幕`);
-    const savedPath = await saveOutline(id, outline);
-    channel.notify(`🗂 大纲已落盘：${savedPath}`);
 
     // 章节规划不随大纲自动进行：会话至此收尾（run_finished），
     // 各幕章节由用户在客户端幕节点「规划本幕章节」入口经单幕规划会话逐幕手动发起
     const finalState = await store.update(id, { status: "outlined", outline });
-    // 大纲确认后回填：description = 剧情梗概；name 仅在用户未命名时以大纲标题回填
+    // 大纲确认后回填：description = 剧情梗概；theme = 大纲主题；name 仅在用户未命名时以大纲标题回填
     cache.step("update-novel", () => novelStore.updateNovel(id, {
       ...(novelName ? {} : { name: outline.title }),
       description: outline.logline,
+      theme: outline.theme ?? null,
     }));
 
     // 大纲新增地点确定性入库：置于角色自动入库之前——毫秒级同步代码先行完成即

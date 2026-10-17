@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { Database } from "bun:sqlite";
 import { agentMessageSchema, type AgentMessage, type ClientMessage } from "@novel/shared";
@@ -98,9 +97,8 @@ function handleAgentMessage(message: AgentMessage): void {
       break;
     }
     case "run_finished": {
-      console.log(`[e2e] run_finished novelId=${message.novelId} outputPath=${message.outputPath}`);
+      console.log(`[e2e] run_finished novelId=${message.novelId}`);
       console.log(`[e2e] 统计：notify=${stats.notify} view=${stats.view}(${[...viewKinds].join("/")}) request=${stats.request} stage=${stats.stage}`);
-      const outputOk = existsSync(message.outputPath);
       const db = new Database(dbPath, { readonly: true });
       const count = (sql: string): number => {
         const row = db.query(sql).get(message.novelId) as { c: number } | null;
@@ -113,12 +111,10 @@ function handleAgentMessage(message: AgentMessage): void {
         outlines: count("SELECT COUNT(*) c FROM outlines WHERE novel_id = ?"),
       };
       db.close();
-      console.log(`[e2e] 落盘文件存在：${outputOk}`);
       console.log(
         `[e2e] 入库行数：novels=${counts.novels} characters=${counts.characters} worldviews=${counts.worldviews} outlines=${counts.outlines}`,
       );
       const ok =
-        outputOk &&
         counts.novels === 1 &&
         counts.characters >= 1 &&
         counts.worldviews === 1 &&

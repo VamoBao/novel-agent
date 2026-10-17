@@ -174,11 +174,7 @@ async function main(): Promise<void> {
     // 五种会话共用同一收尾：run_finished 携带小说 ID（client 据此刷新书库/详情）；
     // 润色会话的业务结果经 polish-result 消息先行回传
     const novelId = await runSession(session, channel, send);
-    send({
-      type: "run_finished",
-      novelId,
-      outputPath: path.join(outputDir, `${novelId}.json`),
-    });
+    send({ type: "run_finished", novelId });
   } catch (error) {
     if (error instanceof UserAbortedError) {
       // client 已断开，无处可发，安静退出（EOF 前完成的写入均已落库）

@@ -8,7 +8,6 @@ import { getDefaultCharacterStore, type CharacterStore } from "../state/characte
 import { getDefaultOutlineStore, type OutlineStore, type StoredOutlineNode } from "../state/outline-store";
 import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
 import { getDefaultLocationStore, type LocationStore } from "../state/location-store";
-import { readOutlineTheme } from "../output/outline-writer";
 import type { Outline } from "@novel/shared";
 import { planChapters, type PlanChaptersInput } from "./agents/chapter-agent";
 import { autoCreateCharacters, collectChapterCharacters, filterNewCharacters } from "./agents/auto-character-agent";
@@ -148,7 +147,7 @@ export async function planActChapters(options: PlanActChaptersOptions): Promise<
       const recoverableForeshadows = foreshadowStore.listUnrecoveredByAct(novelId, act.id);
       const confirmed = await planChapters({
         novelTitle: novel.name ?? "未命名小说", logline: novel.description ?? "",
-        theme: readOutlineTheme(novelId), narrativePov: novel.narrativePov ?? undefined,
+        theme: novel.theme ?? undefined, narrativePov: novel.narrativePov ?? undefined,
         partName: part.node.name, partSummary: part.node.summary ?? "", actName: act.node.name,
         actSummary, keyPlotPoints,
         fullOutline: fullOutlineContext(outlineStore.listOutlineNodes(novelId, { currentOnly: true })),

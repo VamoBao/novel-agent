@@ -62,9 +62,9 @@ describe("protocol schemas", () => {
     expect(
       agentMessageSchema.parse({ type: "request", id: 3, ask: { type: "confirm", prompt: "p", default: true } }),
     ).toMatchObject({ id: 3 });
-    expect(
-      agentMessageSchema.parse({ type: "run_finished", novelId: "n1", outputPath: "/abs/out.json" }),
-    ).toMatchObject({ novelId: "n1" });
+    expect(agentMessageSchema.parse({ type: "run_finished", novelId: "n1" })).toMatchObject({
+      novelId: "n1",
+    });
     expect(
       agentMessageSchema.parse({
         type: "polish-result",

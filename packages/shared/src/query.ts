@@ -80,7 +80,7 @@ export type OutlineNodeEntry = z.infer<typeof outlineNodeEntrySchema>;
 export const documentEntrySchema = z.object({
   id: z.string().min(1).describe("documents 表主键（UUIDv7）"),
   chapterId: z.string().min(1).describe("所属章（outlines 表 chapter 节点）ID"),
-  filePath: z.string().min(1).describe("正文文件相对路径（相对 output 根）"),
+  filePath: z.string().min(1).describe("正文文件绝对路径（历史旧行可能存相对路径，查询时兼容解析）"),
   wordCount: z.number().int().min(0).describe("正文字数（不含空白字符）"),
   updatedAt: z.string().describe("生成时间（ISO 8601）"),
   content: z
