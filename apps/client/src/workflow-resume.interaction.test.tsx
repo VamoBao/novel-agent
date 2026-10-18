@@ -32,7 +32,7 @@ async function probe(body: string, env: Record<string, string> = {}): Promise<un
         if (running) { running = false; exit?.(143); }
       },
       respond: async () => {},
-      isAutostart: () => false, autoSelectNovelId: () => null,
+      isAutostart: () => false, autoSelectNovelId: () => null, isSettingsOpen: () => false,
     };
     ${body}
     await act(async () => root.unmount());

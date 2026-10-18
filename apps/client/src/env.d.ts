@@ -68,6 +68,7 @@ declare global {
       pickOutputDirectory: () => Promise<PickOutputDirResult>;
       isAutostart: () => boolean;
       autoSelectNovelId: () => string | null;
+      isSettingsOpen: () => boolean;
     };
   }
 }

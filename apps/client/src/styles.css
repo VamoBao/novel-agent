@@ -989,10 +989,86 @@ button.ghost {
   gap: 8px;
 }
 
-/* 模型设置弹窗（SettingsDialog）：两组模型字段，Key 走 password 输入 */
-.settings-dialog {
-  width: 480px;
-  max-width: calc(100vw - 48px);
+/* 设置页（SettingsPage）：独立整页——左导航分类 + 右设置项内容区，
+   内容纵向铺开（不再受弹窗高度局限）；Key 走 password 输入 */
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 20px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.settings-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 184px 1fr;
+  min-height: 0;
+}
+
+/* 左导航：分类按钮纵向排列，选中态用强调色底 + 左侧色条 */
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 10px;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-default);
+  overflow-y: auto;
+}
+
+.settings-nav button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 13px;
+  text-align: left;
+}
+
+.settings-nav button:hover:not(:disabled) {
+  background: var(--bg-button-hover);
+  color: var(--fg-default);
+}
+
+.settings-nav button.active {
+  background: var(--bg-accent-subtle);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.settings-nav button.active:hover:not(:disabled) {
+  background: var(--bg-accent-subtle);
+}
+
+/* 右内容区：设置项纵向铺开，底部固定保存 / 取消动作行 */
+.settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 14px;
 }
 
 .settings-group {
@@ -1006,11 +1082,11 @@ button.ghost {
   color: var(--fg-muted);
 }
 
-.settings-dialog .field {
+.settings-page .field {
   margin-bottom: 8px;
 }
 
-.settings-dialog .field label {
+.settings-page .field label {
   display: block;
   font-size: 12px;
   color: var(--fg-muted);
@@ -1018,8 +1094,8 @@ button.ghost {
 }
 
 /* provider 下拉框（接口类型）与输入框同款观感 */
-.settings-dialog .field input,
-.settings-dialog .field select {
+.settings-page .field input,
+.settings-page .field select {
   width: 100%;
   box-sizing: border-box;
   padding: 6px 8px;
@@ -1037,7 +1113,7 @@ button.ghost {
   color: var(--fg-subtle);
 }
 
-/* 设置弹窗「外观」主题分段三选（SettingsDialog）：选中态复用主按钮填充语汇 */
+/* 设置页「外观」主题分段三选：选中态复用主按钮填充语汇 */
 .theme-options {
   display: flex;
   gap: 6px;
@@ -1054,14 +1130,14 @@ button.ghost {
   color: var(--fg-on-emphasis);
 }
 
-/* 设置弹窗字段附属动作行（产物输出目录：浏览 / 恢复默认）：小号描边钮，语义变量配色 */
-.settings-dialog .field-actions {
+/* 设置页字段附属动作行（产物输出目录：浏览 / 恢复默认）：小号描边钮，语义变量配色 */
+.settings-page .field-actions {
   display: flex;
   gap: 6px;
   margin-top: 6px;
 }
 
-.settings-dialog .field-actions button {
+.settings-page .field-actions button {
   padding: 4px 12px;
   font-size: 12px;
   border: 1px solid var(--border-strong);
@@ -1071,6 +1147,6 @@ button.ghost {
   cursor: pointer;
 }
 
-.settings-dialog .field-actions button:hover:not(:disabled) {
+.settings-page .field-actions button:hover:not(:disabled) {
   background: var(--bg-subtle);
 }

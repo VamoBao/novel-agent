@@ -91,7 +91,7 @@ contextBridge.exposeInMainWorld("agent", {
     ipcRenderer.invoke("library:updateStyle", novelId, styleId, style),
   deleteStyle: (styleId: string): Promise<{ deleted: string }> =>
     ipcRenderer.invoke("library:deleteStyle", styleId),
-  /** 模型设置读写（设置弹窗）：明文 JSON 于 userData（优先级 设置 > .env > 继承环境变量）；
+  /** 模型设置读写（设置页）：明文 JSON 于 userData（优先级 设置 > .env > 继承环境变量）；
    *  读取一并回传两族模型生效的接口类型（弹窗回显真实生效值）与产物目录的场景默认值 */
   getSettings: (): Promise<{
     settings: AppSettings;
@@ -108,4 +108,6 @@ contextBridge.exposeInMainWorld("agent", {
   isAutostart: (): boolean => process.env.NOVEL_CLIENT_AUTOSTART === "1",
   /** 诊断钩子：无头冒烟自动选中小说并预览首个可用节点 */
   autoSelectNovelId: (): string | null => process.env.NOVEL_CLIENT_SELECT ?? null,
+  /** 诊断钩子：无头冒烟自动打开设置页 */
+  isSettingsOpen: (): boolean => process.env.NOVEL_CLIENT_SETTINGS === "1",
 });

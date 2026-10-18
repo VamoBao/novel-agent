@@ -13,7 +13,7 @@ import { NovelListPanel } from "./components/NovelListPanel";
 import { OutlineRegenDialog } from "./components/OutlineRegenDialog";
 import { OutlineRegenFlow } from "./components/OutlineRegenFlow";
 import { PreviewPane } from "./components/PreviewPane";
-import { SettingsDialog } from "./components/SettingsDialog";
+import { SettingsPage } from "./components/SettingsPage";
 import { StructureTreePanel, type Selection } from "./components/StructureTreePanel";
 import { WritingPrefsDialog } from "./components/WritingPrefsDialog";
 
@@ -52,7 +52,7 @@ export function App() {
   /** 弹框确认中的重生成目标（非 null 时渲染 OutlineRegenDialog） */
   const [regenConfirm, setRegenConfirm] = useState<OutlineRegenTarget | null>(null);
   const [outlineRegen, setOutlineRegen] = useState<OutlineRegenTarget | null>(null);
-  /** 设置弹窗（非 null 时渲染 SettingsDialog：外观 / 两族模型 / 写作偏好默认） */
+  /** 设置页（true 时整页呈现 SettingsPage：左导航分类 + 右设置项） */
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** 写作偏好弹窗目标（书库右键「写作偏好」，非 null 时渲染 WritingPrefsDialog） */
   const [writingPrefs, setWritingPrefs] = useState<{ novelId: string; novelName: string } | null>(null);
@@ -84,8 +84,9 @@ export function App() {
   useEffect(() => {
     void refreshList();
     // 无头冒烟钩子：AUTOSTART 等价点击「新建小说」（agent 始终由 CreationFlow 挂载时发起）；
-    // SELECT 自动选中指定小说（详情加载后自动预览首个可用节点）
+    // SELECT 自动选中指定小说（详情加载后自动预览首个可用节点）；SETTINGS 自动打开设置页
     if (window.agent.isAutostart()) setCreating(true);
+    if (window.agent.isSettingsOpen()) setSettingsOpen(true);
     const autoSelect = window.agent.autoSelectNovelId();
     if (autoSelect) setSelectedId(autoSelect);
   }, [refreshList]);
@@ -355,6 +356,14 @@ export function App() {
       </div>
     );
   }
+  // 设置页：独立整页呈现（头部返回按钮 / Esc 返回浏览页），与浏览页互斥
+  if (settingsOpen) {
+    return (
+      <div className="app create-app">
+        <SettingsPage onClose={() => setSettingsOpen(false)} />
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -460,8 +469,6 @@ export function App() {
           onConfirm={handleRegenConfirmed}
         />
       ) : null}
-
-      {settingsOpen ? <SettingsDialog onClose={() => setSettingsOpen(false)} /> : null}
 
       {writingPrefs ? (
         <WritingPrefsDialog

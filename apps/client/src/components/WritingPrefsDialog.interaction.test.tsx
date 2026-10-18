@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 /**
  * WritingPrefsDialog 交互冒烟（happy-dom + 真实 React，独立子进程隔离模块缓存——
- * 与 SettingsDialog.interaction 同款 harness）：打开加载小说现值 → 编辑三项 →
+ * 与 SettingsPage.interaction 同款 harness）：打开加载小说现值 → 编辑三项 →
  * 保存提交载荷正确；半设篇幅被表单校验拦截零提交。
  */
 test("写作偏好弹窗：加载现值、编辑保存载荷正确、半设篇幅拦截", async () => {

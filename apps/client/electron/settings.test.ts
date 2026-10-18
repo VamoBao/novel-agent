@@ -230,7 +230,7 @@ describe("resolveModelEnv provider 三级优先级与旧配置迁移", () => {
   });
 });
 
-describe("resolveEffectiveProviders（设置弹窗回显生效接口类型）", () => {
+describe("resolveEffectiveProviders（设置页回显生效接口类型）", () => {
   test("设置文件显式值胜出；留空时由 .env / 继承环境变量按地址迁移决定", () => {
     // 设置文件显式 claude → 胜出（即使 .env 说 openai）
     const explicit = normalizeSettings({ agentModel: { provider: "claude" } });

@@ -4,7 +4,7 @@ import {
   type NovelWritingPrefs,
 } from "@novel/shared";
 
-/** 写作偏好三字段表单（设置弹窗系统级默认与书库「写作偏好」小说级覆盖共用） */
+/** 写作偏好三字段表单（设置页系统级默认与书库「写作偏好」小说级覆盖共用） */
 export interface WritingPrefsFormValues {
   chapterLengthMin: string;
   chapterLengthMax: string;

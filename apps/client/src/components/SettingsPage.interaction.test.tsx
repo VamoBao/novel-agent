@@ -5,6 +5,93 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { normalizeSettings, readSettingsFile, resolveModelEnv, writeSettingsFile } from "../../electron/settings";
 
+test("设置页结构：左导航三项、默认模型设置、切换渲染对应设置项、Esc 触发返回", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "novel-settings-page-"));
+  const filePath = join(dir, "settings.json");
+  try {
+    writeSettingsFile(filePath, normalizeSettings({}));
+    const probe = `
+      import { Window } from 'happy-dom';
+      import { readSettingsFile, resolveEffectiveProviders } from './electron/settings';
+      const dom = new Window({ url: 'http://localhost' });
+      Object.assign(globalThis, { window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
+      const { act, createElement } = await import('react');
+      const { createRoot } = await import('react-dom/client');
+      const { SettingsPage } = await import('./src/components/SettingsPage');
+      const filePath = process.env.SETTINGS_PROBE_FILE;
+      dom.agent = {
+        getSettings: async () => {
+          const settings = readSettingsFile(filePath);
+          return { settings, filePath, effectiveProviders: resolveEffectiveProviders(settings, {}, {}), defaultOutputDir: "/default/output" };
+        },
+        saveSettings: async (settings) => ({ settings, filePath }),
+      };
+      const container = dom.document.createElement('div');
+      dom.document.body.append(container);
+      const root = createRoot(container);
+      let closed = false;
+      await act(async () => { root.render(createElement(SettingsPage, { onClose: () => { closed = true; } })); });
+      const nav = [...dom.document.querySelectorAll('.settings-nav button')].map((b) => b.textContent);
+      const clickNav = async (label) => {
+        const button = [...dom.document.querySelectorAll('.settings-nav button')].find((b) => b.textContent.includes(label));
+        await act(async () => { button.click(); });
+      };
+      const snapshot = () => ({
+        active: dom.document.querySelector('.settings-nav button.active')?.textContent,
+        groups: [...dom.document.querySelectorAll('.settings-group-label')].map((p) => p.textContent),
+      });
+      const initial = snapshot();
+      await clickNav('写作偏好');
+      const writing = snapshot();
+      await clickNav('外观');
+      const appearance = snapshot();
+      const themeButtons = [...dom.document.querySelectorAll('.theme-options button')].map((b) => b.textContent);
+      // 页面化：无弹窗遮罩，保存动作行常驻右栏底部
+      const layout = {
+        backdrop: dom.document.querySelector('.dialog-backdrop') === null,
+        hasSave: dom.document.querySelector('.settings-actions button.primary')?.textContent,
+      };
+      // Esc 返回（页面化后保留键盘退出习惯）
+      await act(async () => { dom.window.dispatchEvent(new dom.KeyboardEvent('keydown', { key: 'Escape' })); });
+      await act(async () => root.unmount());
+      await dom.happyDOM.close();
+      process.stdout.write(JSON.stringify({ nav, initial, writing, appearance, themeButtons, layout, closed }));
+    `;
+    const proc = Bun.spawn([process.execPath, "--eval", probe], {
+      cwd: fileURLToPath(new URL("../..", import.meta.url)),
+      env: { ...process.env, SETTINGS_PROBE_FILE: filePath }, stdout: "pipe", stderr: "pipe",
+    });
+    const [stdout, stderr, exit] = await Promise.all([
+      new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
+    ]);
+    expect(stderr).toBe("");
+    expect(exit).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({
+      nav: ["模型设置", "写作偏好", "外观"],
+      // 默认分类：模型设置（Agent 会话模型 + 写作模型两组）
+      initial: {
+        active: "模型设置",
+        groups: [
+          "Agent 会话模型——世界观 / 角色 / 大纲 / 章节规划 / 正文校验",
+          "写作模型——章节正文生成专用",
+        ],
+      },
+      // 写作偏好：篇幅 / 合格线 + 产物输出目录（正文文件去向与写作直接相关）
+      writing: {
+        active: "写作偏好",
+        groups: ["写作偏好（默认）——章节正文生成", "产物输出目录——章节正文文件"],
+      },
+      // 外观：主题三选
+      appearance: { active: "外观", groups: ["外观"] },
+      themeButtons: ["跟随系统", "浅色", "深色"],
+      layout: { backdrop: true, hasSave: "保存" },
+      closed: true,
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test.each(["agent", "writing"])("%s 只编辑连接字段后仍使用界面显示的 DeepSeek（不触碰下拉框）", async (group) => {
   const dir = mkdtempSync(join(tmpdir(), "novel-settings-provider-edit-"));
   const filePath = join(dir, "settings.json");
@@ -20,7 +107,7 @@ test.each(["agent", "writing"])("%s 只编辑连接字段后仍使用界面显�
       Object.assign(globalThis, { window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
       const { act, createElement } = await import('react');
       const { createRoot } = await import('react-dom/client');
-      const { SettingsDialog } = await import('./src/components/SettingsDialog');
+      const { SettingsPage } = await import('./src/components/SettingsPage');
       const filePath = process.env.SETTINGS_PROBE_FILE;
       dom.agent = {
         getSettings: async () => {
@@ -32,9 +119,10 @@ test.each(["agent", "writing"])("%s 只编辑连接字段后仍使用界面显�
       const container = dom.document.createElement('div');
       dom.document.body.append(container);
       const root = createRoot(container);
-      await act(async () => root.render(createElement(SettingsDialog, { onClose: () => {} })));
+      await act(async () => root.render(createElement(SettingsPage, { onClose: () => {} })));
       const group = process.env.SETTINGS_TEST_GROUP;
-      const target = dom.document.querySelectorAll('.settings-group')[group === 'agent' ? 1 : 2];
+      // 默认分类即模型设置：组序 [0] = Agent 会话模型、[1] = 写作模型
+      const target = dom.document.querySelectorAll('.settings-group')[group === 'agent' ? 0 : 1];
       const select = target.querySelector('select');
       const shown = select.value;
       const inputs = target.querySelectorAll('input');
@@ -49,7 +137,7 @@ test.each(["agent", "writing"])("%s 只编辑连接字段后仍使用界面显�
         });
       });
       const afterEdit = select.value;
-      await act(async () => dom.document.querySelector('button.primary').click());
+      await act(async () => dom.document.querySelector('.settings-actions button.primary').click());
       const saved = readSettingsFile(filePath);
       const env = resolveModelEnv(saved, {}, {});
       process.stdout.write(JSON.stringify({
@@ -95,7 +183,7 @@ test("Agent Base URL 从设置加载，编辑保存后重读并注入通用环�
       Object.assign(globalThis, { window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
       const { act, createElement } = await import('react');
       const { createRoot } = await import('react-dom/client');
-      const { SettingsDialog } = await import('./src/components/SettingsDialog');
+      const { SettingsPage } = await import('./src/components/SettingsPage');
       const filePath = process.env.SETTINGS_PROBE_FILE;
       // 模拟宿主注入来源（main 侧读根 .env）：生效 provider 可能来自 .env 而非设置文件
       const dotenv = JSON.parse(process.env.SETTINGS_PROBE_DOTENV || '{}');
@@ -110,9 +198,10 @@ test("Agent Base URL 从设置加载，编辑保存后重读并注入通用环�
       dom.document.body.append(container);
       const root = createRoot(container);
       let closed = false;
-      await act(async () => { root.render(createElement(SettingsDialog, { onClose: () => { closed = true; } })); });
+      await act(async () => { root.render(createElement(SettingsPage, { onClose: () => { closed = true; } })); });
+      // 默认分类模型设置：组序 [0] = Agent 会话模型、[1] = 写作模型
       const groups = dom.document.querySelectorAll('.settings-group');
-      const agentGroup = groups[1];
+      const agentGroup = groups[0];
       const inputs = agentGroup.querySelectorAll('input');
       const loaded = { count: inputs.length, type: inputs[0].type, model: inputs[1].value, url: inputs[2]?.value };
       // provider 下拉框：载入时按有效地址回显（历史配置无 provider），切换后只换 Base URL 提示、不改写已填值
@@ -138,7 +227,7 @@ test("Agent Base URL 从设置加载，编辑保存后重读并注入通用环�
         inputs[2].dispatchEvent(new dom.Event('input', { bubbles: true }));
       });
       // 写作模型组：provider 默认 OpenAI，独立选择不影响 Agent 组
-      const writingGroup = groups[2];
+      const writingGroup = groups[1];
       const writingSelect = writingGroup.querySelector('select');
       const writing = { loaded: writingSelect.value, afterSwitch: '' };
       await act(async () => {
@@ -146,7 +235,7 @@ test("Agent Base URL 从设置加载，编辑保存后重读并注入通用环�
         writingSelect.dispatchEvent(new dom.Event('change', { bubbles: true }));
       });
       writing.afterSwitch = writingSelect.value;
-      await act(async () => { dom.document.querySelector('button.primary').click(); });
+      await act(async () => { dom.document.querySelector('.settings-actions button.primary').click(); });
       await act(async () => root.unmount());
       await dom.happyDOM.close();
       process.stdout.write(JSON.stringify({ loaded, provider, writing, closed }));
@@ -206,7 +295,7 @@ test("产物输出目录：浏览回填经探针验证的目录并保存落盘�
       Object.assign(globalThis, { window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
       const { act, createElement } = await import('react');
       const { createRoot } = await import('react-dom/client');
-      const { SettingsDialog } = await import('./src/components/SettingsDialog');
+      const { SettingsPage } = await import('./src/components/SettingsPage');
       const filePath = process.env.SETTINGS_PROBE_FILE;
       // pickOutputDirectory 脚本：第一次返回不可写目录（探针失败），其后返回可写目录
       let pickCount = 0;
@@ -226,8 +315,11 @@ test("产物输出目录：浏览回填经探针验证的目录并保存落盘�
       const container = dom.document.createElement('div');
       dom.document.body.append(container);
       const root = createRoot(container);
-      await act(async () => { root.render(createElement(SettingsDialog, { onClose: () => {} })); });
-      const group = dom.document.querySelectorAll('.settings-group')[4];
+      await act(async () => { root.render(createElement(SettingsPage, { onClose: () => {} })); });
+      // 产物输出目录归入「写作偏好」分类：先切换导航，组序 [0] = 写作偏好、[1] = 输出目录
+      const navButton = [...dom.document.querySelectorAll('.settings-nav button')].find((b) => b.textContent.includes('写作偏好'));
+      await act(async () => { navButton.click(); });
+      const group = dom.document.querySelectorAll('.settings-group')[1];
       const input = group.querySelector('input');
       const placeholder = input.placeholder;
       // 第一次浏览：探针失败 → 错误回显、目录不采纳（保持空 = 默认）
@@ -241,7 +333,7 @@ test("产物输出目录：浏览回填经探针验证的目录并保存落盘�
       const valueAfterReset = input.value;
       // 再选一次并保存：outputDir 落盘
       await act(async () => { group.querySelectorAll('.field-actions button')[0].click(); });
-      await act(async () => { dom.document.querySelector('button.primary').click(); });
+      await act(async () => { dom.document.querySelector('.settings-actions button.primary').click(); });
       const saved = readSettingsFile(filePath);
       await act(async () => root.unmount());
       await dom.happyDOM.close();
@@ -272,7 +364,7 @@ test("产物输出目录：浏览回填经探针验证的目录并保存落盘�
   }
 });
 
-test("历史配置（无 provider，DeepSeek 官方地址）在弹窗中回显为 DeepSeek 并保存为新格式", async () => {
+test("历史配置（无 provider，DeepSeek 官方地址）在设置页中回显为 DeepSeek 并保存为新格式", async () => {
   const dir = mkdtempSync(join(tmpdir(), "novel-settings-ui-legacy-"));
   const filePath = join(dir, "settings.json");
   try {
@@ -288,7 +380,7 @@ test("历史配置（无 provider，DeepSeek 官方地址）在弹窗中回显�
       Object.assign(globalThis, { window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
       const { act, createElement } = await import('react');
       const { createRoot } = await import('react-dom/client');
-      const { SettingsDialog } = await import('./src/components/SettingsDialog');
+      const { SettingsPage } = await import('./src/components/SettingsPage');
       const filePath = process.env.SETTINGS_PROBE_FILE;
       // 模拟宿主注入来源（main 侧读根 .env）：生效 provider 可能来自 .env 而非设置文件
       const dotenv = JSON.parse(process.env.SETTINGS_PROBE_DOTENV || '{}');
@@ -302,15 +394,16 @@ test("历史配置（无 provider，DeepSeek 官方地址）在弹窗中回显�
       const container = dom.document.createElement('div');
       dom.document.body.append(container);
       const root = createRoot(container);
-      await act(async () => { root.render(createElement(SettingsDialog, { onClose: () => {} })); });
+      await act(async () => { root.render(createElement(SettingsPage, { onClose: () => {} })); });
+      // 默认分类模型设置：组序 [0] = Agent 会话模型、[1] = 写作模型
       const groups = dom.document.querySelectorAll('.settings-group');
       const loaded = {
-        provider: groups[1].querySelector('select').value,
-        key: groups[1].querySelectorAll('input')[0].value,
-        writingProvider: groups[2].querySelector('select').value,
+        provider: groups[0].querySelector('select').value,
+        key: groups[0].querySelectorAll('input')[0].value,
+        writingProvider: groups[1].querySelector('select').value,
       };
-      const untouched = groups[1].querySelector('select').value;
-      await act(async () => { dom.document.querySelector('button.primary').click(); });
+      const untouched = groups[0].querySelector('select').value;
+      await act(async () => { dom.document.querySelector('.settings-actions button.primary').click(); });
       await act(async () => root.unmount());
       await dom.happyDOM.close();
       process.stdout.write(JSON.stringify({ loaded, untouched }));
@@ -325,7 +418,7 @@ test("历史配置（无 provider，DeepSeek 官方地址）在弹窗中回显�
     expect(stderr).toBe("");
     expect(exit).toBe(0);
     expect(JSON.parse(stdout)).toEqual({
-      // 弹窗回显生效值：Agent 地址留空 → 沿用 DeepSeek 官方默认；写作未配置 → 默认 OpenAI
+      // 设置页回显生效值：Agent 地址留空 → 沿用 DeepSeek 官方默认；写作未配置 → 默认 OpenAI
       loaded: { provider: "deepseek", key: "old-key", writingProvider: "openai" },
       untouched: "deepseek",
     });
@@ -356,7 +449,7 @@ test("只改主题时保留 .env 的 provider，不固化回显值", async () =>
       Object.assign(globalThis, { window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
       const { act, createElement } = await import('react');
       const { createRoot } = await import('react-dom/client');
-      const { SettingsDialog } = await import('./src/components/SettingsDialog');
+      const { SettingsPage } = await import('./src/components/SettingsPage');
       const filePath = process.env.SETTINGS_PROBE_FILE;
       const dotenv = JSON.parse(process.env.SETTINGS_PROBE_DOTENV || '{}');
       dom.agent = {
@@ -369,16 +462,20 @@ test("只改主题时保留 .env 的 provider，不固化回显值", async () =>
       const container = dom.document.createElement('div');
       dom.document.body.append(container);
       const root = createRoot(container);
-      await act(async () => { root.render(createElement(SettingsDialog, { onClose: () => {} })); });
+      await act(async () => { root.render(createElement(SettingsPage, { onClose: () => {} })); });
+      // 模型设置分类（默认）读回显的接口类型
       const groups = dom.document.querySelectorAll('.settings-group');
-      const agentSelect = groups[1].querySelector('select');
+      const agentSelect = groups[0].querySelector('select');
       const shown = {
         agent: agentSelect.value,
         agentOptions: [...agentSelect.options].map((option) => option.value),
-        urlPlaceholder: groups[1].querySelectorAll('input')[2].placeholder,
+        urlPlaceholder: groups[0].querySelectorAll('input')[2].placeholder,
       };
+      // 切到外观分类改主题后保存
+      const appearanceNav = [...dom.document.querySelectorAll('.settings-nav button')].find((b) => b.textContent.includes('外观'));
+      await act(async () => { appearanceNav.click(); });
       await act(async () => { dom.document.querySelectorAll('.theme-options button')[2].click(); });
-      await act(async () => { dom.document.querySelector('button.primary').click(); });
+      await act(async () => { dom.document.querySelector('.settings-actions button.primary').click(); });
       await act(async () => root.unmount());
       await dom.happyDOM.close();
       process.stdout.write(JSON.stringify({ shown }));

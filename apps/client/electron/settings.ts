@@ -21,7 +21,7 @@ import {
  *
  * provider 为空串表示**历史配置未设置**：agent 侧按有效地址迁移（DeepSeek 官方
  * 地址 → deepseek，其余 → openai；Agent 地址留空沿用 DeepSeek，独立写作落 OpenAI），
- * 设置弹窗按同一规则回显生效选项。此处刻意**不按地址推断**——否则「设置里留空的
+ * 设置页按同一规则回显生效选项。此处刻意**不按地址推断**——否则「设置里留空的
  * provider」会遮蔽 `.env` / 继承环境里已配置的值。
  *
  * 优先级（resolveModelEnv / resolveWritingEnv）：设置文件 > 根目录 `.env` >
@@ -262,7 +262,7 @@ export type PickOutputDirResult =
   | { ok: true; dir: string }
   | { ok: false; canceled: boolean; error?: string };
 
-/** 两族模型各自最终生效的接口类型（设置弹窗回显用——与 agent 侧同一对纯函数，所见即所用） */export interface EffectiveProviders {
+/** 两族模型各自最终生效的接口类型（设置页回显用——与 agent 侧同一对纯函数，所见即所用） */export interface EffectiveProviders {
   agent: ModelProvider;
   writing: ModelProvider;
 }

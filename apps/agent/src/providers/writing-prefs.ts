@@ -6,7 +6,7 @@ import {
 
 /**
  * 系统级写作偏好（章节篇幅范围 + 文风合格线）的环境变量读取：
- * 客户端设置弹窗维护 userData/settings.json 的 writing 组，main 侧 childEnv 经
+ * 客户端设置页维护 userData/settings.json 的 writing 组，main 侧 childEnv 经
  * 三级优先级（设置 > .env > 继承环境变量）注入以下变量；协议宿主 / CLI 也可
  * 直接设置。未设置或值非法（非整数 / 越界）的项视为 null——该级未覆盖，
  * 与小说级（novels 表三列）共同交给 shared 的 resolveChapterLength /

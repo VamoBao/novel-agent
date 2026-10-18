@@ -29,7 +29,7 @@ test.each(["other", "current", "switch"] as const)(
           description: '定位' }],
       });
       dom.agent = {
-        isAutostart: () => false, autoSelectNovelId: () => null,
+        isAutostart: () => false, autoSelectNovelId: () => null, isSettingsOpen: () => false,
         listNovels: async () => novels,
         getNovelDetail: async id => {
           if (scenario === 'switch' && saved && id === 'A') {
