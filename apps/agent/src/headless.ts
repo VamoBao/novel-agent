@@ -17,8 +17,9 @@ import { OUTPUT_DIR } from "./output/outline-writer";
  * `resume <runId>` = 按已保存的模式、小说与目标继续未完成主流程；
  * `polish-character <novelId> [characterId] <formJson>` = 角色 AI 润色（编辑流传角色 ID，
  * 新建流缺省；formJson 为表单当前值 JSON——argv 传参，结果经 polish-result 消息回传）；
- * `write-chapter <novelId> <chapterNodeId>` = 章节正文生成（写作模型单轮生成，
- * 三段校验 + 修订循环后入库；流程经 write-progress 消息实时回传；
+ * `write-chapter <novelId> <chapterNodeId>` = 章节正文生成（写作模型持续追加对话修订，
+ * 三段独立校验 + 修订循环后入库；流程经 write-progress 消息实时回传；
+ * 写作调用用量经 stderr JSON 记录，不进入 stdout 协议；
  * 校验经 Agent 会话模型，故本会话与其余会话同样需要 AGENT_MODEL_API_KEY）。
  */
 
@@ -97,6 +98,7 @@ async function runSession(session: Session, channel: ProtocolChannel, send: (mes
           channel,
           novelId: session.novelId,
           chapterNodeId: session.chapterNodeId,
+          onUsage: (event) => process.stderr.write(`${JSON.stringify({ type: "chapter-writing-usage", ...event })}\n`),
           // 流程进度透传：生成/校验/修订/保存各阶段实时回传客户端（章卡进度区块）
           onProgress: (event) =>
             send({

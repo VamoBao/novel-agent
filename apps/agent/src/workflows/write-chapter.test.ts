@@ -1,4 +1,4 @@
-import { modelMessageSchema } from "ai";
+import { modelMessageSchema, type ModelMessage } from "ai";
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -29,12 +29,27 @@ import type { WriteProgressEvent } from "./write-chapter";
  * 写作模型未配置）不依赖 LLM；重新生成路径（覆盖替换）与新生成同套校验循环。
  */
 
-type GenerateTextArgs = { model: unknown; prompt: string };
+type GenerateTextArgs = { model: unknown; messages: ModelMessage[] };
 type GenerateObjectArgs = { model: unknown; prompt: string };
 let generateTextCalls: GenerateTextArgs[] = [];
 let generateTextResult = "";
 /** 多轮正文脚本：非空时逐轮 shift，耗尽后回落 generateTextResult */
 let generateTextQueue: string[] = [];
+/** 返回 SDK 原生消息，检测修订时丢失空白/推理签名等元信息的回归。 */
+const responseMessages = (text: string): ModelMessage[] => [{
+  role: "assistant",
+  content: [
+    { type: "reasoning", text: "本轮构思", providerOptions: { anthropic: { signature: "signed-reasoning" } } },
+    { type: "text", text },
+  ],
+}];
+
+function writingMessage(index: number, latest = false): string {
+  const call = generateTextCalls[index]!;
+  const message = latest ? call.messages?.at(-1) : call.messages?.[0];
+  if (typeof message?.content !== "string") throw new Error("写作请求缺少文本 user 消息");
+  return message.content;
+}
 let generateObjectCalls: GenerateObjectArgs[] = [];
 /** 校验三段脚本（键 = prompt 段落标识；值可为单结果或逐次 shift 的数组；缺省全绿一次通过） */
 let reviewScript: {
@@ -78,9 +93,9 @@ mock.module("ai", () => ({
     return { object: nextReviewObject(reviewScriptKey(args.prompt)) };
   },
   generateText: async (args: GenerateTextArgs) => {
-    generateTextCalls.push(args);
+    generateTextCalls.push({ ...args, ...(args.messages ? { messages: structuredClone(args.messages) } : {}) });
     const text = generateTextQueue.length > 0 ? (generateTextQueue.shift() ?? "") : generateTextResult;
-    return { text };
+    return { text, response: { messages: responseMessages(text) } };
   },
 }));
 
@@ -219,7 +234,7 @@ describe("writeChapter", () => {
 
     // LLM 只调用一轮 generateText；prompt 携带章名/概述/世界观/前后章衔接信息
     expect(generateTextCalls).toHaveLength(1);
-    const prompt = generateTextCalls[0]!.prompt;
+    const prompt = writingMessage(0);
     expect(prompt).toContain("第一章");
     expect(prompt).toContain("少年在市集拾得碎片");
     expect(prompt).toContain("九州大陆，灵脉断绝");
@@ -265,7 +280,7 @@ describe("writeChapter", () => {
     generateTextResult = PROSE;
     const boundChannel = new FakeChannel([]);
     await writeChapter({ channel: boundChannel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
-    const boundPrompt = generateTextCalls[0]!.prompt;
+    const boundPrompt = writingMessage(0);
     expect(boundPrompt).toContain("林恒");
     expect(boundPrompt).not.toContain("萧无咎");
     expect(boundChannel.notifies.some((n) => n.includes("🎭 本章未绑定登场角色"))).toBeFalse();
@@ -280,7 +295,7 @@ describe("writeChapter", () => {
       ...ctx,
       chapterNodeId: ctx.secondChapterNodeId,
     });
-    const legacyPrompt = generateTextCalls[0]!.prompt;
+    const legacyPrompt = writingMessage(0);
     expect(legacyPrompt).toContain("林恒");
     expect(legacyPrompt).toContain("萧无咎");
     expect(
@@ -322,7 +337,7 @@ describe("writeChapter", () => {
 
     await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
 
-    const prompt = generateTextCalls[0]!.prompt;
+    const prompt = writingMessage(0);
     expect(prompt).toContain("【登场角色状态（角色基准卡 + 已结束迁移后的状态）】");
     expect(prompt).toContain("【本章角色变化计划（创作计划，不是已经发生的事实）】");
     expect(prompt).toContain("进行中");
@@ -357,7 +372,7 @@ describe("writeChapter", () => {
     generateObjectCalls = [];
     generateTextResult = PROSE;
     await writeChapter({ channel: new FakeChannel([]), novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx, chapterNodeId: ctx.secondChapterNodeId });
-    const prompt = generateTextCalls[0]!.prompt;
+    const prompt = writingMessage(0);
     const review = generateObjectCalls.find(call => call.prompt.includes("设定审校编辑"))!.prompt;
     for (const expected of ["背景：青云市集的散修少年", "创作目的：承载打破宗门垄断的主线", "结局方向：打破垄断后归隐", "【已结束角色迁移历史", "林恒 · 渴望（计划区间已结束", "旧值「夺回灵脉」→ 目标「守护同伴」", "诱因：历史独有诱因", "过渡描述：历史独有过渡", "不代表正文已兑现"]) {
       expect(prompt).toContain(expected);
@@ -374,7 +389,7 @@ describe("writeChapter", () => {
 
     await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
 
-    const prompt = generateTextCalls[0]!.prompt;
+    const prompt = writingMessage(0);
     expect(prompt).toContain("【登场角色状态（角色基准卡 + 已结束迁移后的状态）】");
     expect(prompt).not.toContain("【本章角色变化计划");
     expect(prompt).not.toContain("本章角色变化按【本章角色变化计划】推进");
@@ -414,7 +429,7 @@ describe("writeChapter", () => {
     });
 
     // 篇幅：小说级胜出，系统级不出现
-    const prompt = generateTextCalls[0]!.prompt;
+    const prompt = writingMessage(0);
     expect(prompt).toContain("篇幅约 3000~4500 字");
     expect(prompt).not.toContain("1500~2500");
     // 合格线：文风校验 prompt 使用小说级 85；82 分判不通过 → 进入第 2 轮修订
@@ -424,7 +439,7 @@ describe("writeChapter", () => {
     expect(events.length).toBeGreaterThan(0);
     expect(events.every((event) => event.stylePassScore === 85)).toBeTrue();
     // 修订块的合格线同源（85）
-    const revisionPrompt = generateTextCalls[1]!.prompt;
+    const revisionPrompt = writingMessage(1, true);
     expect(revisionPrompt).toContain("文风相似度 82 分（合格线 85）");
     // 覆盖生效通报（篇幅与合格线各一条）
     expect(channel.notifies.some((n) => n.includes("📏 本小说篇幅偏好：约 3000~4500 字（覆盖系统设置）"))).toBeTrue();
@@ -455,7 +470,7 @@ describe("writeChapter", () => {
       ...ctx,
     });
 
-    const prompt = generateTextCalls[0]!.prompt;
+    const prompt = writingMessage(0);
     expect(prompt).toContain("篇幅约 1200~1800 字");
     // 阈值 90 生效：默认脚本 95 分照常通过；文风 prompt 带 90
     const stylePrompt = generateObjectCalls.find((call) => call.prompt.includes("文风比对评审"))!.prompt;
@@ -476,7 +491,7 @@ describe("writeChapter", () => {
       systemWritingPrefs: { chapterLengthMin: 1200, chapterLengthMax: 1800, stylePassScore: 60 },
       ...ctx,
     });
-    expect(generateTextCalls[0]!.prompt).toContain("篇幅约 1200~1800 字");
+    expect(writingMessage(0)).toContain("篇幅约 1200~1800 字");
   });
 
   test("叙事视角注入：采集后随【小说】块进 prompt（全程保持），未采集零注入", async () => {
@@ -488,7 +503,7 @@ describe("writeChapter", () => {
 
     await writeChapter({ channel: new FakeChannel([]), novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
 
-    const prompt = generateTextCalls[0]!.prompt;
+    const prompt = writingMessage(0);
     expect(prompt).toContain("叙事视角：第三人称限知");
     expect(prompt).toContain("正文叙述全程保持该视角");
     // 位于【小说】块内（书名 / 简介之后，世界观之前）
@@ -527,7 +542,7 @@ describe("writeChapter", () => {
     generateTextCalls = [];
     generateTextResult = PROSE;
     await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx, chapterNodeId: fourth!.id });
-    let prompt = generateTextCalls[0]!.prompt;
+    let prompt = writingMessage(0);
     expect(prompt).toContain("【上一章（衔接其结尾，不要重复叙述）】");
     expect(prompt).toContain("第三章");
     expect(prompt).toContain(prose);
@@ -537,7 +552,7 @@ describe("writeChapter", () => {
     writeDocumentArtifact(relative, big, ctx.outputDir);
     generateTextCalls = [];
     await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx, chapterNodeId: fourth!.id });
-    prompt = generateTextCalls[0]!.prompt;
+    prompt = writingMessage(0);
     expect(prompt).not.toContain(big);
     expect(prompt).toContain("第三章：碎片来历初现");
   });
@@ -685,7 +700,7 @@ describe("writeChapter", () => {
     const channel = new FakeChannel([]);
     await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
 
-    const prompt = generateTextCalls[0]!.prompt;
+    const prompt = writingMessage(0);
     expect(prompt).not.toContain("【参考文风】");
     expect(prompt).not.toContain("模仿参考文风");
     expect(prompt).not.toContain("被停用的文风");
@@ -710,7 +725,7 @@ describe("writeChapter", () => {
     const channel = new FakeChannel([]);
     await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
 
-    const prompt = generateTextCalls[0]!.prompt;
+    const prompt = writingMessage(0);
     // 两份样本全文与名字随段注入
     expect(prompt).toContain("【参考文风】");
     expect(prompt).toContain("（江南式打斗）");
@@ -751,7 +766,7 @@ describe("writeChapter", () => {
     const channel = new FakeChannel([]);
     await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
 
-    const prompt = generateTextCalls[0]!.prompt;
+    const prompt = writingMessage(0);
     expect(prompt).toContain("（启用样本）");
     expect(prompt).toContain("启用的文风文本。");
     expect(prompt).not.toContain("（停用样本）");
@@ -768,7 +783,7 @@ describe("writeChapter", () => {
     const channel = new FakeChannel([]);
     await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
 
-    const prompt = generateTextCalls[0]!.prompt;
+    const prompt = writingMessage(0);
     expect(prompt).not.toContain("【本章伏笔】");
     expect(prompt).not.toContain("按注意度控制显隐程度");
     // 写作要求编号与既有形态一致（无附加条时「只输出正文文本」仍是第 6 条）
@@ -804,7 +819,7 @@ describe("writeChapter", () => {
     const channel = new FakeChannel([]);
     await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
 
-    const prompt = generateTextCalls[0]!.prompt;
+    const prompt = writingMessage(0);
     expect(prompt).toContain("【本章伏笔】");
     expect(prompt).toContain("一、本章登场");
     expect(prompt).toContain("碎片刻着细如发丝的痕");
@@ -864,7 +879,7 @@ describe("writeChapter", () => {
       chapterNodeId: ctx.secondChapterNodeId,
     });
 
-    const prompt = generateTextCalls[0]!.prompt;
+    const prompt = writingMessage(0);
     expect(prompt).toContain("登场于《第一章》");
     expect(prompt).toContain("登场章正文（呼应其细节，不要照抄）：");
     expect(prompt).toContain(prose);
@@ -889,7 +904,7 @@ describe("writeChapter", () => {
     });
     await writeChapter({ channel: new FakeChannel([]), novelId: NOVEL_ID, model: DUMMY_MODEL,
       ...ctx, chapterNodeId: ctx.secondChapterNodeId });
-    const writing = generateTextCalls[0]!.prompt;
+    const writing = writingMessage(0);
     const review = generateObjectCalls.find(call => call.prompt.includes("设定审校编辑"))!.prompt;
     for (const prompt of [writing, review]) {
       expect(prompt).toContain("回收阶段：阶段回收");
@@ -926,15 +941,15 @@ describe("writeChapter", () => {
     expect(generateTextCalls).toHaveLength(2);
     const reviews = generateObjectCalls.filter(call => call.prompt.includes("设定审校编辑"));
     expect(reviews).toHaveLength(2);
-    for (const call of [...generateTextCalls, ...reviews]) {
-      expect(call.prompt).toContain("回收阶段：最终回收");
-      expect(call.prompt).toContain("最终回收章：《第三章》（全书第 3 章）");
-      expect(call.prompt).toContain("本章必须完整揭露隐藏真相");
-      expect(call.prompt).toContain("解释表面行为与真相的联系");
-      expect(call.prompt).toContain("最终收尾要求优先于概述中推迟揭露或继续悬置的描述");
+    for (const prompt of [writingMessage(0), writingMessage(1), ...reviews.map(call => call.prompt)]) {
+      expect(prompt).toContain("回收阶段：最终回收");
+      expect(prompt).toContain("最终回收章：《第三章》（全书第 3 章）");
+      expect(prompt).toContain("本章必须完整揭露隐藏真相");
+      expect(prompt).toContain("解释表面行为与真相的联系");
+      expect(prompt).toContain("最终收尾要求优先于概述中推迟揭露或继续悬置的描述");
     }
-    expect(generateTextCalls[0]!.prompt).toContain("最终回收必须在本章揭露完整真相并收尾");
-    expect(generateTextCalls[1]!.prompt).toContain("（伏笔）：最终章仍将密钥真相留待日后");
+    expect(writingMessage(0)).toContain("最终回收必须在本章揭露完整真相并收尾");
+    expect(writingMessage(1, true)).toContain("（伏笔）：最终章仍将密钥真相留待日后");
     expect(reviews[0]!.prompt).toContain("未完整揭露真相");
     expect(reviews[0]!.prompt).toContain("不得仅因落实最终收尾而报告 summary 问题");
     expect(events.find(event => event.phase === "revising")?.report).toMatchObject({
@@ -996,7 +1011,7 @@ describe("writeChapter", () => {
     expect(channel.notifies.some((n) => n.includes("✅ 校验通过（第 1 轮）"))).toBeTrue();
   });
 
-  test("首轮不达标：第 2 轮修订 prompt 含上一版正文与整改报告，修订稿通过后入库", async () => {
+  test("首轮不达标：第 2 轮保留原生正文消息并追加整改报告，修订稿通过后入库", async () => {
     const ctx = await setupDb();
     cleanupAll.push(ctx.cleanup);
     generateTextCalls = [];
@@ -1020,16 +1035,16 @@ describe("writeChapter", () => {
       ...ctx,
     });
 
-    // 两轮生成；修订轮 prompt 携带上一版正文与整改报告（问题与建议逐条）
+    // 两轮生成；上一版正文保留在原生响应，当前 user 仅追加整改报告和指令
     expect(generateTextCalls).toHaveLength(2);
-    expect(generateTextCalls[0]!.prompt).not.toContain("【上一版正文");
-    const revisionPrompt = generateTextCalls[1]!.prompt;
-    expect(revisionPrompt).toContain("【上一版正文（在其基础上修订）】");
-    expect(revisionPrompt).toContain(PROSE.trim());
+    expect(writingMessage(0)).not.toContain("【上一版正文");
+    const revisionPrompt = writingMessage(1, true);
+    expect(generateTextCalls[1]!.messages?.[1]).toEqual(responseMessages(PROSE)[0]);
+    expect(revisionPrompt).not.toContain(PROSE.trim());
     expect(revisionPrompt).toContain("【整改报告（请逐条修订）】");
     expect(revisionPrompt).toContain("五个字写成四个字");
     expect(revisionPrompt).toContain("→ 建议：统一为五个字");
-    expect(revisionPrompt).toContain("6. 按整改报告逐条修订上一版正文");
+    expect(revisionPrompt).toContain("只修正报告指出的问题");
 
     // 修订轮进度事件携带首轮报告；saving 事件报告转绿且轮次 2
     const revising = events.find((event) => event.phase === "revising")!;
@@ -1043,6 +1058,41 @@ describe("writeChapter", () => {
     expect(readFileSync(artifact, "utf8")).toContain("矛盾已统一为五个字");
     expect(channel.notifies.some((n) => n.includes("♻️ 第 2 轮：上一版未达标准"))).toBeTrue();
     expect(channel.notifies.some((n) => n.includes("✅ 校验通过（第 2 轮）"))).toBeTrue();
+  });
+
+  test("三轮写作保持完整请求前缀及原生响应，报告只追加且审校仅看到最新正文", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    const drafts = ["  第一稿原文。\n", "\n 第二稿原文。  ", " 第三稿原文。\n"];
+    generateTextQueue = [...drafts];
+    reviewScript = {
+      content: [
+        { issues: [{ kind: "summary", description: "第一稿缺少拾遗", suggestion: "补全拾遗" }] },
+        { issues: [{ kind: "summary", description: "第二稿缺少追查", suggestion: "补全追查" }] },
+        { issues: [] },
+      ],
+    };
+    await writeChapter({ channel: new FakeChannel([]), novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
+    const [first, second, third] = generateTextCalls;
+    expect(first!.messages?.map(m => m.role)).toEqual(["user"]);
+    expect(second!.messages?.map(m => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(third!.messages?.map(m => m.role)).toEqual(["user", "assistant", "user", "assistant", "user"]);
+    expect(second!.messages?.slice(0, 1)).toEqual(first!.messages);
+    expect(third!.messages?.slice(0, 3)).toEqual(second!.messages);
+    expect(second!.messages?.[1]).toEqual(responseMessages(drafts[0]!)[0]);
+    expect(third!.messages?.[3]).toEqual(responseMessages(drafts[1]!)[0]);
+    expect(writingMessage(1, true)).toContain("第一稿缺少拾遗");
+    expect(writingMessage(2, true)).toContain("第二稿缺少追查");
+    expect(writingMessage(2, true)).toContain("最新一版");
+    expect(writingMessage(2, true)).not.toContain("第一稿缺少拾遗");
+    expect(writingMessage(2, true)).not.toContain("九州大陆");
+    const reviews = generateObjectCalls.filter(call => call.prompt.includes("设定审校编辑"));
+    expect(reviews[1]!.prompt).toContain(drafts[1]!.trim());
+    expect(reviews[1]!.prompt).not.toContain(drafts[0]!.trim());
+    expect(reviews[1]!.prompt).not.toContain("第一稿缺少拾遗");
+    const doc = ctx.documentStore.getDocumentByChapter(ctx.chapterNodeId)!;
+    expect(readFileSync(doc.filePath, "utf8")).toBe(drafts[2]!.trim());
   });
 
   test("3 轮仍未达标：保底保存最后一版并警告（含文风分与问题计数）", async () => {

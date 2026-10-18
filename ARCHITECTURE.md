@@ -129,8 +129,8 @@ apps/agent/src/
     │                    #   回收卡片+登场章上下文——正文优先概述兜底+预算护栏）+ 参考文风（style-reference-store
     │                    #   按启用过滤，非空注入【参考文风】段于 prompt 尾部 + 模仿要求 + notify 名单，无启用零改动）
     │                    #   → 生成-校验-修订循环（最多 MAX_REVIEW_ROUNDS=3 轮）：写作模型 getWritingModel()
-    │                    #   单轮 generateText（无确认门）→ chapter-review 三段校验（Agent 模型）产出整改报告
-    │                    #   → isReportPassing 通过跳出 / 未达标按报告修订式重写（原上下文+上一版正文+整改报告），
+    │                    #   generateText（持续追加原生写作消息，无确认门）→ chapter-review 三段校验（Agent 模型）产出整改报告
+    │                    #   → isReportPassing 通过跳出 / 未达标在原生写作对话尾部追加报告、修订最新一稿，
     │                    #   3 轮仍未达标保底保存最后一版并警告 → 正文落文件（层级目录）+
     │                    #   saveChapterDocument 元数据入库绑定；进度经 Options 注入的 onProgress 回调透传
     │                    #   （单段结束即回传 stageResult，完整报告在 revising/saving 回传；headless 映射 write-progress 协议消息）
@@ -316,9 +316,9 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 
 1. **前置校验**（全部抛可读错误，由协议入口转 fatal error）：小说存在 → 章节点存在、同小说且类型为 chapter → 章剧情概述非空（旧数据缺内容拒绝）→ 所属幕与部节点存在 → 世界观已确认（worldviews 表有记录）；已有正文不再拒绝——检测到既有 document 即走重新生成路径（isRegen 分流 notify 与保存路径，流程与首次生成完全一致）
 2. **上下文组装（全取自库）**：书名 / logline + 叙事视角（novels.narrative_pov，未采集零注入——随【小说】块注入并要求正文叙述全程保持该视角、人称与信息范围不得中途漂移）+ 世界观 JSON + 本章角色完整参考（全部已设定字段；人物属性与作者指导分开，基准叠加已结束迁移）+ 同大纲版本已确认的已结束完整迁移历史与本章变化计划（角色/字段/旧值→目标/起止章/诱因/过渡/序号/修订；未来、草案、取消不注入；计划区间结束不证明正文已兑现）+ 部名与部梗概 + 幕名与幕梗概及关键情节点 + 本章名与剧情概述 + 全书跨幕前后章衔接（上一章正文在 8000 字符预算内优先、缺失或超预算回退概述，下一章只取概述）+ **本章绑定伏笔（可选增强）**：`buildChapterForeshadowContext`（workflows/foreshadow-context）——登场注入卡片、回收组按登场章全局章序升序注入卡片 + 登场章上下文（正文优先、8000 字符预算内整条注入，未生成/文件缺失/超预算降级概述）+ 多步回收既往回收章概述，【本章伏笔】块插【下一章】块后【参考文风】段前、写作要求条件附加编号顺延、生成前 notify「🔮 本章伏笔」统计与降级计数；无绑定伏笔零注入零通知 + **参考文风（可选增强）**：style_references 表按启用过滤（enabled=1），非空在 prompt 尾部【下一章】块之后插【参考文风】段（每条「（名字）\n内容」，长样本置尾不推远核心上下文且紧邻风格指令）、写作要求附模仿条（模仿叙事语言 / 句式节奏 / 描写风格，不抄袭具体情节与专有名词）、生成前 notify「🖋️ 本次参考文风：名单」；无启用文风零注入零通知（行为与无此功能逐字节一致）
-3. **生成-校验-修订循环与落盘**：写作偏好生效值先行解析——`resolveSystemWritingPrefs`（providers/writing-prefs，环境变量读系统级）+ shared `resolveChapterLength` / `resolveStylePassScore`（小说级 novels 行 > 系统级 > 内置默认 2000~3000 字 / 80 分；篇幅 min/max 整体覆盖、半设乱序防御性跳过），小说级覆盖生效时 notify 通报。`getWritingModel()`（providers/writing-model，按 `WRITING_MODEL_PROVIDER` 所选接口类型调用对应官方 SDK，`WRITING_MODEL_*` 三环境变量齐才启用，任一未配置回落 Agent 会话模型）单轮 `generateText`（非 ReAct——无工具无提问），写作要求篇幅条用生效值（`篇幅约 X~Y 字`）、遵守世界观禁忌、只输出正文文本；空结果拒绝且零残留。每轮生成后经 `reviewChapter`（chapter-review，Agent 模型三段独立校验——①内容约束（世界观/章节概述/本章伏笔/**本章角色状态与变化计划**，与写作者同源）②文风相似度（合格线 = 生效阈值，评分 prompt 与判定同一条线；无启用样本 skipped）③前后自洽）产出结构化整改报告：`isReportPassing` 通过（①③零问题且文风达标）→ 落盘；未达标按报告修订式重写（prompt 追加【上一版正文】+【整改报告】块——合格线随 formatRevisionBlock 同行，末条要求替换为按报告逐条修订），最多 3 轮；第 3 轮仍未达标 → ⚠️ 警告（含文风分与问题计数）后保底保存最后一版。进度全程经 onProgress 回调透传（drafting/review-*/revising/saving，报告附着在 revising/saving 事件）。正文经 document-writer 写 `<输出目录>/<小说ID>/<部名>/<章名>.md`（sanitize 段清理，同名冲突加 `-N` 后缀不覆盖既有文件；顶层文件夹在首次生成正文时创建），file_path 以**绝对路径**落库（用户中途更换输出目录后旧正文仍指向真实位置；写失败包「输出目录不可写」上下文直达 fatal error），文件先落、库后入，库失败回滚删除文件
+3. **生成-校验-修订循环与落盘**：写作偏好生效值先行解析——`resolveSystemWritingPrefs`（providers/writing-prefs，环境变量读系统级）+ shared `resolveChapterLength` / `resolveStylePassScore`（小说级 novels 行 > 系统级 > 内置默认 2000~3000 字 / 80 分；篇幅 min/max 整体覆盖、半设乱序防御性跳过），小说级覆盖生效时 notify 通报。`getWritingModel()`（providers/writing-model，按 `WRITING_MODEL_PROVIDER` 所选接口类型调用对应官方 SDK，`WRITING_MODEL_*` 三环境变量齐才启用，任一未配置回落 Agent 会话模型）`generateText({ messages })`（非 ReAct——无工具无提问；初稿资料与要求只组装一次，历史原样保留），写作要求篇幅条用生效值（`篇幅约 X~Y 字`）、遵守世界观禁忌、只输出正文文本；空结果拒绝且零残留。每轮生成后经 `reviewChapter`（chapter-review，Agent 模型三段独立校验——①内容约束（世界观/章节概述/本章伏笔/**本章角色状态与变化计划**，与写作者同源）②文风相似度（合格线 = 生效阈值，评分 prompt 与判定同一条线；无启用样本 skipped）③前后自洽）产出结构化整改报告：`isReportPassing` 通过（①③零问题且文风达标）→ 落盘；未达标在写作对话尾部追加【整改报告】及针对最新稿的修订指令（合格线随 formatRevisionBlock 同行），正文保留在原生 assistant 响应中，不重拼资料或重建历史，最多 3 轮；第 3 轮仍未达标 → ⚠️ 警告（含文风分与问题计数）后保底保存最后一版。进度全程经 onProgress 回调透传（drafting/review-*/revising/saving，报告附着在 revising/saving 事件）。正文经 document-writer 写 `<输出目录>/<小说ID>/<部名>/<章名>.md`（sanitize 段清理，同名冲突加 `-N` 后缀不覆盖既有文件；顶层文件夹在首次生成正文时创建），file_path 以**绝对路径**落库（用户中途更换输出目录后旧正文仍指向真实位置；写失败包「输出目录不可写」上下文直达 fatal error），文件先落、库后入，库失败回滚删除文件
    三项校验各在开始与结束时发送 `write-progress`，结束事件附 `stageResult`；客户端按轮累积阶段结果，有问题即在对应阶段显示警告与建议，新轮清空阶段结果。完整 `report` 仍随修订 / 保存事件供末尾汇总。
-4. **元数据入库绑定**：首次生成走 `saveChapterDocument`、重新生成走 `replaceChapterDocument`（单事务删旧行插新行）插 documents 行（file_path 相对路径 + 字数，内容不进库）+ 章节点回写 `document_id` 并置 `status=completed`；重生成在事务提交后清理旧正文文件（新旧路径相同——旧文件本就缺失——时跳过防误删新文件；幂等容忍缺失）；任一环节失败回滚删新文件，旧正文行与文件零影响；notify 保存路径与字数；run_finished 携带小说 ID 供客户端刷新详情（章节点 ID 稳定，选中与正文展示保持）；大纲重生成只降级归档章节点，documents 行与正文文件保留（旧正文与归档章的关联留存）
+4. **元数据入库绑定**：首次生成走 `saveChapterDocument`、重新生成走 `replaceChapterDocument`（单事务删旧行插新行）插 documents 行（file_path 绝对路径 + 字数，内容不进库）+ 章节点回写 `document_id` 并置 `status=completed`；重生成在事务提交后清理旧正文文件（新旧路径相同——旧文件本就缺失——时跳过防误删新文件；幂等容忍缺失）；任一环节失败回滚删新文件，旧正文行与文件零影响；notify 保存路径与字数；run_finished 携带小说 ID 供客户端刷新详情（章节点 ID 稳定，选中与正文展示保持）；大纲重生成只降级归档章节点，documents 行与正文文件保留（旧正文与归档章的关联留存）
 
 > 伏笔回收按目标章所属树的全书章序区分阶段回收与最终回收；最终章要求完整揭露真相并收尾，内容审校按同源材料检查并产出伏笔整改项。缺失/跨版回收点不猜测最终章，保留既有三轮修订与保底警告策略。详细职责与边界见 [workflows 架构：伏笔最终回收与审校](apps/agent/src/workflows/ARCHITECTURE.md#伏笔最终回收与审校2026-10-14)。
 
@@ -407,3 +407,13 @@ React/CLI 确认门展示全部回收计划，预览逐幕列已绑定章或待�
 ### Provider 审查修复（2026-10-16）
 
 角色润色使用本地 polishedCharacterSchema 输出契约：顶层与 basicInfo 的全部字段必填，满足 OpenAI strict json_schema 的 required 要求；输入与持久化仍使用原 characterSchema，可选字段语义保留，不关闭严格输出、不改写角色基准。协议回归经真实工作流、三家 SDK 和内存 SQLite 执行，仅替换网络边界。SettingsPage 的 modelTouched 按模型组跟踪四个连接字段，编辑时固化当前显示的 provider；主题与写作偏好不触碰模型组。
+
+## 正文写作对话与诊断（2026-10-18）
+
+`write-chapter.ts` 在一次会话内维护 SDK `ModelMessage[]`：首条 user 含原有完整资料和写作要求；每次生成后原样追加 `result.response.messages`（含正文空白、推理及 provider 元信息），未通过时再追加当前审校报告和仅修订最新稿的 user 指令。三段审校继续独立调用，仅审当前稿；三轮上限、保底保存、覆盖替换与失败保护不变。历史只在内存保留，不接入持久化恢复。
+
+写作调用使用 canonical `providerOptions.anthropic.cacheControl: { type: "ephemeral" }` 开启 Claude 默认 5 分钟自动缓存，兼容独立写作模型与回落 Agent 模型；OpenAI/DeepSeek 忽略该厂商命名空间，沿用服务侧自动缓存。保留完整历史增加逻辑输入与网络载荷，不保证实际命中、节费或提速，默认 TTL 也可能在长时间生成和审校后过期。
+
+`onUsage(WriteChapterUsage)` 返回每次成功写作调用的小说/章、轮次、阶段、provider/modelId、durationMs 和输入/输出/缓存读写计数。根据 `usage.raw` 白名单判断供应商是否提供相应字段，再使用 SDK 标准计数；缺失记 null、显式零记 0，raw 不输出。headless 写入 stderr 单行 JSON（type=`chapter-writing-usage`），Electron 继承该流；stdout 协议及客户端内容提示不变，诊断不包含 API Key、Base URL、正文、报告或请求载荷。调用抛错时不生成用量事件；durationMs 仅覆盖该次写作调用，包含 SDK 自动重试时间，不包含审校或落盘，不是整个会话耗时。
+
+真实 SDK/SQLite/HTTP 边界替身回归见 `workflows/write-chapter-sdk.test.ts`；该验证不模拟服务端 KV 缓存，也不证明线上命中率、账单或文学质量。

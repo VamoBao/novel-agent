@@ -43,11 +43,11 @@ apps/agent/src/workflows/
 │                             #   prompt 尾部 + 模仿要求 + notify 名单；无启用文风零改动）
 │                             #   → 生成-校验-修订循环（最多 MAX_REVIEW_ROUNDS=3 轮；写作要求篇幅条用
 │                             #   生效值、角色变化计划条件条——编号顺延于伏笔/文风之前）：写作模型
-│                             #   getWritingModel() 单轮 generateText（无确认门；WRITING_MODEL_*
+│                             #   getWritingModel() generateText（会话内追加原生消息；无确认门；WRITING_MODEL_*
 │                             #   未配置回落 Agent 模型）→ chapter-review 三段校验（reviewModel 缺省
 │                             #   Agent 会话模型）产出整改报告 → isReportPassing 通过跳出 /
-│                             #   未达标按报告修订式重写（原 prompt +【上一版正文】+【整改报告】块，
-│                             #   末条要求替换为按报告逐条修订），3 轮仍未达标保底保存最后一版并警告
+│                             #   未达标仅在写作历史末尾追加【整改报告】与修订最新稿指令，
+│                             #   result.response.messages 原样留存（正文空白/推理签名/provider 元信息不重建），3 轮仍未达标保底保存最后一版并警告
 │                             #   → 正文落文件（document-writer：<输出目录>/<小说ID>/<部名>/<章名>.md，
 │                             #   顶层即创作 ID——同名小说天然分属不同文件夹、改名零联动；章名冲突 -N 后缀；
 │                             #   file_path 以绝对路径落库——换输出目录后旧正文仍指向真实位置）
@@ -179,7 +179,7 @@ apps/agent/src/workflows/
     │                             #   参考文风注入四态 / 本章伏笔注入三态——无绑定零注入零通知回归、
     │                             #   登场与同章种收块位置与编号顺延与通知统计、回收登场章正文
     │                             #   优先与概述兜底及降级计数 / 校验循环五路径——一次通过事件序列
-    │                             #   与校验模型注入、第 2 轮修订 prompt 含上一版正文与整改报告、
+    │                             #   与校验模型注入、第 2/3 轮保留原生正文消息并只追加报告与指令、
     │                             #   3 轮保底保存与警告通知、无文风 skipped、校验抛错零残留）
     ├── chapter-context.test.ts   # 章节上下文单测（临时库 + 临时 output：migrationPhaseAt 四阶段与
     │                             #   单章变化与开放区间；buildCharacterStateContext 各章参考与计划块
@@ -255,7 +255,7 @@ apps/agent/src/workflows/
 
 1. **前置校验**（可读错误，协议入口转 fatal error）：小说存在 → 章节点存在 / 同小说 / 类型 chapter → summary 非空（旧数据缺概述拒绝）→ 所属幕与部节点存在 → worldviews 有记录（世界观已确认）；已有正文不再拒绝——getDocumentByChapter 有行即 isRegen（notify「🔄 重新生成中（将覆盖现有正文）」）
 2. **上下文组装（全取自库）**：书名 / logline + 世界观 JSON + 登场角色摘要行（名/定位/外貌/性格/渴望/恐惧——按章节点 character_ids 绑定过滤注入本章阵容；未绑定（null，17 版前旧章）或绑定角色全不在库时回退全库注入并 notify「🎭 本章未绑定登场角色（旧数据）」）+ 部名与部梗概 + 幕名与幕梗概及关键情节点 + 本章名与概述 + 同幕前后章名与概述（衔接上文、给下文留空间）+ **本章绑定伏笔**（可选增强——`buildChapterForeshadowContext`：登场注入卡片；回收组按登场章全局章序升序注入卡片 + 登场章上下文（正文优先、FORESHADOW_PROSE_BUDGET=8000 预算内整条注入，未生成/文件缺失/超预算降级该章概述）+ 多步回收既往回收章概述；同章种收只归回收组标「登场于本章」；【本章伏笔】块插【下一章】块后【参考文风】前，写作要求条件附加编号顺延，生成前 notify「🔮 本章伏笔：登场 N 条、回收 M 条（X 条降级）」；无绑定伏笔零注入零通知）+ 参考文风（可选增强，不新增校验分支——style-reference-store 按启用过滤，非空在 prompt 尾部【下一章】块后插【参考文风】段（每条「（名字）\n内容」）并在写作要求附模仿条（模仿叙事语言 / 句式节奏 / 描写风格，不抄袭具体情节与专有名词），生成前 notify「🖋️ 本次参考文风：名单」；无启用文风零注入零通知）
-3. **生成-校验-修订循环**：初稿 notify（✍️ 正文生成中 / 📏 小说级偏好覆盖 / 🔮 本章伏笔 / 🖋️ 参考文风）后进入 `for round in 1..MAX_REVIEW_ROUNDS`——onProgress(drafting|revising，revising 附上一轮报告) → `getWritingModel()`（按 WRITING_MODEL_PROVIDER 所选接口类型调用对应官方 SDK，环境变量 WRITING_MODEL_* 配置，任一未配置回落 Agent 会话模型）单轮 `generateText`（初稿 prompt 与既有形态逐字节一致；修订轮追加【上一版正文】+【整改报告】块于写作要求前，末条要求替换为按报告逐条修订），写作要求篇幅条用**写作偏好生效值**（`resolveSystemWritingPrefs`（providers/writing-prefs）读系统级环境变量 + shared resolveChapterLength / resolveStylePassScore 按「小说级 novels 行 > 系统级 > 内置默认 2000~3000 / 80」解析——篇幅 min/max 整体覆盖、半设乱序防御性跳过）、只输出正文文本；空结果拒绝。→ `reviewChapter`（chapter-review，reviewModel 缺省 Agent 模型——三段独立单轮 generateObject：①内容约束（世界观/章节概述/本章伏笔 lines 同源）②文风评分（合格线 = 生效阈值；无启用样本 skipped 零调用）③前后自洽（仅正文）；段开始 onProgress(review-*)，每段结束再回传 stageResult；无文风样本回传 skipped 且零模型调用）→ 报告 passed 判定：通过 notify「✅ 校验通过（第 N 轮）」跳出；未达标且 round<3 notify「♻️ 第 N+1 轮：上一版未达标准（内容 X 处、文风 Y 分、自洽 Z 处），按整改报告修订重写…」进入下一轮；round=3 仍未达标 notify「⚠️ 3 轮未全部达标，保存最后一版（…）——建议人工复核或重新发起生成」保底
+3. **生成-校验-修订循环**：初稿 notify（✍️ 正文生成中 / 📏 小说级偏好覆盖 / 🔮 本章伏笔 / 🖋️ 参考文风）后进入 `for round in 1..MAX_REVIEW_ROUNDS`——onProgress(drafting|revising，revising 附上一轮报告) → `getWritingModel()`（按 WRITING_MODEL_PROVIDER 所选接口类型调用对应官方 SDK，环境变量 WRITING_MODEL_* 配置，任一未配置回落 Agent 会话模型）`generateText({ messages })`（首条 user 资料与要求内容保留既有形态；每次原样追加 SDK 原生响应，修订轮再追加当前【整改报告】和仅修订最新稿的 user 指令，严格保留完整旧请求前缀），写作要求篇幅条用**写作偏好生效值**（`resolveSystemWritingPrefs`（providers/writing-prefs）读系统级环境变量 + shared resolveChapterLength / resolveStylePassScore 按「小说级 novels 行 > 系统级 > 内置默认 2000~3000 / 80」解析——篇幅 min/max 整体覆盖、半设乱序防御性跳过）、只输出正文文本；空结果拒绝。→ `reviewChapter`（chapter-review，reviewModel 缺省 Agent 模型——三段独立单轮 generateObject：①内容约束（世界观/章节概述/本章伏笔 lines 同源）②文风评分（合格线 = 生效阈值；无启用样本 skipped 零调用）③前后自洽（仅正文）；段开始 onProgress(review-*)，每段结束再回传 stageResult；无文风样本回传 skipped 且零模型调用）→ 报告 passed 判定：通过 notify「✅ 校验通过（第 N 轮）」跳出；未达标且 round<3 notify「♻️ 第 N+1 轮：上一版未达标准（内容 X 处、文风 Y 分、自洽 Z 处），按整改报告修订重写…」进入下一轮；round=3 仍未达标 notify「⚠️ 3 轮未全部达标，保存最后一版（…）——建议人工复核或重新发起生成」保底
 4. **元数据入库绑定**：onProgress(saving，附最终报告) → 正文落盘（<小说ID>/部名/章名层级，同名章冲突 -N 后缀不覆盖；写失败包「输出目录不可写」上下文直达 fatal error），文件先落、库后入，库失败回滚删文件 → 元数据单事务入库（file_path 绝对路径 + 字数，内容不进库）+ 章节点回写 document_id 并置 status=completed——首次生成走 `saveChapterDocument`，isRegen 走 `replaceChapterDocument` 覆盖替换（删旧行插新行），事务提交后清理旧正文文件（新旧路径相同跳过防误删、幂等容忍缺失）→ notify 保存路径与字数；run_finished 携带小说 ID 供客户端刷新详情（headless 把 onProgress 映射为 write-progress 协议消息；校验依赖 Agent 模型，会话始终要求 AGENT_MODEL_API_KEY）；大纲重生成只降级归档章节点，documents 行与正文文件保留（旧正文与归档章的关联留存）
 
 ## 大纲重新生成数据流（regenerateOutline）
@@ -331,3 +331,13 @@ writeChapter 在会话开始解析一次 stylePassScore，所有 WriteProgressEv
 ## 角色润色输出契约（2026-10-16）
 
 polish-character.ts 的 polishedCharacterSchema 在 characterSchema 基础上将顶层与 basicInfo 全部字段设为必填，与现有全字段补全要求一致，兼容 OpenAI 严格结构化输出；角色输入、存储与固定基准的 schema 保持可选字段不变。polish-character.test.ts 另经独立子进程加载真实 AI SDK / 工作流 / 内存 SQLite，模拟 OpenAI 对 strict required 的递归检查，并验证 DeepSeek / Claude 正常润色与基准零改动。跨模块修复与验收见根 PROGRESS.md。
+
+## 正文写作对话、缓存与用量（2026-10-18）
+
+写作者的 `ModelMessage[]` 在 `writeChapter` 单次调用内持续追加；初稿 user 只构建一次，所有原生 assistant 响应及既有报告保留，不 trim 历史或注入重复资料，修订指令明确以最新一稿为准。审校与最终落盘正文继续 trim，`chapter-review` 三段调用不接收写作者的历史或旧报告。最多三轮与所有失败/覆盖保护保持原有语义。
+
+写作请求统一带 canonical Anthropic 命名空间的 `{ cacheControl: { type: "ephemeral" } }`，由官方 Claude 适配器映射到 HTTP 顶层 cache_control；其他适配器忽略，不依赖模型名或自定义 provider 名推断协议。默认 5 分钟 TTL，长期生成/审校可能失效，不提高收费 TTL，不保证命中。
+
+`WriteChapterUsage` / `onUsage` 是工作流到入口的诊断接口：每次成功写作 API 调用上报输入、输出、缓存读写 token 与单次调用耗时及小说/章/轮次/模型。以 raw 的允许字段识别缺失，再使用 SDK 归一化值；null 表示未知、0 表示已报告的零，不透传 raw。headless 用 stderr JSON `chapter-writing-usage` 记录（宿主继承 stderr），不新增协议消息、UI 提示或数据库记录，不输出正文、报告、Key 或地址。失败请求无用量事件，耗时不含审校/落盘。完整说明见根 ARCHITECTURE 同名章节。
+
+`write-chapter-sdk.test.ts` 独立进程使用真实 SDK 和临时 SQLite，只替换 HTTP；覆盖三种协议的三轮历史前缀、Claude 缓存配置/回落、缺失或部分 usage、显式零计数及 headless stdout/stderr 隔离。字面合成响应不是实际缓存或文学质量验收。

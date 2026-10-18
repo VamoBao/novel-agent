@@ -1,4 +1,4 @@
-import { generateText } from "ai";
+import { generateText, type LanguageModelUsage, type ModelMessage } from "ai";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
 import type {
   ReviewReport,
@@ -54,6 +54,21 @@ export interface WriteProgressEvent {
   stageResult?: ReviewStageResult;
 }
 
+/** 每次成功写作 API 调用的诊断摘要；供应商未提供的 token 计数保留 null。 */
+export interface WriteChapterUsage {
+  novelId: string;
+  chapterNodeId: string;
+  round: number;
+  phase: "drafting" | "revising";
+  provider: string;
+  modelId: string;
+  durationMs: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+}
+
 export interface WriteChapterOptions {
   /** 交互通道（终端 / 协议 / 测试替身），业务交互的唯一出口 */
   channel: UiChannel;
@@ -67,6 +82,8 @@ export interface WriteChapterOptions {
   reviewModel?: LanguageModelV4;
   /** 流程进度回调（headless 映射为 write-progress 协议消息；CLI / 测试可不传） */
   onProgress?: (event: WriteProgressEvent) => void;
+  /** 写作调用用量与耗时，由入口记录诊断；不发送到 UI、不包含正文或密钥。 */
+  onUsage?: (event: WriteChapterUsage) => void;
   /** 正文产物根目录；缺省 output（NOVEL_OUTPUT_DIR，协议模式下宿主传绝对路径），测试注入临时目录 */
   outputDir?: string;
   /** 系统级写作偏好（章节篇幅 + 文风合格线的系统设置）；缺省读环境变量
@@ -101,6 +118,31 @@ function describeReport(report: ReviewReport): string {
   return `内容 ${report.content.issues.length} 处、${styleText}、自洽 ${report.consistency.issues.length} 处`;
 }
 
+/** SDK 会把部分缺失计数归零，诊断需用原始字段区分未知与真实的 0；raw 不进入日志。 */
+function reportedWritingUsage(usage: LanguageModelUsage) {
+  const counts = {
+    inputTokens: usage.inputTokens ?? null,
+    outputTokens: usage.outputTokens ?? null,
+    cacheReadTokens: usage.inputTokenDetails.cacheReadTokens ?? null,
+    cacheWriteTokens: usage.inputTokenDetails.cacheWriteTokens ?? null,
+  };
+  const raw = usage.raw;
+  if (!raw) return counts;
+  const details = raw.prompt_tokens_details;
+  const cacheRead = details !== null && typeof details === "object" && "cached_tokens" in details ? details.cached_tokens : undefined;
+  const cacheWrite = details !== null && typeof details === "object" && "cache_write_tokens" in details ? details.cache_write_tokens : undefined;
+  const fields = {
+    inputTokens: [raw.prompt_tokens, raw.input_tokens],
+    outputTokens: [raw.completion_tokens, raw.output_tokens],
+    cacheReadTokens: [raw.prompt_cache_hit_tokens, raw.cache_read_input_tokens, cacheRead],
+    cacheWriteTokens: [raw.cache_creation_input_tokens, cacheWrite],
+  };
+  for (const key of ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"] as const) {
+    if (!fields[key].some(value => typeof value === "number")) counts[key] = null;
+  }
+  return counts;
+}
+
 /**
  * 章节正文生成工作流（客户端章节点「✍️ 生成本章正文」入口）：
  * 从库中校验并组装写作上下文（小说名/logline、世界观、本章绑定的登场角色摘要
@@ -111,7 +153,7 @@ function describeReport(report: ReviewReport): string {
  * 会话模型）生成正文；生成后、落盘前经校验 subAgent（chapter-review，
  * Agent 模型三段独立调用——内容约束 / 文风相似度 / 前后自洽）产出结构化整改
  * 报告：通过（内容与自洽零问题且文风 skipped 或达到合格线）才落盘入库；未达标
- * 按报告修订式重写（原上下文 + 上一版正文 + 整改报告），最多 MAX_REVIEW_ROUNDS
+ * 在原生写作对话尾部追加整改报告并修订最新正文，最多 MAX_REVIEW_ROUNDS
  * 轮，第 3 轮仍未达标保存最后一版并警告（产物优先，用户确认的决策）。
  * 该章已有正文时为**重新生成**：流程完全一致，落库走覆盖替换
  * （replaceChapterDocument 单事务删旧行插新行），事务提交后清理旧正文文件；
@@ -272,87 +314,72 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   const reviewModel = options.reviewModel ?? agentSessionModel;
   const { onProgress } = options;
 
-  /** 写作 prompt（初稿与修订版共用主体；修订版追加上一版正文与整改报告块，末条要求替换为修订指令） */
-  const buildPrompt = (
-    revision: { previousContent: string; revisionBlock: string } | null,
-  ): string =>
-    [
-      "你是一位经验丰富的小说作者，请依据下面的资料把指定章节的剧情概述扩写为小说正文。",
-      "",
-      "【小说】",
-      `书名：${novel.name ?? "未命名小说"}`,
-      novel.description ? `一句话简介：${novel.description}` : null,
-      novel.narrativePov
-        ? `叙事视角：${novel.narrativePov}（正文叙述全程保持该视角——人称与信息范围不得中途漂移，限知视角不得写出视角内角色不可知的信息）`
-        : null,
-      "",
-      "【世界观】",
-      JSON.stringify(storedWorldview.worldview),
-      "",
-      ...(characterContext.lines.length > 0 ? characterContext.lines : ["【登场角色参考】", "（暂无入库角色）"]),
-      "",
-      "【所属部】",
-      `${part.node.name}：${part.node.summary ?? "（缺部梗概）"}`,
-      "",
-      "【所属幕】",
-      `${act.node.name}：${act.node.summary ?? "（缺幕梗概）"}`,
-      act.node.keyPlotPoints ? `幕关键情节点：${act.node.keyPlotPoints.join("；")}` : null,
-      "",
-      "【本章】",
-      `${chapter.node.name}：${chapter.node.summary}`,
-      "",
-      neighbors.previous
-        ? `【上一章（衔接其结尾，不要重复叙述）】\n${neighbors.previous.name}：${neighbors.previous.summary ?? "（无概述）"}` +
-          (neighbors.previousProse
-            ? `\n上一章正文（衔接其收束，不要照抄）：\n${neighbors.previousProse}`
-            : "")
-        : null,
-      neighbors.next
-        ? `【下一章（为其留出衔接空间，不要抢写其情节）】\n${neighbors.next.name}：${neighbors.next.summary ?? "（无概述）"}`
-        : null,
-      // 本章伏笔插在下一章块之后、参考文风之前：核心叙事上下文区，长样本文风仍留尾部
-      ...(hasForeshadows ? ["", ...foreshadowContext.lines] : []),
-      // 参考文风放 prompt 尾部：不把世界观/角色/本章概述等核心上下文推远，且紧邻风格指令
-      ...(enabledStyles.length > 0
-        ? [
-            "",
-            "【参考文风】",
-            enabledStyles
-              .map((stored) => `（${stored.styleReference.name}）\n${stored.styleReference.content}`)
-              .join("\n\n"),
-          ]
-        : []),
-      // 修订材料置于写作要求之前：与文风样本同属尾部上下文区，要求清单保持最后
-      ...(revision
-        ? [
-            "",
-            "【上一版正文（在其基础上修订）】",
-            revision.previousContent,
-            "",
-            "【整改报告（请逐条修订）】",
-            revision.revisionBlock,
-          ]
-        : []),
-      "",
-      "写作要求：",
-      "1. 依据本章剧情概述展开正文，可合理补充场景、对话与细节，但不得偏离概述的情节走向；",
-      "2. 承接上一章结尾（如有），并为下一章留出衔接空间（如有）；",
-      "3. 场景化叙述、张弛有度，对话自然贴合各角色性格；",
-      "4. 严格遵守世界观禁忌（taboos）；",
-      `5. 篇幅约 ${chapterLength.min}~${chapterLength.max} 字；`,
-      ...extraRequirements.map((text, i) => `${6 + i}. ${text}`),
-      revision
-        ? `${6 + extraRequirements.length}. 按整改报告逐条修订上一版正文（只修正报告指出的问题，报告未涉及的情节与表达尽量保持原样），只输出修订后的正文文本：不要章节标题、不要任何说明或元信息。`
-        : `${6 + extraRequirements.length}. 只输出正文文本：不要章节标题、不要任何说明或元信息。`,
-    ]
-      .filter((line): line is string => line !== null)
-      .join("\n");
+  // 初稿资料与要求只组装一次，后续严格追加消息，保留完整请求前缀。
+  const initialPrompt = [
+    "你是一位经验丰富的小说作者，请依据下面的资料把指定章节的剧情概述扩写为小说正文。",
+    "",
+    "【小说】",
+    `书名：${novel.name ?? "未命名小说"}`,
+    novel.description ? `一句话简介：${novel.description}` : null,
+    novel.narrativePov
+      ? `叙事视角：${novel.narrativePov}（正文叙述全程保持该视角——人称与信息范围不得中途漂移，限知视角不得写出视角内角色不可知的信息）`
+      : null,
+    "",
+    "【世界观】",
+    JSON.stringify(storedWorldview.worldview),
+    "",
+    ...(characterContext.lines.length > 0 ? characterContext.lines : ["【登场角色参考】", "（暂无入库角色）"]),
+    "",
+    "【所属部】",
+    `${part.node.name}：${part.node.summary ?? "（缺部梗概）"}`,
+    "",
+    "【所属幕】",
+    `${act.node.name}：${act.node.summary ?? "（缺幕梗概）"}`,
+    act.node.keyPlotPoints ? `幕关键情节点：${act.node.keyPlotPoints.join("；")}` : null,
+    "",
+    "【本章】",
+    `${chapter.node.name}：${chapter.node.summary}`,
+    "",
+    neighbors.previous
+      ? `【上一章（衔接其结尾，不要重复叙述）】\n${neighbors.previous.name}：${neighbors.previous.summary ?? "（无概述）"}` +
+        (neighbors.previousProse
+          ? `\n上一章正文（衔接其收束，不要照抄）：\n${neighbors.previousProse}`
+          : "")
+      : null,
+    neighbors.next
+      ? `【下一章（为其留出衔接空间，不要抢写其情节）】\n${neighbors.next.name}：${neighbors.next.summary ?? "（无概述）"}`
+      : null,
+    // 本章伏笔插在下一章块之后、参考文风之前：核心叙事上下文区，长样本文风仍留尾部
+    ...(hasForeshadows ? ["", ...foreshadowContext.lines] : []),
+    // 参考文风放 prompt 尾部：不把世界观/角色/本章概述等核心上下文推远，且紧邻风格指令
+    ...(enabledStyles.length > 0
+      ? [
+          "",
+          "【参考文风】",
+          enabledStyles
+            .map((stored) => `（${stored.styleReference.name}）\n${stored.styleReference.content}`)
+            .join("\n\n"),
+        ]
+      : []),
+    "",
+    "写作要求：",
+    "1. 依据本章剧情概述展开正文，可合理补充场景、对话与细节，但不得偏离概述的情节走向；",
+    "2. 承接上一章结尾（如有），并为下一章留出衔接空间（如有）；",
+    "3. 场景化叙述、张弛有度，对话自然贴合各角色性格；",
+    "4. 严格遵守世界观禁忌（taboos）；",
+    `5. 篇幅约 ${chapterLength.min}~${chapterLength.max} 字；`,
+    ...extraRequirements.map((text, i) => `${6 + i}. ${text}`),
+    `${6 + extraRequirements.length}. 只输出正文文本：不要章节标题、不要任何说明或元信息。`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
 
   // 生成-校验-修订循环：初稿 + 最多 MAX_REVIEW_ROUNDS-1 轮修订；通过才跳出，
   // 3 轮仍未达标保底保存最后一版并警告（产物优先）
   let content = "";
   let report: ReviewReport | null = null;
   let passed = false;
+  let messages: ModelMessage[] = [{ role: "user", content: initialPrompt }];
 
   for (let round = 1; round <= MAX_REVIEW_ROUNDS; round++) {
     const isRevision = round > 1;
@@ -368,21 +395,39 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
       channel.notify(
         `♻️ 第 ${round} 轮：上一版未达标准（${describeReport(report)}），按整改报告修订重写…`,
       );
+      messages = [...messages, {
+        role: "user",
+        content: [
+          "【整改报告（请逐条修订）】",
+          formatRevisionBlock(report, stylePassScore),
+          "",
+          "请依据以上独立审校意见，在你刚刚输出的最新一版正文基础上修订，继续遵守最初的全部写作资料与要求。只修正报告指出的问题，报告未涉及的情节与表达尽量保持原样；不要退回更早的稿件。只输出修订后的完整正文文本：不要章节标题、不要任何说明或元信息。",
+        ].join("\n"),
+      }];
     }
 
-    const { text } = await generateText({
+    const startedAt = performance.now();
+    const result = await generateText({
       model,
-      prompt: buildPrompt(
-        isRevision && report
-          ? { previousContent: content, revisionBlock: formatRevisionBlock(report, stylePassScore) }
-          : null,
-      ),
+      messages,
+      // canonical 命名空间兼容自定义 provider name；其他厂商的适配器忽略此项。
+      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+    });
+    options.onUsage?.({
+      novelId, chapterNodeId, round,
+      phase: isRevision ? "revising" : "drafting",
+      provider: model.provider,
+      modelId: model.modelId,
+      durationMs: Math.round(performance.now() - startedAt),
+      ...reportedWritingUsage(result.usage),
     });
 
-    content = text.trim();
+    content = result.text.trim();
     if (content.length === 0) {
       throw new Error("写作模型返回了空正文，请稍后重试");
     }
+    // 原生响应包含推理签名/provider 元信息，不能用 trim 后的正文重建 assistant。
+    messages = [...messages, ...result.response.messages];
 
     // 三段校验（chapter-review，Agent 模型独立调用；异常直接抛错终止会话零残留）
     report = await reviewChapter(

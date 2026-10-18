@@ -20,6 +20,7 @@ export {
   writeChapter,
   type WriteChapterOptions,
   type WriteChapterResult,
+  type WriteChapterUsage,
 } from "./write-chapter";
 export { collectWorldview } from "./agents/worldview-agent";
 export { createOutline } from "./agents/outline-agent";
