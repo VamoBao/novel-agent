@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Ruler } from "lucide-react";
 import {
   DEFAULT_CHAPTER_LENGTH_MAX,
   DEFAULT_CHAPTER_LENGTH_MIN,
@@ -16,8 +17,8 @@ interface WritingPrefsDialogProps {
 }
 
 /**
- * 小说写作偏好弹窗（书库右键「📏 写作偏好」入口）：章节篇幅范围与文风合格线的
- * **小说级覆盖**——优先级高于系统设置（⚙️ 设置弹窗的「写作偏好（默认）」），
+ * 小说写作偏好弹窗（书库右键「写作偏好」入口）：章节篇幅范围与文风合格线的
+ * **小说级覆盖**——优先级高于系统设置（设置弹窗的「写作偏好（默认）」），
  * 留空项回落系统设置（系统未设置时为内置默认 2000~3000 字 / 80 分）。
  * 打开时从详情加载现值；提交经 query CLI set-writing-prefs 全量替换
  * （null=清空覆盖），服务端成对校验兜底；取消零副作用。
@@ -86,7 +87,10 @@ export function WritingPrefsDialog({ novelId, novelName, onClose, onSaved }: Wri
         aria-modal="true"
         onClick={(event) => event.stopPropagation()}
       >
-        <h3>📏 写作偏好</h3>
+        <h3>
+          <Ruler className="ic" aria-hidden />
+          写作偏好
+        </h3>
         <p className="dialog-lead">
           《{novelName}》的章节正文生成偏好，优先级高于系统设置；留空项跟随系统设置
           （系统未设置时为内置默认：篇幅 {DEFAULT_CHAPTER_LENGTH_MIN}~{DEFAULT_CHAPTER_LENGTH_MAX} 字、

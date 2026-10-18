@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { ArrowLeft, CircleX, Wrench } from "lucide-react";
 import { useAgentSession } from "../hooks/use-agent-session";
 import { QuestionCard } from "./QuestionCard";
 import { ViewCard } from "./ViewCard";
@@ -45,9 +46,12 @@ export function OutlineRegenFlow({
     <>
       <div className="creation-header">
         <button className="icon-btn" onClick={close} title="终止大纲重新生成并返回浏览页">
-          ←
+          <ArrowLeft className="ic-btn" aria-hidden />
         </button>
-        <strong>🛠 重新生成大纲 ·《{novelName}》</strong>
+        <strong>
+          <Wrench className="ic" aria-hidden />
+          重新生成大纲 ·《{novelName}》
+        </strong>
       </div>
       <main className="flow">
         {flow.map((item, index) =>
@@ -66,7 +70,10 @@ export function OutlineRegenFlow({
 
         {phase === "error" ? (
           <div className="error-panel">
-            <p>❌ {error ?? (exitCode !== null ? `agent 已退出（exit ${exitCode}）` : "发生错误")}</p>
+            <p>
+              <CircleX className="ic" aria-hidden />
+              {error ?? (exitCode !== null ? `agent 已退出（exit ${exitCode}）` : "发生错误")}
+            </p>
             <p className="hint">
               已确认的结果已保存。继续后会从未完成的阶段重新开始问答。
             </p>

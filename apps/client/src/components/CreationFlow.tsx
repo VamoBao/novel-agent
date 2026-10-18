@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { ArrowLeft, CircleX, PenLine } from "lucide-react";
 import { useAgentSession } from "../hooks/use-agent-session";
 import { QuestionCard } from "./QuestionCard";
 import { StageBar } from "./StageBar";
@@ -40,9 +41,12 @@ export function CreationFlow({ resumeRunId, onFinished, onClose }: CreationFlowP
     <>
       <div className="creation-header">
         <button className="icon-btn" onClick={close} title="终止创作并返回书库">
-          ←
+          <ArrowLeft className="ic-btn" aria-hidden />
         </button>
-        <strong>{resumeRunId ? "✍️ 继续创作流程" : "✍️ 新建小说"}</strong>
+        <strong>
+          <PenLine className="ic" aria-hidden />
+          {resumeRunId ? "继续创作流程" : "新建小说"}
+        </strong>
         {phase === "running" ? <StageBar current={stage} /> : null}
       </div>
       <main className="flow">
@@ -62,7 +66,10 @@ export function CreationFlow({ resumeRunId, onFinished, onClose }: CreationFlowP
 
         {phase === "error" ? (
           <div className="error-panel">
-            <p>❌ {error ?? (exitCode !== null ? `agent 已退出（exit ${exitCode}）` : "发生错误")}</p>
+            <p>
+              <CircleX className="ic" aria-hidden />
+              {error ?? (exitCode !== null ? `agent 已退出（exit ${exitCode}）` : "发生错误")}
+            </p>
             <p className="hint">已确认的结果已保存。继续后会从未完成的阶段重新开始问答。</p>
             <div className="row center">
               <button className="primary" onClick={start}>

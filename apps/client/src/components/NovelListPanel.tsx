@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Library, Pencil, Pin, RefreshCw, Ruler, Star, Trash2 } from "lucide-react";
 import type { NovelListItem } from "@novel/shared";
 import { DeleteNovelDialog } from "./DeleteNovelDialog";
 
@@ -12,7 +13,7 @@ interface NovelListPanelProps {
   onRename: (id: string, name: string) => void;
   onSetPinned: (id: string, pinned: boolean) => void;
   onSetFavorite: (id: string, favorite: boolean) => void;
-  /** 打开「📏 写作偏好」弹窗（App 接线到 WritingPrefsDialog） */
+  /** 打开「写作偏好」弹窗（App 接线到 WritingPrefsDialog） */
   onSetWritingPrefs: (id: string) => void;
   onDelete: (id: string) => void;
 }
@@ -78,9 +79,12 @@ export function NovelListPanel({
   return (
     <div className="library">
       <div className="library-head">
-        <strong>📚 书库</strong>
+        <strong>
+          <Library className="ic" aria-hidden />
+          书库
+        </strong>
         <button className="icon-btn" onClick={onRefresh} title="刷新列表">
-          ↻
+          <RefreshCw className="ic-btn" aria-hidden />
         </button>
       </div>
 
@@ -96,7 +100,7 @@ export function NovelListPanel({
       ) : null}
 
       {novels !== null && !error && novels.length === 0 ? (
-        <p className="pane-hint">还没有小说，点右上角「＋ 新建小说」开始创作。</p>
+        <p className="pane-hint">还没有小说，点右上角「新建小说」按钮开始创作。</p>
       ) : null}
 
       <ul className="novel-list">
@@ -126,9 +130,9 @@ export function NovelListPanel({
                 }}
               >
                 <span className="novel-name">
-                  {novel.pinned ? "📌 " : ""}
+                  {novel.pinned ? <Pin className="ic" aria-hidden /> : null}
                   {novel.name ?? "未命名小说"}
-                  {novel.favorite ? " ⭐" : ""}
+                  {novel.favorite ? <Star className="ic-after" aria-hidden /> : null}
                 </span>
               </button>
             </li>
@@ -142,12 +146,29 @@ export function NovelListPanel({
           style={{ left: menu.x, top: menu.y }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          <button onClick={() => startRename(menuNovel)}>✏️ 重命名</button>
+          <button onClick={() => startRename(menuNovel)}>
+            <Pencil className="ic" aria-hidden />
+            重命名
+          </button>
           <button onClick={() => onSetPinned(menuNovel.id, !menuNovel.pinned)}>
-            {menuNovel.pinned ? "取消置顶" : "📌 置顶"}
+            {menuNovel.pinned ? (
+              "取消置顶"
+            ) : (
+              <>
+                <Pin className="ic" aria-hidden />
+                置顶
+              </>
+            )}
           </button>
           <button onClick={() => onSetFavorite(menuNovel.id, !menuNovel.favorite)}>
-            {menuNovel.favorite ? "取消收藏" : "⭐ 收藏"}
+            {menuNovel.favorite ? (
+              "取消收藏"
+            ) : (
+              <>
+                <Star className="ic" aria-hidden />
+                收藏
+              </>
+            )}
           </button>
           <button
             onClick={() => {
@@ -155,7 +176,8 @@ export function NovelListPanel({
               onSetWritingPrefs(menuNovel.id);
             }}
           >
-            📏 写作偏好
+            <Ruler className="ic" aria-hidden />
+            写作偏好
           </button>
           <button
             className="danger"
@@ -164,7 +186,8 @@ export function NovelListPanel({
               setConfirmDeleteId(menuNovel.id);
             }}
           >
-            🗑 删除
+            <Trash2 className="ic" aria-hidden />
+            删除
           </button>
         </div>
       ) : null}

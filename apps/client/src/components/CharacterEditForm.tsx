@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { UserPlus, WandSparkles } from "lucide-react";
 import { characterSchema, type Character, type CharacterEntry } from "@novel/shared";
 
 /** 表单态：与 characterSchema 字段一一对应的扁平字符串（可选项空串 = 未填） */
@@ -116,7 +117,7 @@ interface CharacterEditFormProps {
 
 /**
  * 新增角色表单：字段对齐 characterSchema，7 个必填字段空值时禁止提交并提示。三个动作——
- * - 🪄 AI 润色：以表单当前值 + 世界观经 LLM 全字段润色后回填表单（polish-result
+ * - AI 润色（WandSparkles 图标）：以表单当前值 + 世界观经 LLM 全字段润色后回填表单（polish-result
  *   协议消息；可重复润色；不自动入库，可订阅期间取消编辑即中止 agent 会话）；
  * - 提交：zod 校验通过后经 query CLI 入库（version=1，即固定基准）；
  * - 取消：退出表单零副作用。
@@ -210,7 +211,10 @@ export function CharacterEditForm({
 
   return (
     <section className="character-form">
-      <h3>✨ 新增角色</h3>
+      <h3>
+        <UserPlus className="ic" aria-hidden />
+        新增角色
+      </h3>
       <div className="form-fields">
         {(
           [
@@ -249,7 +253,12 @@ export function CharacterEditForm({
       </div>
       {missing.length > 0 ? <p className="form-error">必填字段未填：{missing.join("、")}</p> : null}
       {error ? <p className="form-error">{error}</p> : null}
-      {polishing ? <p className="hint">🪄 润色中，结果将自动回填表单（可再次润色或直接提交）…</p> : null}
+      {polishing ? (
+        <p className="hint">
+          <WandSparkles className="ic" aria-hidden />
+          润色中，结果将自动回填表单（可再次润色或直接提交）…
+        </p>
+      ) : null}
       <div className="form-actions">
         <button
           disabled={busy || !hasWorldview || !hasAnyInput}
@@ -262,7 +271,8 @@ export function CharacterEditForm({
           }
           onClick={polish}
         >
-          🪄 AI 润色
+          <WandSparkles className="ic" aria-hidden />
+          AI 润色
         </button>
         <button
           className="primary"

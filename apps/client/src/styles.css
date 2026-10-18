@@ -958,6 +958,25 @@ button.ghost {
   border-style: dashed;
 }
 
+/* Lucide 图标基线（客户端统一矢量图标，替代 emoji）：.ic = 图标后随文本、
+   .ic-after = 图标前有文本、.ic-btn = 纯图标按钮内容；尺寸随字号（1em）缩放 */
+.ic,
+.ic-after,
+.ic-btn {
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+  flex: none;
+}
+
+.ic {
+  margin-right: 0.3em;
+}
+
+.ic-after {
+  margin-left: 0.3em;
+}
+
 .hint {
   color: var(--fg-muted);
   font-size: 13px;

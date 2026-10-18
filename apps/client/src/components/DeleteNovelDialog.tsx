@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Trash2 } from "lucide-react";
 import type { NovelListItem } from "@novel/shared";
 
 /** 确认口令 = 展示名（未命名小说用展示名，保证有唯一可输入的确认串） */
@@ -40,7 +41,10 @@ export function DeleteNovelDialog({ novel, onCancel, onConfirm }: DeleteNovelDia
         aria-modal="true"
         onClick={(event) => event.stopPropagation()}
       >
-        <h3>🗑 删除小说</h3>
+        <h3>
+          <Trash2 className="ic" aria-hidden />
+          删除小说
+        </h3>
         <p className="dialog-lead">
           即将删除 <strong>《{phrase}》</strong>。
           世界观、角色、大纲节点及 output 产物文件将一并清除，<strong>此操作不可恢复</strong>。

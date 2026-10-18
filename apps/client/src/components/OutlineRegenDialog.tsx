@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { RefreshCw } from "lucide-react";
 
 interface OutlineRegenDialogProps {
   novelName: string;
@@ -28,7 +29,10 @@ export function OutlineRegenDialog({ novelName, onCancel, onConfirm }: OutlineRe
         aria-modal="true"
         onClick={(event) => event.stopPropagation()}
       >
-        <h3>🔄 重新生成大纲</h3>
+        <h3>
+          <RefreshCw className="ic" aria-hidden />
+          重新生成大纲
+        </h3>
         <p className="dialog-lead">
           即将为 <strong>《{novelName}》</strong> 重新生成大纲。
         </p>

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { RefreshCw } from "lucide-react";
 
 interface ChapterRegenDialogProps {
   chapterName: string;
@@ -28,7 +29,10 @@ export function ChapterRegenDialog({ chapterName, onCancel, onConfirm }: Chapter
         aria-modal="true"
         onClick={(event) => event.stopPropagation()}
       >
-        <h3>🔄 重新生成本章正文</h3>
+        <h3>
+          <RefreshCw className="ic" aria-hidden />
+          重新生成本章正文
+        </h3>
         <p className="dialog-lead">
           即将为 <strong>「{chapterName}」</strong> 重新生成正文。
         </p>

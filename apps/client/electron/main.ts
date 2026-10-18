@@ -387,7 +387,7 @@ ipcMain.handle("library:setFavorite", (_event, novelId: string, favorite: boolea
   handleItemMutation([favorite ? "favorite" : "unfavorite", novelId]),
 );
 
-/** 写作偏好小说级覆盖（书库右键「📏 写作偏好」）：全量替换三项，返回更新后列表项 */
+/** 写作偏好小说级覆盖（书库右键「写作偏好」）：全量替换三项，返回更新后列表项 */
 ipcMain.handle(
   "library:setWritingPrefs",
   (_event, novelId: string, prefs: NovelWritingPrefs): Promise<NovelListItem> =>

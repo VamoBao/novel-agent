@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement } from "react";
+import { Settings } from "lucide-react";
 import type { AppSettings, ThemeSetting } from "../../electron/settings";
 import {
   DEFAULT_CHAPTER_LENGTH_MAX,
@@ -86,7 +87,7 @@ interface SettingsDialogProps {
 }
 
 /**
- * 应用设置弹窗（头部 ⚙️ 入口）：Agent 会话模型与写作模型两组字段——各含
+ * 应用设置弹窗（头部「设置」入口）：Agent 会话模型与写作模型两组字段——各含
  * **接口类型 provider**（openai / deepseek / claude，决定调用哪家官方 SDK 与协议）、
  * API Key、模型名与 Base URL；另有「写作偏好（默认）」——章节篇幅范围与文风
  * 合格线的系统级默认（留空 = 内置默认 2000~3000 字 / 80 分；单本小说可在书库
@@ -247,7 +248,10 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
   return (
     <div className="dialog-backdrop" onClick={onClose}>
       <div className="dialog settings-dialog" onClick={(e) => e.stopPropagation()}>
-        <h3>⚙️ 设置</h3>
+        <h3>
+          <Settings className="ic" aria-hidden />
+          设置
+        </h3>
         {loading ? (
           <p className="dialog-lead">加载中…</p>
         ) : (

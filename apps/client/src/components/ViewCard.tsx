@@ -1,12 +1,28 @@
+import {
+  BookOpen,
+  ChevronRight,
+  CircleCheck,
+  ClipboardList,
+  FileText,
+  Link,
+  ListOrdered,
+  Recycle,
+  Sparkles,
+  User,
+} from "lucide-react";
 import type { View } from "@novel/shared";
 
-/** 只读视图渲染：世界观 / 冲突 / 大纲全量 / 字段摘要 / 角色卡（后两者多见于确认提问内嵌） */
+/** 只读视图渲染：世界观 / 冲突 / 大纲全量 / 字段摘要 / 角色卡（后两者多见于确认提问内嵌）；
+ *  清单标题以 Lucide 图标替代 emoji（CLI 侧 renderView 仍为 emoji 终端渲染，两侧文案一致） */
 export function ViewCard({ view }: { view: View }) {
   switch (view.kind) {
     case "worldview":
       return (
         <section className="viewcard">
-          <h3>✅ 世界观已确认</h3>
+          <h3>
+            <CircleCheck className="ic" aria-hidden />
+            世界观已确认
+          </h3>
           <dl>
             <dt>地理位置</dt>
             <dd>{view.worldview.background.geography}</dd>
@@ -30,7 +46,10 @@ export function ViewCard({ view }: { view: View }) {
     case "conflict":
       return (
         <section className="viewcard">
-          <h3>✅ 核心冲突已确认</h3>
+          <h3>
+            <CircleCheck className="ic" aria-hidden />
+            核心冲突已确认
+          </h3>
           <dl>
             <dt>由来</dt>
             <dd>{view.conflict.origin}</dd>
@@ -44,18 +63,34 @@ export function ViewCard({ view }: { view: View }) {
     case "outline":
       return (
         <section className="viewcard">
-          <h3>{view.detail === "confirm" ? "📖 大纲草稿" : "✅ 大纲已生成"}</h3>
+          <h3>
+            {view.detail === "confirm" ? (
+              <>
+                <BookOpen className="ic" aria-hidden />
+                大纲草稿
+              </>
+            ) : (
+              <>
+                <CircleCheck className="ic" aria-hidden />
+                大纲已生成
+              </>
+            )}
+          </h3>
           <p className="title-line">
             《{view.outline.title}》——{view.outline.logline}
           </p>
           {view.outline.theme ? <p className="dim">主题：{view.outline.theme}</p> : null}
           {view.outline.parts.map((part) => (
             <div key={part.name} className="part">
-              <p className="part-name">▶ {part.name}：{part.summary}</p>
+              <p className="part-name">
+                <ChevronRight className="ic" aria-hidden />
+                {part.name}：{part.summary}
+              </p>
               {part.acts.map((act) => (
                 <div key={act.name} className="act">
                   <p>
-                    ▶ {act.name}：{act.summary}
+                    <ChevronRight className="ic" aria-hidden />
+                    {act.name}：{act.summary}
                   </p>
                   {view.detail === "full"
                     ? act.keyPlotPoints.map((point, index) => (
@@ -71,7 +106,10 @@ export function ViewCard({ view }: { view: View }) {
           {/* 清单仅在大纲确认视图渲染（对齐 CLI renderView：full 视图不展示，避免误读「确认后自动入库」文案） */}
           {view.detail === "confirm" && view.newCharacters && view.newCharacters.length > 0 ? (
             <>
-              <p className="part-name">✨ 本次大纲新增角色（确认后自动入库）</p>
+              <p className="part-name">
+                <Sparkles className="ic" aria-hidden />
+                本次大纲新增角色（确认后自动入库）
+              </p>
               {view.newCharacters.map((c) => (
                 <p key={c.name} className="act">
                   · {c.name}——{c.role}
@@ -81,7 +119,10 @@ export function ViewCard({ view }: { view: View }) {
           ) : null}
           {view.detail === "confirm" && view.newForeshadows && view.newForeshadows.length > 0 ? (
             <>
-              <p className="part-name">✨ 本次大纲伏笔（确认后自动入库）</p>
+              <p className="part-name">
+                <Sparkles className="ic" aria-hidden />
+                本次大纲伏笔（确认后自动入库）
+              </p>
               {view.newForeshadows.map((f) => (
                 <p key={`${f.actName}-${f.surfaceAction}`} className="act">
                   · [{f.actName}] {f.surfaceAction} ⇢ {f.hiddenTruth}（注意度 {f.attentionLevel}，服务：{f.characterNames.join("、")}，回收幕：{f.recoverActNames.join("、")}）
@@ -91,7 +132,10 @@ export function ViewCard({ view }: { view: View }) {
           ) : null}
           {view.detail === "confirm" && view.newLocations && view.newLocations.length > 0 ? (
             <>
-              <p className="part-name">✨ 本次大纲新增地点（确认后自动入库）</p>
+              <p className="part-name">
+                <Sparkles className="ic" aria-hidden />
+                本次大纲新增地点（确认后自动入库）
+              </p>
               {view.newLocations.map((l) => (
                 <p key={l.name} className="act">
                   · {l.name}——{l.description}
@@ -104,7 +148,10 @@ export function ViewCard({ view }: { view: View }) {
     case "chapter-plan":
       return (
         <section className="viewcard">
-          <h3>📑 章节规划草稿（{view.actName}）</h3>
+          <h3>
+            <ListOrdered className="ic" aria-hidden />
+            章节规划草稿（{view.actName}）
+          </h3>
           <dl>
             <dt>本幕梗概</dt>
             <dd>{view.actSummary}</dd>
@@ -126,7 +173,10 @@ export function ViewCard({ view }: { view: View }) {
           ))}
           {view.newCharacters && view.newCharacters.length > 0 ? (
             <>
-              <p className="part-name">✨ 本次规划新增角色（确认后自动入库）</p>
+              <p className="part-name">
+                <Sparkles className="ic" aria-hidden />
+                本次规划新增角色（确认后自动入库）
+              </p>
               {view.newCharacters.map((c) => (
                 <p key={c.name} className="act">
                   · {c.name}——{c.role}
@@ -136,7 +186,10 @@ export function ViewCard({ view }: { view: View }) {
           ) : null}
           {view.newForeshadows && view.newForeshadows.length > 0 ? (
             <>
-              <p className="part-name">✨ 本次规划新增伏笔（确认后自动入库）</p>
+              <p className="part-name">
+                <Sparkles className="ic" aria-hidden />
+                本次规划新增伏笔（确认后自动入库）
+              </p>
               {view.newForeshadows.map((f) => (
                 <div key={`${f.chapterName}-${f.surfaceAction}`} className="act">
                   <p>
@@ -153,7 +206,10 @@ export function ViewCard({ view }: { view: View }) {
           ) : null}
           {view.foreshadowBindings && view.foreshadowBindings.length > 0 ? (
             <>
-              <p className="part-name">🔗 伏笔绑定（确认后生效）</p>
+              <p className="part-name">
+                <Link className="ic" aria-hidden />
+                伏笔绑定（确认后生效）
+              </p>
               {view.foreshadowBindings.map((b) => (
                 <p key={`${b.index}-${b.chapterName}`} className="plot">
                   {b.index}) → {b.chapterName}
@@ -163,7 +219,10 @@ export function ViewCard({ view }: { view: View }) {
           ) : null}
           {view.foreshadowRecoverBindings && view.foreshadowRecoverBindings.length > 0 ? (
             <>
-              <p className="part-name">♻ 伏笔回收绑定（确认后生效）</p>
+              <p className="part-name">
+                <Recycle className="ic" aria-hidden />
+                伏笔回收绑定（确认后生效）
+              </p>
               {view.foreshadowRecoverBindings.map((binding) => (
                 <p key={`${binding.index}-${binding.chapterName}`} className="plot">
                   {binding.index}) → {binding.chapterName}
@@ -173,7 +232,10 @@ export function ViewCard({ view }: { view: View }) {
           ) : null}
           {view.newLocations && view.newLocations.length > 0 ? (
             <>
-              <p className="part-name">✨ 本次规划新增地点（确认后自动入库）</p>
+              <p className="part-name">
+                <Sparkles className="ic" aria-hidden />
+                本次规划新增地点（确认后自动入库）
+              </p>
               {view.newLocations.map((l) => (
                 <p key={l.name} className="act">
                   · {l.name}——{l.description}
@@ -187,16 +249,21 @@ export function ViewCard({ view }: { view: View }) {
       return (
         <section className="viewcard">
           <p>
-            📋 【{view.label}】{view.summary}
+            <ClipboardList className="ic" aria-hidden />
+            【{view.label}】{view.summary}
           </p>
         </section>
       );
     case "character-card":
       return (
         <section className="viewcard">
-          <h3>📝 角色卡汇总</h3>
+          <h3>
+            <FileText className="ic" aria-hidden />
+            角色卡汇总
+          </h3>
           <p className="title-line">
-            👤 {view.character.basicInfo.name}（{view.character.core.narrativeRole}
+            <User className="ic" aria-hidden />
+            {view.character.basicInfo.name}（{view.character.core.narrativeRole}
             {view.character.basicInfo.gender ? `，${view.character.basicInfo.gender}` : ""}）
           </p>
           <dl>

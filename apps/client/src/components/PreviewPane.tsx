@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { CircleCheck, CirclePause, Pencil } from "lucide-react";
 import type { ReactElement } from "react";
 import type {
   CharacterEntry,
@@ -172,7 +173,10 @@ function ForeshadowPreview({
   return (
     <>
       <div className="preview-actions">
-        <button onClick={() => setEditing(true)}>✏️ 编辑伏笔</button>
+        <button onClick={() => setEditing(true)}>
+          <Pencil className="ic" aria-hidden />
+          编辑伏笔
+        </button>
       </div>
       <section className="viewcard">
         <p className="card-label">伏笔 · {actName}</p>
@@ -262,13 +266,26 @@ function StylePreview({
   return (
     <>
       <div className="preview-actions">
-        <button onClick={() => setEditing(true)}>✏️ 编辑文风</button>
+        <button onClick={() => setEditing(true)}>
+          <Pencil className="ic" aria-hidden />
+          编辑文风
+        </button>
       </div>
       <section className="viewcard">
         <p className="card-label">参考文风</p>
         <p className="part-name">{entry.name}</p>
         <p className="outline-summary">
-          {entry.enabled ? "✅ 启用中（生成正文时注入）" : "⏸ 已停用（生成正文时不注入）"}
+          {entry.enabled ? (
+            <>
+              <CircleCheck className="ic" aria-hidden />
+              启用中（生成正文时注入）
+            </>
+          ) : (
+            <>
+              <CirclePause className="ic" aria-hidden />
+              已停用（生成正文时不注入）
+            </>
+          )}
         </p>
         <div className="prose-content">{entry.content}</div>
       </section>

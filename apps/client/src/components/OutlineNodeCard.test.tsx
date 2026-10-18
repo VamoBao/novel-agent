@@ -22,7 +22,8 @@ describe("OutlineNodeCard 正文生成进度", () => {
         { kind: "worldview", description: "出现高铁", suggestion: "改为马车" },
       ] } }],
     });
-    expect(html).toContain("⚠ 内容约束校验");
+    expect(html).toContain("lucide-triangle-alert");
+    expect(html).toContain("内容约束校验");
     expect(html).toContain("[世界观] 出现高铁 → 改为马车");
     expect(html).not.toContain("未达标（");
   });
@@ -41,12 +42,13 @@ describe("OutlineNodeCard 正文生成进度", () => {
         { phase: "review-consistency", result: report.consistency },
       ],
     });
-    expect(html).toContain("⚠ 文风校验");
+    expect(html).toContain("lucide-triangle-alert");
+    expect(html).toContain("文风校验");
     expect(html).toContain("文风 82 分：句式偏短");
     expect(html).toContain("增加描写");
-    expect(html).toContain("⚠ 前后自洽校验");
+    expect(html).toContain("前后自洽校验");
     expect(html).toContain("时间冲突 → 统一时间");
-    expect(html).toContain("⚠️ 未达标（内容 0 处 · 文风 82 分 · 自洽 1 处）");
+    expect(html).toContain("未达标（内容 0 处 · 文风 82 分 · 自洽 1 处）");
   });
 
   test("无文风要求显示跳过", () => {
@@ -55,7 +57,8 @@ describe("OutlineNodeCard 正文生成进度", () => {
       { phase: "review-style", result: { skipped: true } },
     ] });
     expect(html).toContain("文风校验（已跳过）");
-    expect(html).not.toContain("✓ 文风校验");
+    expect(html).toContain("lucide-minus");
+    expect(html).not.toContain("✓");
   });
 
   test.each([
@@ -71,7 +74,7 @@ describe("OutlineNodeCard 正文生成进度", () => {
         skipped: false, score, rationale: "评分依据", suggestions: ["调整句式节奏"],
       } }],
     });
-    expect(html).toContain(failed ? "⚠ 文风校验" : "✓ 文风校验");
+    expect(html).toContain(failed ? "lucide-triangle-alert" : "lucide-check");
     expect(html.includes("调整句式节奏")).toBe(failed);
   });
 });
@@ -96,7 +99,7 @@ describe("OutlineNodeCard 迁移陈旧提示", () => {
     );
     expect(html).toContain("登场角色的迁移计划已更新");
     expect(html).toContain("林恒 性格 第 2 条");
-    expect(html).toContain("🔄 重新生成");
+    expect(html).toContain("建议「重新生成」");
   });
 
   test("无陈旧迁移（空数组）不渲染提示", () => {
@@ -115,7 +118,7 @@ describe("OutlineNodeCard 登场人物区块", () => {
         castNames={["林恒", "萧无咎"]}
       />,
     );
-    expect(bound).toContain("🎭 登场人物");
+    expect(bound).toContain("登场人物");
     expect(bound).toContain("林恒、萧无咎");
 
     const unbound = renderToStaticMarkup(

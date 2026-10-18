@@ -56,7 +56,7 @@ test.each(["other", "current", "switch"] as const)(
           .dispatchEvent(new dom.MouseEvent('contextmenu', { bubbles: true }));
       });
       await act(async () => {
-        [...container.querySelectorAll('button')].find(n => n.textContent.includes('📏 写作偏好')).click();
+        [...container.querySelectorAll('button')].find(n => n.textContent.includes('写作偏好')).click();
       });
       await act(async () => container.querySelector('.dialog button.primary').click());
       if (scenario === 'switch') {

@@ -1,3 +1,13 @@
+import {
+  Check,
+  CircleCheck,
+  Drama,
+  ListOrdered,
+  Minus,
+  PenLine,
+  RefreshCw,
+  TriangleAlert,
+} from "lucide-react";
 import type { DocumentEntry, OutlineNodeEntry, ReviewReport, ReviewStageResult, WriteProgressPhase } from "@novel/shared";
 import { DEFAULT_STYLE_PASS_SCORE } from "@novel/shared";
 import type { StaleCastMigration } from "../character-staleness";
@@ -79,7 +89,7 @@ function reportSummary(report: ReviewReport): string {
  * 「规划本幕章节」入口固定在两张卡片下方右对齐——节点名与类型以左栏结构
  * 树为准（点击时已高亮），右栏不再重复；入口仅未规划过章节的幕显示，旧数
  * 据幕缺梗概/情节点（无规划种子内容），禁用并提示原因。
- * 章节点：无正文时同样右对齐显示「✍️ 生成本章正文」入口（写作模型生成，
+ * 章节点：无正文时同样右对齐显示「生成本章正文」入口（写作模型生成，
  * write-chapter 会话）；生成中由 writeProgress 渲染流程进度区块（步骤条 +
  * 单段校验反馈及整改报告摘要，write-progress 消息驱动）；已有正文则在梗概卡下追加正文卡
  * （约 N 字 + 全文——内容存 output 落盘文件，库内只留元数据；重写/修订流为
@@ -146,7 +156,10 @@ export function OutlineNodeCard({
       ) : null}
       {node.type === "chapter" && castNames && castNames.length > 0 ? (
         <section className="viewcard">
-          <p className="card-label">🎭 登场人物</p>
+          <p className="card-label">
+            <Drama className="ic" aria-hidden />
+            登场人物
+          </p>
           <p className="outline-summary">{castNames.join("、")}</p>
         </section>
       ) : null}
@@ -155,11 +168,12 @@ export function OutlineNodeCard({
           <p className="card-label">正文 · 约 {document.wordCount} 字</p>
           {staleMigrations && staleMigrations.length > 0 ? (
             <p className="cast-stale">
-              ⚠️ 登场角色的迁移计划已更新（
+              <TriangleAlert className="ic" aria-hidden />
+              登场角色的迁移计划已更新（
               {staleMigrations
                 .map((m) => `${m.name} ${m.fieldLabel} 第 ${m.sequence} 条`)
                 .join("、")}
-              ）——本章正文生成于该计划确认之前，如需保持一致建议「🔄 重新生成」
+              ）——本章正文生成于该计划确认之前，如需保持一致建议「重新生成」
             </p>
           ) : null}
           {document.content ? (
@@ -197,7 +211,17 @@ export function OutlineNodeCard({
                   key={step.label}
                   className={failed ? "warning" : skipped ? "skipped" : index === currentStep && !stage ? "current" : stage || index < currentStep ? "done" : undefined}
                 >
-                  <span>{failed ? "⚠ " : skipped ? "— " : stage || index < currentStep ? "✓ " : ""}{step.label}{skipped ? "（已跳过）" : ""}</span>
+                  <span>
+                    {failed ? (
+                      <TriangleAlert className="ic" aria-hidden />
+                    ) : skipped ? (
+                      <Minus className="ic" aria-hidden />
+                    ) : stage || index < currentStep ? (
+                      <Check className="ic" aria-hidden />
+                    ) : null}
+                    {step.label}
+                    {skipped ? "（已跳过）" : ""}
+                  </span>
                   {stage?.phase === "review-style" && !stage.result.skipped ? (
                     <div className="stage-feedback">
                       <p>文风 {stage.result.score} 分：{stage.result.rationale}</p>
@@ -220,7 +244,18 @@ export function OutlineNodeCard({
           {report ? (
             <div className="write-report">
               <p className={report.passed ? "report-verdict pass" : "report-verdict fail"}>
-                {report.passed ? "✅ 已达标" : "⚠️ 未达标"}（{reportSummary(report)}）
+                {report.passed ? (
+                  <>
+                    <CircleCheck className="ic" aria-hidden />
+                    已达标
+                  </>
+                ) : (
+                  <>
+                    <TriangleAlert className="ic" aria-hidden />
+                    未达标
+                  </>
+                )}
+                （{reportSummary(report)}）
               </p>
               {reportIssues.length > 0 ? (
                 <details>
@@ -246,7 +281,8 @@ export function OutlineNodeCard({
             title={legacy ? "旧数据未入库幕梗概/关键情节点，无法规划章节" : undefined}
             onClick={onPlanChapters}
           >
-            📑 规划本幕章节
+            <ListOrdered className="ic" aria-hidden />
+            规划本幕章节
           </button>
         </div>
       ) : null}
@@ -264,7 +300,8 @@ export function OutlineNodeCard({
             }
             onClick={onWriteChapter}
           >
-            {writing ? "✍️ 正文生成中…" : "✍️ 生成本章正文"}
+            <PenLine className="ic" aria-hidden />
+            {writing ? "正文生成中…" : "生成本章正文"}
           </button>
         </div>
       ) : null}
@@ -275,7 +312,8 @@ export function OutlineNodeCard({
             title={writing ? "正文生成中…" : "重新生成并覆盖现有正文（会先弹出确认）"}
             onClick={onRegenerateChapter}
           >
-            {writing ? "🔄 重新生成中…" : "🔄 重新生成"}
+            <RefreshCw className="ic" aria-hidden />
+            {writing ? "重新生成中…" : "重新生成"}
           </button>
         </div>
       ) : null}

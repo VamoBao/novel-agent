@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { BookOpen, Menu, Play, Plus, Settings } from "lucide-react";
 import type {
   CharacterEntry,
   NovelDetail,
@@ -53,7 +54,7 @@ export function App() {
   const [outlineRegen, setOutlineRegen] = useState<OutlineRegenTarget | null>(null);
   /** 设置弹窗（非 null 时渲染 SettingsDialog：外观 / 两族模型 / 写作偏好默认） */
   const [settingsOpen, setSettingsOpen] = useState(false);
-  /** 写作偏好弹窗目标（书库右键「📏 写作偏好」，非 null 时渲染 WritingPrefsDialog） */
+  /** 写作偏好弹窗目标（书库右键「写作偏好」，非 null 时渲染 WritingPrefsDialog） */
   const [writingPrefs, setWritingPrefs] = useState<{ novelId: string; novelName: string } | null>(null);
 
   /** null = 列表加载中 */
@@ -364,16 +365,20 @@ export function App() {
             onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
             title={sidebarCollapsed ? "展开小说列表" : "折叠小说列表"}
           >
-            ☰
+            <Menu className="ic-btn" aria-hidden />
           </button>
-          <h1>📖 novel-agent</h1>
+          <h1>
+            <BookOpen className="ic" aria-hidden />
+            novel-agent
+          </h1>
         </div>
         <div className="header-actions">
           <button className="icon-btn" onClick={() => setSettingsOpen(true)} title="设置">
-            ⚙️
+            <Settings className="ic-btn" aria-hidden />
           </button>
           <button className="primary" onClick={() => setCreating(true)}>
-            ＋ 新建小说
+            <Plus className="ic" aria-hidden />
+            新建小说
           </button>
         </div>
       </header>
@@ -408,7 +413,8 @@ export function App() {
                     : "继续大纲重生成";
                 return (
                   <button key={run.id} className="tree-node" onClick={() => setResumeRunId(run.id)}>
-                    ▶ {label}
+                    <Play className="ic" aria-hidden />
+                    {label}
                   </button>
                 );
               })}

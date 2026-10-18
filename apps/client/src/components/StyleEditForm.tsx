@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trash2 } from "lucide-react";
 import type { StyleReferenceEntry } from "@novel/shared";
 
 /** 内容软上限：防误粘整本书撑爆写作 prompt（schema 层不设 max，历史数据与大样本不受影响） */
@@ -19,7 +20,7 @@ interface StyleEditFormProps {
 /**
  * 参考文风编辑表单（新建 / 编辑共用）：名字 + 内容 + 启用开关三项，
  * 名字与内容必填、内容软上限 20000 字符（超限禁提交并提示当前字数）；
- * 提交经 query CLI 直写库；编辑态附「🗑 删除」（confirm 确认）；
+ * 提交经 query CLI 直写库；编辑态附「删除」（confirm 确认）；
  * 取消零副作用。
  */
 export function StyleEditForm({ novelId, entry, onSubmitted, onDeleted, onCancel }: StyleEditFormProps) {
@@ -145,7 +146,8 @@ export function StyleEditForm({ novelId, entry, onSubmitted, onDeleted, onCancel
             title="删除该参考文风（删除后不可恢复）"
             onClick={remove}
           >
-            🗑 删除
+            <Trash2 className="ic" aria-hidden />
+            删除
           </button>
         ) : null}
       </div>

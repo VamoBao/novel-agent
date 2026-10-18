@@ -91,14 +91,14 @@ describe("CharacterMigrationPanel 迁移清单", () => {
     const html = render([migration({ migrateField: "basicInfo.name", oldValue: "林恒", newValue: "陆隐" })]);
     expect(html).toContain("林恒 → 陆隐");
     expect(html).toContain("姓名为固定项");
-    expect(html).not.toContain("✏️ 编辑");
-    expect(html).not.toContain("✅ 确认生效");
+    expect(html).not.toContain("lucide-pencil");
+    expect(html).not.toContain("确认生效");
     expect(html).not.toContain("复制为新草案");
-    expect(html).toContain("🗑 取消");
+    expect(html).toContain("lucide-trash-2");
   });
   test("空清单：给出占位提示与新增入口", () => {
     const html = render([]);
-    expect(html).toContain("🧬 角色迁移（0）");
+    expect(html).toContain("角色迁移（0）");
     expect(html).toContain("暂无迁移");
     expect(html).toContain("新增迁移");
   });
@@ -111,25 +111,25 @@ describe("CharacterMigrationPanel 迁移清单", () => {
     expect(html).toContain("大纲 v1");
     expect(html).toContain("诱因：经历背叛");
     expect(html).toContain("过渡：逐渐收敛外放");
-    expect(html).toContain("✏️ 编辑");
-    expect(html).toContain("✅ 确认生效");
-    expect(html).toContain("🗑 取消");
+    expect(html).toContain("lucide-pencil");
+    expect(html).toContain("确认生效");
+    expect(html).toContain("lucide-trash-2");
     expect(html).not.toContain("复制为新草案");
   });
 
   test("已确认行：无确认入口，附编辑·取消·复制为新草案", () => {
     const html = render([migration({ status: "confirmed", revision: 2 })]);
     expect(html).toContain("（已确认 · 修订 v2）");
-    expect(html).not.toContain("✅ 确认生效");
-    expect(html).toContain("⧉ 复制为新草案");
+    expect(html).not.toContain("确认生效");
+    expect(html).toContain("复制为新草案");
   });
 
   test("已取消行：只提供复制为新草案（归档方案重新绑定入口）", () => {
     const html = render([migration({ status: "cancelled", outlineVersion: 1, startChapterId: null })]);
     expect(html).toContain("（已取消 · 修订 v1）");
-    expect(html).not.toContain("🗑 取消");
-    expect(html).not.toContain("✅ 确认生效");
-    expect(html).toContain("⧉ 复制为新草案");
+    expect(html).not.toContain("lucide-trash-2");
+    expect(html).not.toContain("确认生效");
+    expect(html).toContain("复制为新草案");
     expect(html).toContain("章节：— ~ （开放）");
   });
 

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CircleCheck, Copy, Dna, Pencil, Plus, Save, Trash2 } from "lucide-react";
 import {
   CHARACTER_MIGRATION_FIELD_PATHS,
   CHARACTER_FIELD_SPECS,
@@ -156,7 +157,19 @@ function MigrationForm({
 
   return (
     <section className="character-form migration-form">
-      <h3>{entry ? `✏️ 编辑迁移（序号 ${entry.sequence} · 修订 v${entry.revision}）` : "🧬 新增角色迁移"}</h3>
+      <h3>
+        {entry ? (
+          <>
+            <Pencil className="ic" aria-hidden />
+            编辑迁移（序号 {entry.sequence} · 修订 v{entry.revision}）
+          </>
+        ) : (
+          <>
+            <Dna className="ic" aria-hidden />
+            新增角色迁移
+          </>
+        )}
+      </h3>
       <div className="form-fields">
         <div className="field">
           <label>变化字段</label>
@@ -256,11 +269,19 @@ function MigrationForm({
       {error ? <p className="form-error">{error}</p> : null}
       <div className="form-actions">
         <button className={entry?.status === "confirmed" ? "primary" : undefined} disabled={busy} onClick={() => run("save")}>
-          {busy ? "提交中…" : entry?.status === "confirmed" ? "💾 保存修改" : "💾 保存草案"}
+          {busy ? (
+            "提交中…"
+          ) : (
+            <>
+              <Save className="ic" aria-hidden />
+              {entry?.status === "confirmed" ? "保存修改" : "保存草案"}
+            </>
+          )}
         </button>
         {entry?.status !== "confirmed" ? (
           <button className="primary" disabled={busy} onClick={() => run("confirm")}>
-            ✅ 确认生效
+            <CircleCheck className="ic" aria-hidden />
+            确认生效
           </button>
         ) : null}
         <button disabled={busy} onClick={onCancel}>
@@ -342,9 +363,12 @@ export function CharacterMigrationPanel({
   return (
     <section className="viewcard migration-panel">
       <div className="migration-head">
-        <p className="card-label">🧬 角色迁移（{migrations.length}）</p>
+        <p className="card-label">
+          <Dna className="ic" aria-hidden />
+          角色迁移（{migrations.length}）
+        </p>
         <button className="tree-group-btn" title="新增迁移" onClick={() => setEditing({ mode: "new" })}>
-          ＋
+          <Plus className="ic-btn" aria-hidden />
         </button>
       </div>
       {rowError ? <p className="form-error">{rowError}</p> : null}
@@ -379,7 +403,8 @@ export function CharacterMigrationPanel({
                       disabled={busyId === migration.id}
                       onClick={() => setEditing({ mode: "edit", entry: migration })}
                     >
-                      ✏️ 编辑
+                      <Pencil className="ic" aria-hidden />
+                      编辑
                     </button>
                     <button
                       className="primary"
@@ -388,7 +413,8 @@ export function CharacterMigrationPanel({
                         act(migration.id, window.agent.confirmMigration(novelId, migration.id))
                       }
                     >
-                      ✅ 确认生效
+                      <CircleCheck className="ic" aria-hidden />
+                      确认生效
                     </button>
                   </>
                 ) : null}
@@ -397,7 +423,8 @@ export function CharacterMigrationPanel({
                     disabled={busyId === migration.id}
                     onClick={() => setEditing({ mode: "edit", entry: migration })}
                   >
-                    ✏️ 编辑
+                    <Pencil className="ic" aria-hidden />
+                    编辑
                   </button>
                 ) : null}
                 {migration.status !== "cancelled" ? (
@@ -407,7 +434,8 @@ export function CharacterMigrationPanel({
                       act(migration.id, window.agent.cancelMigration(novelId, migration.id))
                     }
                   >
-                    🗑 取消
+                    <Trash2 className="ic" aria-hidden />
+                    取消
                   </button>
                 ) : null}
                 {migration.status !== "draft" && migration.migrateField !== "basicInfo.name" ? (
@@ -418,7 +446,8 @@ export function CharacterMigrationPanel({
                       setEditing({ mode: "new", initial: copyAsDraft(migration) })
                     }
                   >
-                    ⧉ 复制为新草案
+                    <Copy className="ic" aria-hidden />
+                    复制为新草案
                   </button>
                 ) : null}
               </div>

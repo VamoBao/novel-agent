@@ -21,7 +21,7 @@ const LABELS: Record<Stage, string> = {
   chapter: "章节",
 };
 
-/** 七阶段进度条：已过 ✓、当前高亮、未到灰 */
+/** 七阶段进度条：已过打勾、当前高亮、未到灰 */
 export function StageBar({ current }: { current: Stage | null }) {
   return (
     <ol className="stagebar">

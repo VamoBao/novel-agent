@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PenLine } from "lucide-react";
 import type { AgentMessage, Ask } from "@novel/shared";
 import { ViewCard } from "./ViewCard";
 
@@ -156,7 +157,8 @@ function CustomOption({ onSubmit }: { onSubmit: (value: string) => void }) {
   if (!open) {
     return (
       <button className="ghost" onClick={() => setOpen(true)}>
-        ✏️ 自定义输入
+        <PenLine className="ic" aria-hidden />
+        自定义输入
       </button>
     );
   }

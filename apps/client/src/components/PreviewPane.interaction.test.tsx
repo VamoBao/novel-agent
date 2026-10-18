@@ -54,6 +54,6 @@ test("生成进度使用协议中的会话阈值，并在后续消息中保留",
   expect(stderr).toBe("");
   expect(exit).toBe(0);
   const result = JSON.parse(stdout);
-  expect(result.styleStep).toContain("⚠ 文风校验");
+  expect(result.styleStep).toContain("文风校验");
   expect(result.styleStep).toContain("调整叙述节奏");
 });

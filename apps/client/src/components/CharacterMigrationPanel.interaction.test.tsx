@@ -87,6 +87,13 @@ async function click(label: string) {
   await act(async () => { button!.click(); });
 }
 
+/** 面板头部「新增迁移」入口为纯图标按钮（Lucide Plus），按 title 定位 */
+async function clickAdd() {
+  const button = [...dom!.document.querySelectorAll("button")].find((node) => node.title === "新增迁移");
+  expect(button).toBeDefined();
+  await act(async () => { button!.click(); });
+}
+
 async function submitPrimary() {
   const button = dom!.document.querySelector<DomButton>(".migration-form button.primary");
   expect(button).not.toBeNull();
@@ -96,7 +103,7 @@ async function submitPrimary() {
 describe("角色迁移表单交互与真实数据库副作用", () => {
   test("新增迁移的实际字段下拉不提供姓名，其他字段仍可选择", async () => {
     const f = await fixture();
-    await click("＋");
+    await clickAdd();
     const select = dom!.document.querySelector<DomSelect>(".migration-form select")!;
     const values = [...select.options].map(option => option.value);
     expect(values).not.toContain("basicInfo.name");
@@ -138,7 +145,7 @@ describe("角色迁移表单交互与真实数据库副作用", () => {
 
   test("新增空目标值被客户端拦截（可选字段同样必填）：零请求零写入", async () => {
     const f = await fixture();
-    await click("＋");
+    await clickAdd();
     await submitPrimary();
     expect(dom!.document.querySelector(".form-error")?.textContent).toContain("目标值不能为空");
     expect(f.store.listMigrations(novelId)).toHaveLength(1);
