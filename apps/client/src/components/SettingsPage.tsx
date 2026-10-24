@@ -60,7 +60,7 @@ const CATEGORIES: { id: SettingsCategory; label: string; icon: LucideIcon }[] = 
   { id: "appearance", label: "外观", icon: Palette },
 ];
 
-/** 表单态：主题 + 两族模型各四字段（provider + Key + 模型名 + Base URL）+ 写作偏好三字段
+/** 表单态：主题 + 三族模型各四字段（provider + Key + 模型名 + Base URL）+ 写作偏好三字段
  *  （空串 = 未设置）+ 产物输出目录（空串 = 场景默认目录） */
 interface FormState {
   theme: ThemeSetting;
@@ -72,18 +72,22 @@ interface FormState {
   writingModelName: string;
   writingModelApiKey: string;
   writingModelBaseUrl: string;
+  reviewProvider: ModelProvider;
+  reviewModelName: string;
+  reviewModelApiKey: string;
+  reviewModelBaseUrl: string;
   chapterLengthMin: string;
   chapterLengthMax: string;
   stylePassScore: string;
   outputDir: string;
 }
 
-/** 两族模型的 provider 字段（下拉框选中态 / 设置文件原值 / 用户是否编辑过连接字段） */
-type ProviderField = "agent" | "writing";
+/** 三族模型的 provider 字段（下拉框选中态 / 设置文件原值 / 用户是否编辑过连接字段） */
+type ProviderField = "agent" | "writing" | "review";
 
 const EMPTY_FORM: FormState = {
   theme: "system",
-  // 载入设置前的兜底选择与「全新配置」的生效值一致（Agent 落 DeepSeek、独立写作落 OpenAI）
+  // 载入设置前的兜底选择与「全新配置」的生效值一致（Agent 落 DeepSeek、独立写作 / 校审落 OpenAI）
   agentProvider: "deepseek",
   agentApiKey: "",
   agentModelName: "",
@@ -92,10 +96,37 @@ const EMPTY_FORM: FormState = {
   writingModelName: "",
   writingModelApiKey: "",
   writingModelBaseUrl: "",
+  reviewProvider: "openai",
+  reviewModelName: "",
+  reviewModelApiKey: "",
+  reviewModelBaseUrl: "",
   chapterLengthMin: "",
   chapterLengthMax: "",
   stylePassScore: "",
   outputDir: "",
+};
+
+/** 连接字段 → 所属模型组：编辑任一连接字段即固化该组当前显示的接口类型 */
+const MODEL_GROUP_FIELDS: Partial<Record<keyof FormState, ProviderField>> = {
+  agentProvider: "agent",
+  agentApiKey: "agent",
+  agentModelName: "agent",
+  agentBaseUrl: "agent",
+  writingProvider: "writing",
+  writingModelName: "writing",
+  writingModelApiKey: "writing",
+  writingModelBaseUrl: "writing",
+  reviewProvider: "review",
+  reviewModelName: "review",
+  reviewModelApiKey: "review",
+  reviewModelBaseUrl: "review",
+};
+
+/** 各模型组的 provider 下拉框选中态键（三族共用渲染） */
+const PROVIDER_FORM_KEYS: Record<ProviderField, keyof FormState> = {
+  agent: "agentProvider",
+  writing: "writingProvider",
+  review: "reviewProvider",
 };
 
 interface SettingsPageProps {
@@ -108,8 +139,10 @@ interface SettingsPageProps {
  * + 右内容区具体设置项——内容纵向铺开，不受弹窗高度局限。分类仅决定渲染哪组，
  * 表单态跨分类共享、右栏底部一次保存全部（对齐原设置弹窗语义）。
  *
- * 模型设置：Agent 会话模型与写作模型两组——各含**接口类型 provider**（openai /
- * deepseek / claude，决定调用哪家官方 SDK 与协议）、API Key、模型名与 Base URL；
+ * 模型设置：Agent 会话模型、写作模型与校审模型三组——各含**接口类型 provider**
+ * （openai / deepseek / claude，决定调用哪家官方 SDK 与协议）、API Key、模型名与
+ * Base URL（写作 / 校审两组三项需同时配置才启用独立模型，留空回落 Agent 模型；
+ * 校审为配置先行——当前版本审校仍用 Agent 模型）；
  * 写作偏好：章节篇幅范围与文风合格线的系统级默认（留空 = 内置默认 2000~3000 字 /
  * 80 分；单本小说可在书库右键「写作偏好」单独覆盖，优先级更高）+ 产物输出目录；
  * 外观：主题三选（保存即生效）。Key 输入用 password 型防旁窥。
@@ -126,10 +159,10 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   /** 设置文件里的 provider 原值（空串 = 历史未设置）：未编辑该组模型连接时按原值保存，
    *  避免把「回显出来的生效值」固化进设置文件、遮蔽 `.env` / 继承环境里的 provider */
   const [storedProvider, setStoredProvider] = useState<Record<ProviderField, ModelProvider | "">>({
-    agent: "", writing: "",
+    agent: "", writing: "", review: "",
   });
   const [modelTouched, setModelTouched] = useState<Record<ProviderField, boolean>>({
-    agent: false, writing: false,
+    agent: false, writing: false, review: false,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -147,7 +180,11 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       .getSettings()
       .then(({ settings, effectiveProviders, defaultOutputDir: fallback }) => {
         if (cancelled) return;
-        setStoredProvider({ agent: settings.agentModel.provider, writing: settings.writingModel.provider });
+        setStoredProvider({
+          agent: settings.agentModel.provider,
+          writing: settings.writingModel.provider,
+          review: settings.reviewModel.provider,
+        });
         setDefaultOutputDir(fallback);
         setForm({
           theme: settings.theme,
@@ -160,6 +197,10 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           writingModelName: settings.writingModel.modelName,
           writingModelApiKey: settings.writingModel.apiKey,
           writingModelBaseUrl: settings.writingModel.baseUrl,
+          reviewProvider: effectiveProviders.review,
+          reviewModelName: settings.reviewModel.modelName,
+          reviewModelApiKey: settings.reviewModel.apiKey,
+          reviewModelBaseUrl: settings.reviewModel.baseUrl,
           chapterLengthMin: settings.writing.chapterLengthMin?.toString() ?? "",
           chapterLengthMax: settings.writing.chapterLengthMax?.toString() ?? "",
           stylePassScore: settings.writing.stylePassScore?.toString() ?? "",
@@ -189,11 +230,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const setField = (field: keyof FormState, value: string): void => {
     setForm((prev) => ({ ...prev, [field]: value }));
     // 编辑连接字段表示正在配置该模型，必须保留界面显示的接口类型。
-    const group = field === "agentProvider" || field === "agentApiKey" || field === "agentModelName" || field === "agentBaseUrl"
-      ? "agent"
-      : field === "writingProvider" || field === "writingModelName" || field === "writingModelApiKey" || field === "writingModelBaseUrl"
-        ? "writing"
-        : null;
+    const group = MODEL_GROUP_FIELDS[field] ?? null;
     if (group) setModelTouched((prev) => ({ ...prev, [group]: true }));
   };
 
@@ -223,6 +260,12 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         modelName: form.writingModelName,
         apiKey: form.writingModelApiKey,
         baseUrl: form.writingModelBaseUrl,
+      },
+      reviewModel: {
+        provider: modelTouched.review ? form.reviewProvider : storedProvider.review,
+        modelName: form.reviewModelName,
+        apiKey: form.reviewModelApiKey,
+        baseUrl: form.reviewModelBaseUrl,
       },
       writing: parsed.prefs,
       outputDir: form.outputDir,
@@ -256,16 +299,16 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       .finally(() => setPicking(false));
   };
 
-  /** provider 下拉框（两族模型共用；option 键序即 MODEL_PROVIDERS 顺序）；
+  /** provider 下拉框（三族模型共用；option 键序即 MODEL_PROVIDERS 顺序）；
    *  下拉框与连接字段的改动均记为显式选择，其他设置不固化推断值 */
   const renderProviderSelect = (field: ProviderField): ReactElement => (
     <div className="field">
       <label>接口类型</label>
       <select
-        value={field === "agent" ? form.agentProvider : form.writingProvider}
+        value={form[PROVIDER_FORM_KEYS[field]]}
         disabled={saving}
         onChange={(e) => {
-          setField(field === "agent" ? "agentProvider" : "writingProvider", e.target.value as ModelProvider);
+          setField(PROVIDER_FORM_KEYS[field], e.target.value);
         }}
       >
         {PROVIDER_OPTIONS.map((option) => (
@@ -351,6 +394,46 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       </div>
       <p className="settings-hint">
         三项需同时配置才启用独立写作模型（接口类型可与上面的 Agent 模型不同）；留空则正文生成回落 Agent 模型。
+        编辑本组连接信息会保存当前接口类型；仅修改外观或写作偏好时，继续沿用已有接口类型配置。
+      </p>
+    </div>
+  );
+
+  /** 校审模型组（模型设置分类；配置先行——当前版本审校仍用 Agent 模型） */
+  const reviewModelGroup = (
+    <div className="settings-group">
+      <p className="settings-group-label">校审模型——章节正文审校专用</p>
+      {renderProviderSelect("review")}
+      <div className="field">
+        <label>模型名</label>
+        <input
+          value={form.reviewModelName}
+          disabled={saving}
+          placeholder={PROVIDER_HINTS[form.reviewProvider].modelName}
+          onChange={(e) => setField("reviewModelName", e.target.value)}
+        />
+      </div>
+      <div className="field">
+        <label>API Key</label>
+        <input
+          type="password"
+          value={form.reviewModelApiKey}
+          disabled={saving}
+          onChange={(e) => setField("reviewModelApiKey", e.target.value)}
+        />
+      </div>
+      <div className="field">
+        <label>Base URL</label>
+        <input
+          value={form.reviewModelBaseUrl}
+          disabled={saving}
+          placeholder={PROVIDER_HINTS[form.reviewProvider].baseUrl}
+          onChange={(e) => setField("reviewModelBaseUrl", e.target.value)}
+        />
+      </div>
+      <p className="settings-hint">
+        三项需同时配置才启用独立校审模型（接口类型可与上面的 Agent / 写作模型不同）；留空则正文审校回落 Agent 模型。
+        当前版本审校流程仍使用 Agent 会话模型——本组配置先行保存，接入校审流程后生效。
         编辑本组连接信息会保存当前接口类型；仅修改外观或写作偏好时，继续沿用已有接口类型配置。
       </p>
     </div>
@@ -489,6 +572,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
                 <>
                   {agentModelGroup}
                   {writingModelGroup}
+                  {reviewModelGroup}
                 </>
               ) : null}
               {category === "writing" ? (

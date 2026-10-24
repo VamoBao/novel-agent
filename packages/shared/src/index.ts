@@ -100,6 +100,7 @@ export {
   inferModelProvider,
   resolveAgentModelProvider,
   resolveWritingModelProvider,
+  resolveReviewModelProvider,
   type ModelProvider,
 } from "./model-provider";
 export { audienceSuggestionSchema, type AudienceSuggestion } from "./audience";

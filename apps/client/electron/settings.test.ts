@@ -55,15 +55,17 @@ describe("normalizeSettings", () => {
 });
 
 describe("normalizeSettings provider（接口类型）", () => {
-  test("三合法值透传（两族模型各自独立）", () => {
+  test("三合法值透传（三族模型各自独立）", () => {
     for (const provider of ["openai", "deepseek", "claude"] as const) {
       expect(normalizeSettings({ agentModel: { provider } }).agentModel.provider).toBe(provider);
       expect(normalizeSettings({ writingModel: { provider } }).writingModel.provider).toBe(provider);
+      expect(normalizeSettings({ reviewModel: { provider } }).reviewModel.provider).toBe(provider);
     }
     const settings = normalizeSettings({
-      agentModel: { provider: "deepseek" }, writingModel: { provider: "claude" },
+      agentModel: { provider: "deepseek" }, writingModel: { provider: "claude" }, reviewModel: { provider: "openai" },
     });
-    expect([settings.agentModel.provider, settings.writingModel.provider]).toEqual(["deepseek", "claude"]);
+    expect([settings.agentModel.provider, settings.writingModel.provider, settings.reviewModel.provider])
+      .toEqual(["deepseek", "claude", "openai"]);
   });
 
   test("缺省 / 手改非法值归空串——此处不做地址推断（不遮蔽 .env / 继承环境里已配置的值）", () => {
@@ -76,6 +78,7 @@ describe("normalizeSettings provider（接口类型）", () => {
     expect(normalizeSettings({ agentModel: { provider: " claude " } }).agentModel.provider).toBe("claude");
     expect(DEFAULT_SETTINGS.agentModel.provider).toBe("");
     expect(DEFAULT_SETTINGS.writingModel.provider).toBe("");
+    expect(DEFAULT_SETTINGS.reviewModel.provider).toBe("");
   });
 
   test("写后读往返保留 provider", () => {
@@ -86,11 +89,13 @@ describe("normalizeSettings provider（接口类型）", () => {
       theme: "system",
       agentModel: { provider: "deepseek", apiKey: "sk", modelName: "deepseek-flash", baseUrl: "" },
       writingModel: { provider: "claude", modelName: "claude-sonnet-5", apiKey: "sk-w", baseUrl: "" },
+      reviewModel: { provider: "openai", modelName: "gpt-5.2", apiKey: "sk-r", baseUrl: "" },
       writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
       outputDir: "",
     });
     expect(readSettingsFile(filePath)).toEqual(saved);
     expect(readSettingsFile(filePath).writingModel.provider).toBe("claude");
+    expect(readSettingsFile(filePath).reviewModel.provider).toBe("openai");
   });
 });
 
@@ -104,6 +109,7 @@ describe("settings 文件读写", () => {
       theme: "system",
       agentModel: { provider: "", apiKey: " sk-main ", modelName: "", baseUrl: "" },
       writingModel: { provider: "", modelName: "m", apiKey: "k", baseUrl: "https://x/v1" },
+      reviewModel: { provider: "", modelName: "", apiKey: "", baseUrl: "" },
       writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
       outputDir: "",
     });
@@ -135,7 +141,7 @@ describe("resolveModelEnv 三级优先级", () => {
     expect(env.AGENT_MODEL_API_KEY).toBe("new-dotenv");
     expect(env.AGENT_MODEL_NAME).toBe("legacy-dotenv");
     expect(env.AGENT_MODEL_BASE_URL).toBe("https://dotenv/v1");
-    expect(Object.keys(env)).toHaveLength(8);
+    expect(Object.keys(env)).toHaveLength(12);
   });
 
   test("设置 Base URL 优先，空白继续向下查找", () => {
@@ -153,11 +159,12 @@ describe("resolveModelEnv 三级优先级", () => {
         theme: "system",
         agentModel: { provider: "", apiKey: "sk-settings", modelName: "", baseUrl: "" },
         writingModel: { provider: "", modelName: "", apiKey: "", baseUrl: "" },
+        reviewModel: { provider: "", modelName: "rm-settings", apiKey: "", baseUrl: "" },
         writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
         outputDir: "",
       },
-      { DEEPSEEK_API_KEY: "sk-dotenv", DEEPSEEK_MODEL_NAME: "from-dotenv", WRITING_MODEL_NAME: "wm-dotenv" },
-      { DEEPSEEK_API_KEY: "sk-inherited", WRITING_MODEL_NAME: "wm-inherited", WRITING_MODEL_API_KEY: "wm-key-inherited" },
+      { DEEPSEEK_API_KEY: "sk-dotenv", DEEPSEEK_MODEL_NAME: "from-dotenv", WRITING_MODEL_NAME: "wm-dotenv", REVIEW_MODEL_API_KEY: "rm-key-dotenv" },
+      { DEEPSEEK_API_KEY: "sk-inherited", WRITING_MODEL_NAME: "wm-inherited", WRITING_MODEL_API_KEY: "wm-key-inherited", REVIEW_MODEL_BASE_URL: "https://rm-inherited/v1" },
     );
     // 设置非空 → 胜出
     expect(env.AGENT_MODEL_API_KEY).toBe("sk-settings");
@@ -167,6 +174,10 @@ describe("resolveModelEnv 三级优先级", () => {
     expect(env.WRITING_MODEL_API_KEY).toBe("wm-key-inherited");
     // 三层均未配置 → 空串（调用方删除该键）
     expect(env.WRITING_MODEL_BASE_URL).toBe("");
+    // 校审组同款三级优先级：设置胜出、.env 胜出、三层全空
+    expect(env.REVIEW_MODEL_NAME).toBe("rm-settings");
+    expect(env.REVIEW_MODEL_API_KEY).toBe("rm-key-dotenv");
+    expect(env.REVIEW_MODEL_PROVIDER).toBe("");
   });
 
   test("空串候选视为未配置（.env 里的空行不遮蔽继承值）", () => {
@@ -188,7 +199,7 @@ describe("resolveModelEnv provider 三级优先级与旧配置迁移", () => {
     const env = resolveModelEnv(settings, {
       AGENT_MODEL_PROVIDER: "openai", WRITING_MODEL_PROVIDER: "claude",
     }, { AGENT_MODEL_PROVIDER: "deepseek" });
-    // 设置非空胜出（两族模型互不影响）
+    // 设置非空胜出（三族模型互不影响）
     expect(env.AGENT_MODEL_PROVIDER).toBe("claude");
     expect(env.WRITING_MODEL_PROVIDER).toBe("deepseek");
   });
@@ -257,6 +268,21 @@ describe("resolveEffectiveProviders（设置页回显生效接口类型）", () 
       writingModel: { provider: "claude" },
     }), {}, {}).writing).toBe("claude");
   });
+
+  test("校审模型独立解析（与写作同规则）：未配置 → OpenAI，官方地址 → DeepSeek，显式值优先", () => {
+    expect(resolveEffectiveProviders(DEFAULT_SETTINGS, {}, {}).review).toBe("openai");
+    expect(resolveEffectiveProviders(DEFAULT_SETTINGS, {
+      REVIEW_MODEL_BASE_URL: "https://api.deepseek.com/v1",
+    }, {}).review).toBe("deepseek");
+    expect(resolveEffectiveProviders(normalizeSettings({
+      reviewModel: { provider: "claude" },
+    }), {}, {}).review).toBe("claude");
+    // 三族互不影响：显式校审 provider 不改 Agent / 写作的生效值
+    const all = resolveEffectiveProviders(normalizeSettings({
+      agentModel: { provider: "deepseek" }, writingModel: { provider: "deepseek" }, reviewModel: { provider: "claude" },
+    }), {}, {});
+    expect([all.agent, all.writing, all.review]).toEqual(["deepseek", "deepseek", "claude"]);
+  });
 });
 
 describe("normalizeSettings theme", () => {
@@ -280,7 +306,8 @@ describe("normalizeSettings theme", () => {
     writeSettingsFile(filePath, {
       theme: "dark",
       agentModel: { provider: "", apiKey: "", modelName: "", baseUrl: "" },
-      writingModel: { provider: "", modelName: "", apiKey: "", baseUrl: "" },
+      writingModel: { provider: "", apiKey: "", modelName: "", baseUrl: "" },
+      reviewModel: { provider: "", apiKey: "", modelName: "", baseUrl: "" },
       writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
       outputDir: "",
     });
@@ -312,7 +339,8 @@ describe("normalizeSettings writing（写作偏好系统级默认）", () => {
     const saved = writeSettingsFile(filePath, {
       theme: "system",
       agentModel: { provider: "", apiKey: "", modelName: "", baseUrl: "" },
-      writingModel: { provider: "", modelName: "", apiKey: "", baseUrl: "" },
+      writingModel: { provider: "", apiKey: "", modelName: "", baseUrl: "" },
+      reviewModel: { provider: "", apiKey: "", modelName: "", baseUrl: "" },
       writing: { chapterLengthMin: 2500, chapterLengthMax: 4000, stylePassScore: 90 },
       outputDir: "",
     });

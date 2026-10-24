@@ -92,7 +92,7 @@ contextBridge.exposeInMainWorld("agent", {
   deleteStyle: (styleId: string): Promise<{ deleted: string }> =>
     ipcRenderer.invoke("library:deleteStyle", styleId),
   /** 模型设置读写（设置页）：明文 JSON 于 userData（优先级 设置 > .env > 继承环境变量）；
-   *  读取一并回传两族模型生效的接口类型（弹窗回显真实生效值）与产物目录的场景默认值 */
+   *  读取一并回传三族模型生效的接口类型（弹窗回显真实生效值）与产物目录的场景默认值 */
   getSettings: (): Promise<{
     settings: AppSettings;
     filePath: string;

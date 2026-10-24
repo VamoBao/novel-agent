@@ -8,6 +8,7 @@ import {
   parseModelProvider,
   resolveAgentModelProvider,
   resolveWritingModelProvider,
+  resolveReviewModelProvider,
 } from "./model-provider";
 
 describe("模型 provider 枚举", () => {
@@ -97,6 +98,13 @@ describe("生效 provider 解析（显式优先 + 按地址迁移）", () => {
     expect(resolveWritingModelProvider("", "")).toBe("openai");
     expect(resolveWritingModelProvider(undefined, "https://api.example.com/v1")).toBe("openai");
     expect(resolveWritingModelProvider("", "https://api.deepseek.com")).toBe("deepseek");
+  });
+
+  test("校审：与写作同规则（显式值优先，地址留空 / 非 DeepSeek 官方地址落 OpenAI）", () => {
+    expect(resolveReviewModelProvider("claude", "https://api.deepseek.com")).toBe("claude");
+    expect(resolveReviewModelProvider("", "")).toBe("openai");
+    expect(resolveReviewModelProvider(undefined, "https://api.example.com/v1")).toBe("openai");
+    expect(resolveReviewModelProvider("", "https://api.deepseek.com")).toBe("deepseek");
   });
 
   test("非法显式值不参与解析（按地址迁移，报错交调用方）", () => {

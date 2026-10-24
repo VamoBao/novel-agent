@@ -54,8 +54,8 @@ export function resolveWritingModelConfig(
 
 /**
  * 写作模型（章节正文创作专用）：Agent 负责世界观/角色/大纲等结构化编排，
- * 正文写作换用更长于文笔的模型时只需改配置，不动代码——两族模型可分别
- * 选择接口类型（如 Agent 用 DeepSeek、写作模型用 Claude）。
+ * 正文写作换用更长于文笔的模型时只需改配置，不动代码——三族模型（Agent /
+ * 写作 / 校审）可分别选择接口类型（如 Agent 用 DeepSeek、写作模型用 Claude）。
  *
  * 三个环境变量（Bun 启动时自动加载 `.env`，参考 `.env.example`）：
  * - `WRITING_MODEL_NAME`：模型名（按所接服务填写，如 gpt-5.2 / qwen3-max）

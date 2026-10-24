@@ -68,12 +68,13 @@ test("设置页结构：左导航三项、默认模型设置、切换渲染对�
     expect(exit).toBe(0);
     expect(JSON.parse(stdout)).toEqual({
       nav: ["模型设置", "写作偏好", "外观"],
-      // 默认分类：模型设置（Agent 会话模型 + 写作模型两组）
+      // 默认分类：模型设置（Agent 会话模型 + 写作模型 + 校审模型三组）
       initial: {
         active: "模型设置",
         groups: [
           "Agent 会话模型——世界观 / 角色 / 大纲 / 章节规划 / 正文校验",
           "写作模型——章节正文生成专用",
+          "校审模型——章节正文审校专用",
         ],
       },
       // 写作偏好：篇幅 / 合格线 + 产物输出目录（正文文件去向与写作直接相关）
@@ -92,13 +93,14 @@ test("设置页结构：左导航三项、默认模型设置、切换渲染对�
   }
 });
 
-test.each(["agent", "writing"])("%s 只编辑连接字段后仍使用界面显示的 DeepSeek（不触碰下拉框）", async (group) => {
+test.each(["agent", "writing", "review"])("%s 只编辑连接字段后仍使用界面显示的 DeepSeek（不触碰下拉框）", async (group) => {
   const dir = mkdtempSync(join(tmpdir(), "novel-settings-provider-edit-"));
   const filePath = join(dir, "settings.json");
   try {
-    // 写作组的历史地址使其初始显示 DeepSeek；Agent 空配置也默认显示 DeepSeek。
+    // 写作 / 校审组的历史地址使其初始显示 DeepSeek；Agent 空配置也默认显示 DeepSeek。
     writeSettingsFile(filePath, normalizeSettings({
       writingModel: { baseUrl: "https://api.deepseek.com" },
+      reviewModel: { baseUrl: "https://api.deepseek.com" },
     }));
     const probe = `
       import { Window } from 'happy-dom';
@@ -121,11 +123,12 @@ test.each(["agent", "writing"])("%s 只编辑连接字段后仍使用界面显�
       const root = createRoot(container);
       await act(async () => root.render(createElement(SettingsPage, { onClose: () => {} })));
       const group = process.env.SETTINGS_TEST_GROUP;
-      // 默认分类即模型设置：组序 [0] = Agent 会话模型、[1] = 写作模型
-      const target = dom.document.querySelectorAll('.settings-group')[group === 'agent' ? 0 : 1];
+      // 默认分类即模型设置：组序 [0] = Agent 会话模型、[1] = 写作模型、[2] = 校审模型
+      const target = dom.document.querySelectorAll('.settings-group')[group === 'agent' ? 0 : group === 'writing' ? 1 : 2];
       const select = target.querySelector('select');
       const shown = select.value;
       const inputs = target.querySelectorAll('input');
+      // Agent 组输入序 [Key, 模型名, Base URL]；写作 / 校审组 [模型名, Key, Base URL]
       const values = group === 'agent'
         ? ['test-key', 'deepseek-flash', 'https://deepseek-proxy.example/v1']
         : ['deepseek-flash', 'test-key', 'https://deepseek-proxy.example/v1'];
@@ -142,7 +145,7 @@ test.each(["agent", "writing"])("%s 只编辑连接字段后仍使用界面显�
       const env = resolveModelEnv(saved, {}, {});
       process.stdout.write(JSON.stringify({
         shown, afterEdit, effective: resolveEffectiveProviders(saved, {}, {})[group],
-        injected: env[group === 'agent' ? 'AGENT_MODEL_PROVIDER' : 'WRITING_MODEL_PROVIDER'],
+        injected: env[group === 'agent' ? 'AGENT_MODEL_PROVIDER' : group === 'writing' ? 'WRITING_MODEL_PROVIDER' : 'REVIEW_MODEL_PROVIDER'],
       }));
       await act(async () => root.unmount());
       await dom.happyDOM.close();
@@ -161,8 +164,12 @@ test.each(["agent", "writing"])("%s 只编辑连接字段后仍使用界面显�
       shown: "deepseek", afterEdit: "deepseek", effective: "deepseek", injected: "deepseek",
     });
     const saved = readSettingsFile(filePath);
-    expect(saved[group === "agent" ? "agentModel" : "writingModel"].provider).toBe("deepseek");
-    expect(saved[group === "agent" ? "writingModel" : "agentModel"].provider).toBe("");
+    const settingsKey = group === "agent" ? "agentModel" : group === "writing" ? "writingModel" : "reviewModel";
+    const untouchedKeys = (["agentModel", "writingModel", "reviewModel"] as const).filter((key) => key !== settingsKey);
+    expect(saved[settingsKey].provider).toBe("deepseek");
+    for (const key of untouchedKeys) {
+      expect(saved[key].provider).toBe("");
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -199,7 +206,7 @@ test("Agent Base URL 从设置加载，编辑保存后重读并注入通用环�
       const root = createRoot(container);
       let closed = false;
       await act(async () => { root.render(createElement(SettingsPage, { onClose: () => { closed = true; } })); });
-      // 默认分类模型设置：组序 [0] = Agent 会话模型、[1] = 写作模型
+      // 默认分类模型设置：组序 [0] = Agent 会话模型、[1] = 写作模型、[2] = 校审模型
       const groups = dom.document.querySelectorAll('.settings-group');
       const agentGroup = groups[0];
       const inputs = agentGroup.querySelectorAll('input');
@@ -395,7 +402,7 @@ test("历史配置（无 provider，DeepSeek 官方地址）在设置页中回�
       dom.document.body.append(container);
       const root = createRoot(container);
       await act(async () => { root.render(createElement(SettingsPage, { onClose: () => {} })); });
-      // 默认分类模型设置：组序 [0] = Agent 会话模型、[1] = 写作模型
+      // 默认分类模型设置：组序 [0] = Agent 会话模型、[1] = 写作模型、[2] = 校审模型
       const groups = dom.document.querySelectorAll('.settings-group');
       const loaded = {
         provider: groups[0].querySelector('select').value,

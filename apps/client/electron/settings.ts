@@ -4,6 +4,7 @@ import {
   chapterLengthBoundSchema,
   parseModelProvider,
   resolveAgentModelProvider,
+  resolveReviewModelProvider,
   resolveWritingModelProvider,
   stylePassScoreSchema,
   type ModelProvider,
@@ -14,19 +15,21 @@ import {
  * VS Code 式**明文 JSON**（用户决策）存于 Electron userData 目录
  * （settings.json，不进仓库、不入 git）——外观主题（system / light / dark，
  * main 侧 applyTheme 设 nativeTheme.themeSource）、Agent 会话模型（Key + 模型名 +
- * Base URL + **接口类型 provider**：openai / deepseek / claude）、写作模型（同四字段，
- * 模型名 / Key / Base URL 三项需同时配置，留空回落 Agent 模型）与**写作偏好系统级
- * 默认**（章节篇幅 min/max + 文风合格线，null=未设置回落内置默认 2000~3000 / 80；
- * 单本小说可在书库右键「写作偏好」单独覆盖，优先级更高）。
+ * Base URL + **接口类型 provider**：openai / deepseek / claude）、写作模型与
+ * 校审模型（同四字段，模型名 / Key / Base URL 三项需同时配置，留空回落
+ * Agent 模型）与**写作偏好系统级默认**（章节篇幅 min/max + 文风合格线，
+ * null=未设置回落内置默认 2000~3000 / 80；单本小说可在书库右键「写作偏好」
+ * 单独覆盖，优先级更高）。校审模型为配置先行——当前版本审校流程仍用
+ * Agent 模型，接入为后续需求。
  *
  * provider 为空串表示**历史配置未设置**：agent 侧按有效地址迁移（DeepSeek 官方
- * 地址 → deepseek，其余 → openai；Agent 地址留空沿用 DeepSeek，独立写作落 OpenAI），
- * 设置页按同一规则回显生效选项。此处刻意**不按地址推断**——否则「设置里留空的
- * provider」会遮蔽 `.env` / 继承环境里已配置的值。
+ * 地址 → deepseek，其余 → openai；Agent 地址留空沿用 DeepSeek，独立写作 / 校审
+ * 落 OpenAI），设置页按同一规则回显生效选项。此处刻意**不按地址推断**——否则
+ * 「设置里留空的 provider」会遮蔽 `.env` / 继承环境里已配置的值。
  *
  * 优先级（resolveModelEnv / resolveWritingEnv）：设置文件 > 根目录 `.env` >
- * 继承的环境变量；模型解析结果仍以 `AGENT_MODEL_*` / `WRITING_MODEL_*` 注入
- * 子进程（childEnv），写作偏好以 `NOVEL_CHAPTER_LENGTH_MIN/MAX` /
+ * 继承的环境变量；模型解析结果仍以 `AGENT_MODEL_*` / `WRITING_MODEL_*` /
+ * `REVIEW_MODEL_*` 注入子进程（childEnv），写作偏好以 `NOVEL_CHAPTER_LENGTH_MIN/MAX` /
  * `NOVEL_STYLE_PASS_SCORE` 注入，providers 层（apps/agent）统一读取。
  *
  * 本模块刻意不 import electron（app.getPath 由调用方传入），保持可在
@@ -59,6 +62,8 @@ export interface AppSettings {
   agentModel: ModelSettings;
   /** 写作模型：章节正文生成专用；三项留空回落 Agent 模型 */
   writingModel: ModelSettings;
+  /** 校审模型：章节正文三段审校专用（配置先行，当前版本审校仍用 Agent 模型）；三项留空回落 Agent 模型 */
+  reviewModel: ModelSettings;
   /** 写作偏好（章节正文生成）的系统级默认；单本小说的「写作偏好」覆盖优先级更高 */
   writing: WritingPrefsSettings;
   /** 章节正文产物输出根目录；空串 = 未设置（打包态默认 userData/output、开发态默认仓库 output/） */
@@ -67,9 +72,10 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "system",
-  // provider 留空：agent 侧按有效地址迁移（全新配置的 Agent 落 DeepSeek、独立写作落 OpenAI）
+  // provider 留空：agent 侧按有效地址迁移（全新配置的 Agent 落 DeepSeek、独立写作 / 校审落 OpenAI）
   agentModel: { provider: "", apiKey: "", modelName: "", baseUrl: "" },
   writingModel: { provider: "", modelName: "", apiKey: "", baseUrl: "" },
+  reviewModel: { provider: "", modelName: "", apiKey: "", baseUrl: "" },
   writing: { chapterLengthMin: null, chapterLengthMax: null, stylePassScore: null },
   outputDir: "",
 };
@@ -137,6 +143,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
       Object.hasOwn(source, "agentModel") ? source.agentModel : source.deepseek,
     ),
     writingModel: normalizeModelGroup(source.writingModel),
+    reviewModel: normalizeModelGroup(source.reviewModel),
     writing: normalizeWritingGroup(source.writing),
     outputDir: normalizeString(source.outputDir),
   };
@@ -171,6 +178,10 @@ const MODEL_ENV_ENTRIES = [
   ["writingModel", "modelName", "WRITING_MODEL_NAME", undefined],
   ["writingModel", "apiKey", "WRITING_MODEL_API_KEY", undefined],
   ["writingModel", "baseUrl", "WRITING_MODEL_BASE_URL", undefined],
+  ["reviewModel", "provider", "REVIEW_MODEL_PROVIDER", undefined],
+  ["reviewModel", "modelName", "REVIEW_MODEL_NAME", undefined],
+  ["reviewModel", "apiKey", "REVIEW_MODEL_API_KEY", undefined],
+  ["reviewModel", "baseUrl", "REVIEW_MODEL_BASE_URL", undefined],
 ] as const;
 
 /** 从（可能是 null/undefined 的）候选值里取第一个非空串 */
@@ -185,7 +196,7 @@ function firstNonEmpty(...candidates: Array<string | undefined>): string {
 
 /**
  * 三级优先级解析为注入子进程的环境变量：设置文件 > `.env`（调用方解析的
- * 键值表）> 继承的父进程环境变量。返回恰好含八个模型变量的键值表，
+ * 键值表）> 继承的父进程环境变量。返回恰好含十二个模型变量的键值表，
  * **空串表示三层均未配置**（调用方须从子进程 env 中删除该键——空串会让
  * provider 侧「未配置」判定与默认值逻辑失真）。provider 同款逐层下探：
  * 没有显式配置 provider 的来源不遮蔽下一层已配置的值（由 agent 侧按
@@ -262,24 +273,26 @@ export type PickOutputDirResult =
   | { ok: true; dir: string }
   | { ok: false; canceled: boolean; error?: string };
 
-/** 两族模型各自最终生效的接口类型（设置页回显用——与 agent 侧同一对纯函数，所见即所用） */export interface EffectiveProviders {
+/** 三族模型各自最终生效的接口类型（设置页回显用——与 agent 侧同一对纯函数，所见即所用） */export interface EffectiveProviders {
   agent: ModelProvider;
   writing: ModelProvider;
+  review: ModelProvider;
 }
 
 /**
- * 解析两族模型**生效**的接口类型：先按三级优先级解析模型变量（与 childEnv 同一
+ * 解析三族模型**生效**的接口类型：先按三级优先级解析模型变量（与 childEnv 同一
  * 函数），再交 shared 的生效 provider 纯函数推断——因此弹窗回显的是 agent 子进程
  * 真正会用的接口类型（可能来自 `.env` / 继承环境变量），而不只是设置文件里的值。
  */
 export function resolveEffectiveProviders(
   settings: AppSettings,
   dotenv: Readonly<Record<string, string>>,
-  inherited: Readonly<NodeJS.ProcessEnv>,
+  inherited: NodeJS.ProcessEnv,
 ): EffectiveProviders {
   const env = resolveModelEnv(settings, dotenv, inherited);
   return {
     agent: resolveAgentModelProvider(env.AGENT_MODEL_PROVIDER, env.AGENT_MODEL_BASE_URL ?? ""),
     writing: resolveWritingModelProvider(env.WRITING_MODEL_PROVIDER, env.WRITING_MODEL_BASE_URL ?? ""),
+    review: resolveReviewModelProvider(env.REVIEW_MODEL_PROVIDER, env.REVIEW_MODEL_BASE_URL ?? ""),
   };
 }

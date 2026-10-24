@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 /**
- * 模型 provider（接口类型）契约：Agent 会话模型与独立写作模型各自**显式选择**
- * 接口类型，agent 侧据此调用对应官方 SDK（OpenAI Chat Completions / DeepSeek /
- * Anthropic Messages），而不是统一走通用兼容接口。
+ * 模型 provider（接口类型）契约：Agent 会话模型与独立写作 / 校审模型各自
+ * **显式选择**接口类型，agent 侧据此调用对应官方 SDK（OpenAI Chat Completions /
+ * DeepSeek / Anthropic Messages），而不是统一走通用兼容接口。
  *
  * 历史配置（没有 provider 字段的 settings.json 与环境变量）按**有效地址**迁移：
  * DeepSeek 官方地址使用 DeepSeek，其余现有 OpenAI 兼容地址使用 OpenAI。
@@ -52,5 +52,14 @@ export function resolveAgentModelProvider(provider: unknown, baseUrl: string): M
  * DeepSeek 官方地址落 OpenAI（独立写作默认 OpenAI）。
  */
 export function resolveWritingModelProvider(provider: unknown, baseUrl: string): ModelProvider {
+  return parseModelProvider(provider) ?? inferModelProvider(baseUrl);
+}
+
+/**
+ * 校审模型的生效 provider：与写作模型同规则（显式值优先，缺省按有效地址迁移，
+ * 地址留空落 OpenAI）。地址留空的默认只在「未配置」时影响设置页回显——校审
+ * 模型启用要求模型名 / Key / Base URL 三项齐全，启用态地址必然非空。
+ */
+export function resolveReviewModelProvider(provider: unknown, baseUrl: string): ModelProvider {
   return parseModelProvider(provider) ?? inferModelProvider(baseUrl);
 }
