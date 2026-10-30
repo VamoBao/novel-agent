@@ -178,56 +178,131 @@ function ForeshadowPreview({
           编辑伏笔
         </button>
       </div>
-      <section className="viewcard">
+      <section className="viewcard fs-card">
         <p className="card-label">伏笔 · {actName}</p>
-        <p className="outline-summary">表面行为：{entry.surfaceAction}</p>
-        <p className="outline-summary">隐藏真相：{entry.hiddenTruth}</p>
-        <p className="outline-summary">
-          注意度：{entry.attentionLevel} · 回收状态：{recoveryLabel(entry.recoveryStatus)}
-        </p>
-        <p className="outline-summary">登场章：{appearName ?? "（未绑定）"}</p>
-        <p className="outline-summary">
-          回收章：{recoverNames.length > 0 ? recoverNames.join("、") : "（未规划）"}
-        </p>
-        {recoveryPlan.map((recovery) => (
-          <p key={recovery.actId} className="outline-summary">
-            回收幕：{recovery.actName}：{recovery.chapterNames.length > 0
-              ? `已绑定回收章：${recovery.chapterNames.join("、")}`
-              : "待细化（尚未绑定回收章）"}
-          </p>
-        ))}
-        <p className="outline-summary">
-          服务角色：
-          {(entry.characterIds ?? []).map((cid) => nameById.get(cid) ?? cid).join("、") || "（无）"}
-        </p>
-        {entry.plantingMethod ? (
-          <p className="outline-summary">埋线方式：{entry.plantingMethod}</p>
+        {/* 核心两块分区展示：表面行为 / 隐藏真相（内幕用强调底 + 左色条区分） */}
+        <div className="fs-pair">
+          <div className="fs-block">
+            <p className="fs-block-label">表面行为</p>
+            <p className="fs-block-text">{entry.surfaceAction}</p>
+          </div>
+          <div className="fs-block fs-truth">
+            <p className="fs-block-label">隐藏真相</p>
+            <p className="fs-block-text">{entry.hiddenTruth}</p>
+          </div>
+        </div>
+        <dl className="fs-meta">
+          <div className="fs-meta-item">
+            <dt>注意度</dt>
+            <dd>
+              {entry.attentionLevel} / 10（1 最易发现，10 最难发现）
+            </dd>
+          </div>
+          <div className="fs-meta-item">
+            <dt>回收状态</dt>
+            <dd>
+              <span className={`fs-status ${entry.recoveryStatus}`}>
+                {recoveryLabel(entry.recoveryStatus)}
+              </span>
+            </dd>
+          </div>
+          <div className="fs-meta-item">
+            <dt>登场章</dt>
+            <dd>{appearName ?? <span className="fs-empty">（未绑定）</span>}</dd>
+          </div>
+          <div className="fs-meta-item">
+            <dt>回收章</dt>
+            <dd>
+              {recoverNames.length > 0 ? (
+                recoverNames.join("、")
+              ) : (
+                <span className="fs-empty">（未规划）</span>
+              )}
+            </dd>
+          </div>
+          <div className="fs-meta-item">
+            <dt>服务角色</dt>
+            <dd>
+              {(entry.characterIds ?? []).map((cid) => nameById.get(cid) ?? cid).join("、") || (
+                <span className="fs-empty">（无）</span>
+              )}
+            </dd>
+          </div>
+          {entry.plantingMethod ? (
+            <div className="fs-meta-item">
+              <dt>埋线方式</dt>
+              <dd>{entry.plantingMethod}</dd>
+            </div>
+          ) : null}
+          {entry.purpose ? (
+            <div className="fs-meta-item">
+              <dt>创作目的</dt>
+              <dd>{entry.purpose}</dd>
+            </div>
+          ) : null}
+        </dl>
+        {recoveryPlan.length > 0 ? (
+          <div className="fs-recovery">
+            <p className="card-label">回收计划</p>
+            <ul className="fs-recovery-list">
+              {recoveryPlan.map((recovery) => (
+                <li key={recovery.actId}>
+                  <span className="fs-recovery-act">{recovery.actName}：</span>
+                  {recovery.chapterNames.length > 0
+                    ? `已绑定回收章：${recovery.chapterNames.join("、")}`
+                    : "待细化（尚未绑定回收章）"}
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : null}
-        {entry.purpose ? <p className="outline-summary">创作目的：{entry.purpose}</p> : null}
       </section>
     </>
   );
 }
 
-/** 地点卡预览（只读，无编辑入口）：名字 + 定位 + 已设定的可选字段；父级名经 detail.locations
- *  解析（未匹配兜底原 ID）；坐标 / 图层 / 人口未设定不渲染——不展示 id（全页面去 ID 约定） */
+/** 地点卡预览（只读，无编辑入口）：名字 + 定位 + 已设定的可选字段（属性表分区展示）；
+ *  父级名经 detail.locations 解析（未匹配兜底原 ID）；坐标 / 图层 / 人口未设定不渲染——
+ *  不展示 id（全页面去 ID 约定） */
 function LocationPreview({ entry, detail }: { entry: LocationEntry; detail: NovelDetail }) {
   const parentName = entry.parentId
     ? detail.locations.find((l) => l.id === entry.parentId)?.name ?? entry.parentId
     : null;
+  const hasCoords = entry.x !== undefined && entry.y !== undefined;
+  const hasMeta = hasCoords || Boolean(entry.layer) || entry.population !== undefined || parentName !== null;
   return (
     <section className="viewcard">
       <p className="card-label">地点</p>
       <p className="part-name">{entry.name}</p>
       {entry.description ? <p className="outline-summary">{entry.description}</p> : null}
-      {entry.x !== undefined && entry.y !== undefined ? (
-        <p className="outline-summary">坐标：（{entry.x}, {entry.y}）</p>
+      {hasMeta ? (
+        <dl className="fs-meta">
+          {hasCoords ? (
+            <div className="fs-meta-item">
+              <dt>坐标</dt>
+              <dd>（{entry.x}, {entry.y}）</dd>
+            </div>
+          ) : null}
+          {entry.layer ? (
+            <div className="fs-meta-item">
+              <dt>图层</dt>
+              <dd>{entry.layer}</dd>
+            </div>
+          ) : null}
+          {entry.population !== undefined ? (
+            <div className="fs-meta-item">
+              <dt>主要物种数量</dt>
+              <dd>{entry.population}</dd>
+            </div>
+          ) : null}
+          {parentName ? (
+            <div className="fs-meta-item">
+              <dt>父级</dt>
+              <dd>{parentName}</dd>
+            </div>
+          ) : null}
+        </dl>
       ) : null}
-      {entry.layer ? <p className="outline-summary">图层：{entry.layer}</p> : null}
-      {entry.population !== undefined ? (
-        <p className="outline-summary">主要物种数量：{entry.population}</p>
-      ) : null}
-      {parentName ? <p className="outline-summary">父级：{parentName}</p> : null}
     </section>
   );
 }

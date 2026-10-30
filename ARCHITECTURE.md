@@ -258,11 +258,20 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 │                        #   （留空=内置默认 2000~3000 / 80）+ 产物输出目录组；外观 = 主题三选，
 │                        #   默认跟随系统、保存即生效；与偏好弹窗共用 writing-prefs-form 表单解析）/
 │                        #   StageBar / ViewCard / QuestionCard
-├── src/styles.css       # 样式：31 个语义 CSS 变量（:root 浅色基准）+ prefers-color-scheme
+├── src/styles.css       # 样式：44 个语义 CSS 变量（:root 浅色基准——颜色语义分组 +
+│                        #   圆角/阴影/控件高度/字号阶梯设计令牌）+ prefers-color-scheme
 │                        #   暗色媒体查询（GitHub Primer Dark 基准），规则区零硬编码色值，
-│                        #   浅色值不回归；Lucide 图标行内基线（.ic/.ic-after/.ic-btn——
-│                        #   客户端图标统一 lucide-react 矢量图标、界面零 emoji；agent 侧
-│                        #   notify 与 CLI renderView 文案不受影响，正文内排版箭头为标点保留）
+│                        #   浅色值不回归；全局统一控件规格——输入框（input/select/textarea
+│                        #   除 checkbox/radio）一套高度 36px/圆角/字号 + 软色焦点环，按钮分
+│                        #   标准 36px / 紧凑 30px 两档等高（.icon-btn 方形与相邻主按钮齐高）；
+│                        #   字号阶梯同层级同字号（页面标题 18 / 卡片标题 15 / 正文与控件 14 /
+│                        #   紧凑正文 13 / 辅助说明 12）；卡片卡壳（viewcard/question/
+│                        #   character-form/设置组）圆角 + 浅阴影；详情卡分区展示（fs-pair
+│                        #   表面行为/隐藏真相双面板、fs-meta 属性表、fs-recovery 回收计划
+│                        #   ——伏笔/地点/角色预览共用）；细滚动条与 0.15s 过渡；Lucide 图标
+│                        #   行内基线（.ic/.ic-after/.ic-btn——客户端图标统一 lucide-react
+│                        #   矢量图标、界面零 emoji；agent 侧 notify 与 CLI renderView 文案
+│                        #   不受影响，正文内排版箭头为标点保留）
 └── electron.vite.config.ts
 ```
 

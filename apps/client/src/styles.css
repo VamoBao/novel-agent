@@ -1,3 +1,7 @@
+/* 设计令牌 + 语义变量（:root 浅色基准）：
+   - 颜色语义变量按背景 / 边框 / 文字 / 强调 / 层级分组，规则区零硬编码色值；
+   - 圆角 / 阴影 / 字号阶梯 / 控件高度为全局统一令牌——同一视觉层级同一字号、
+     同一位置的动作按钮同一高度、输入框（input / select / textarea）全软件一套规格。 */
 :root {
   color-scheme: light;
   /* 背景 */
@@ -34,10 +38,26 @@
   --danger-hover: #912018;
   /* 成功绿 */
   --success: #15803d;
-  /* 层级 */
+  /* 层级（弹层深投影 + 卡片浅投影） */
   --overlay: rgba(31, 35, 40, 0.45);
+  --shadow-xs: 0 1px 2px rgba(31, 35, 40, 0.05);
+  --shadow-card: 0 1px 2px rgba(31, 35, 40, 0.04), 0 2px 8px rgba(31, 35, 40, 0.06);
   --shadow-popover: 0 6px 20px rgba(31, 35, 40, 0.14);
   --shadow-modal: 0 12px 32px rgba(31, 35, 40, 0.22);
+  /* 圆角阶梯 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  /* 控件高度：标准动作按钮 / 紧凑动作按钮（行内与菜单场景） */
+  --control-h: 36px;
+  --control-h-sm: 30px;
+  /* 字号阶梯：页面标题 18 / 卡片标题 15 / 正文与控件 14 / 紧凑正文 13 / 辅助说明 12 */
+  --font-xl: 18px;
+  --font-lg: 15px;
+  --font-md: 14px;
+  --font-sm: 13px;
+  --font-xs: 12px;
 
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
@@ -76,6 +96,8 @@
     --danger-hover: #da3633;
     --success: #3fb950;
     --overlay: rgba(1, 4, 9, 0.6);
+    --shadow-xs: 0 1px 2px rgba(1, 4, 9, 0.4);
+    --shadow-card: 0 1px 2px rgba(1, 4, 9, 0.32), 0 2px 8px rgba(1, 4, 9, 0.28);
     --shadow-popover: 0 6px 20px rgba(1, 4, 9, 0.4);
     --shadow-modal: 0 12px 32px rgba(1, 4, 9, 0.5);
   }
@@ -89,7 +111,147 @@ body {
   margin: 0;
   background: var(--bg-app);
   color: var(--fg-default);
+  font-size: var(--font-md);
+  line-height: 1.6;
 }
+
+/* 细滚动条（Electron Chromium）：弱化存在感，暗色随语义变量自适应 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--fg-subtle);
+}
+
+/* ===== 全局控件规格：输入框（单行 input / select / textarea 一套外观）与按钮 ===== */
+
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  width: 100%;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  color: var(--fg-default);
+  font-family: inherit;
+  font-size: var(--font-md);
+  line-height: 1.5;
+}
+
+/* 单行控件锁定标准高度；textarea 随行数撑开 */
+input:not([type="checkbox"]):not([type="radio"]),
+select {
+  height: var(--control-h);
+  padding: 4px 12px;
+}
+
+textarea {
+  resize: vertical;
+}
+
+/* 行内输入（问答行、弹框）撑满剩余宽度 */
+.row > input:not([type="checkbox"]):not([type="radio"]) {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 复选框还原原生尺寸，仅统一强调色 */
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+button {
+  min-height: var(--control-h);
+  padding: 6px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  color: var(--fg-default);
+  font-family: inherit;
+  font-size: var(--font-md);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--bg-button-hover);
+}
+
+button.primary {
+  background: var(--accent-emphasis);
+  border-color: var(--accent-emphasis);
+  color: var(--fg-on-emphasis);
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.ghost {
+  border-style: dashed;
+}
+
+/* 焦点环：输入控件与按钮共用（软色 3px 环 + 强调描边） */
+input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--bg-accent-subtle);
+}
+
+button,
+input,
+select,
+textarea {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+/* 紧凑动作按钮（列表行内动作 / 右键菜单 / 小工具行）：同一规格同一高度 */
+.context-menu button,
+.migration-actions button,
+.pane-error button,
+.settings-page .field-actions button {
+  min-height: var(--control-h-sm);
+  padding: 4px 12px;
+  font-size: var(--font-sm);
+  border-radius: var(--radius-sm);
+}
+
+/* 列表行 / 导航项形态的按钮：不受标准按钮高度约束（自身行高更紧凑） */
+.novel-item,
+.tree-node,
+.tree-toggle,
+.settings-nav button {
+  min-height: 0;
+}
+
+/* ===== 应用骨架：顶栏 + 三栏工作区 ===== */
 
 .app {
   display: flex;
@@ -101,13 +263,15 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 20px;
+  padding: 12px 20px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border-default);
+  box-shadow: var(--shadow-xs);
 }
 
 .header h1 {
-  font-size: 17px;
+  font-size: var(--font-xl);
+  font-weight: 600;
   margin: 0;
 }
 
@@ -117,9 +281,15 @@ body {
   gap: 10px;
 }
 
+/* 纯图标按钮：与相邻标准按钮（如「新建小说」）同高对方形 */
 .icon-btn {
-  padding: 6px 10px;
-  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
+  font-size: var(--font-lg);
   line-height: 1;
 }
 
@@ -157,7 +327,12 @@ body {
 
 .preview-pane {
   overflow-y: auto;
-  padding: 10px 12px 20px;
+  padding: 12px 16px 24px;
+}
+
+/* 右栏内容限宽，长正文不摊满超宽窗口 */
+.preview {
+  max-width: 860px;
 }
 
 /* 创作页：独立整页（不与浏览页三栏共存），CreationFlow 自带头部 + 滚动问答流 */
@@ -171,9 +346,16 @@ body {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 10px 20px;
+  padding: 12px 20px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border-default);
+  box-shadow: var(--shadow-xs);
+}
+
+.creation-header strong,
+.settings-header strong {
+  font-size: var(--font-xl);
+  font-weight: 600;
 }
 
 .row.center {
@@ -190,28 +372,31 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 2px 12px 8px;
-  font-size: 13px;
+  padding: 4px 12px 8px;
+  font-size: var(--font-sm);
+}
+
+.library-head strong {
+  font-weight: 600;
 }
 
 .pane-hint {
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: var(--font-sm);
   padding: 0 12px;
   line-height: 1.6;
 }
 
 .pane-error {
   color: var(--danger);
-  font-size: 13px;
+  font-size: var(--font-sm);
   padding: 0 12px;
   line-height: 1.6;
 }
 
 .pane-error button {
   margin-left: 8px;
-  padding: 2px 8px;
-  font-size: 12px;
+  vertical-align: middle;
 }
 
 .novel-list,
@@ -221,14 +406,16 @@ body {
   padding: 0;
 }
 
+/* 书库条目：圆角行 + 悬浮底色，选中态强调浅底 + 左侧色条 */
 .novel-item {
   display: block;
-  width: 100%;
+  width: calc(100% - 12px);
+  margin: 2px 6px;
   text-align: left;
   border: none;
-  border-radius: 0;
+  border-radius: var(--radius-md);
   background: transparent;
-  padding: 7px 12px;
+  padding: 8px 12px;
   line-height: 1.3;
 }
 
@@ -243,7 +430,7 @@ body {
 
 .novel-item .novel-name {
   display: block;
-  font-size: 14px;
+  font-size: var(--font-md);
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -255,9 +442,9 @@ body {
   text-align: left;
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 5px 8px;
-  font-size: 13px;
+  font-size: var(--font-sm);
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
@@ -325,19 +512,24 @@ body {
   align-items: center;
   gap: 6px;
   padding: 10px 12px 3px;
-  font-size: 12px;
+  font-size: var(--font-xs);
   font-weight: 600;
   color: var(--fg-muted);
 }
 
-/* 组头动作按钮（大纲刷新入口）：小号描边图标钮 */
+/* 组头动作按钮（大纲刷新 / 新增入口）：紧凑方形图标钮 */
 .tree-group-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   margin-left: auto;
-  padding: 1px 7px;
-  font-size: 12px;
+  padding: 0;
+  font-size: var(--font-sm);
   border: 1px solid var(--border-strong);
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--fg-muted);
   cursor: pointer;
 }
@@ -352,20 +544,19 @@ body {
   z-index: 100;
   display: flex;
   flex-direction: column;
-  min-width: 150px;
-  padding: 4px;
+  min-width: 170px;
+  padding: 6px;
   background: var(--bg-panel);
   border: 1px solid var(--border-default);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-popover);
 }
 
 .context-menu button {
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   text-align: left;
-  padding: 7px 10px;
-  font-size: 13px;
+  padding: 5px 10px;
   background: transparent;
 }
 
@@ -384,16 +575,11 @@ button.danger {
 
 /* 内联重命名 */
 .novel-item.editing {
-  padding: 4px 8px;
+  padding: 4px 6px;
 }
 
-.novel-item.editing input {
-  width: 100%;
-  padding: 5px 8px;
-  font-size: 14px;
-}
+/* ===== 模态弹框 ===== */
 
-/* 删除强确认对话框（GitHub 删 repo 式：输入小说名放行） */
 .dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -405,18 +591,18 @@ button.danger {
 }
 
 .dialog {
-  width: 420px;
+  width: 440px;
   max-width: calc(100vw - 48px);
-  padding: 18px 20px;
+  padding: 20px 22px;
   background: var(--bg-panel);
   border: 1px solid var(--border-default);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-modal);
 }
 
 .dialog h3 {
-  margin: 0 0 8px;
-  font-size: 15px;
+  margin: 0 0 10px;
+  font-size: var(--font-lg);
 }
 
 .dialog-danger h3 {
@@ -425,39 +611,29 @@ button.danger {
 
 .dialog-lead {
   margin: 0 0 10px;
-  font-size: 13px;
+  font-size: var(--font-md);
   line-height: 1.6;
 }
 
 .dialog-hint {
-  margin: 0 0 6px;
-  font-size: 13px;
+  margin: 0 0 8px;
+  font-size: var(--font-sm);
+  line-height: 1.6;
 }
 
 .dialog-hint code {
   padding: 1px 6px;
   background: var(--bg-danger-subtle);
   border: 1px solid var(--border-danger);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--danger-strong);
-}
-
-.dialog input {
-  width: 100%;
-  padding: 7px 10px;
-  font-size: 14px;
 }
 
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.dialog-actions button {
-  padding: 6px 14px;
-  font-size: 13px;
+  gap: 10px;
+  margin-top: 16px;
 }
 
 .dialog-actions .danger-filled {
@@ -475,6 +651,8 @@ button.danger {
   cursor: not-allowed;
 }
 
+/* ===== 会话问答流（创作 / 章节规划 / 大纲重生成共用） ===== */
+
 .stagebar {
   display: flex;
   gap: 6px;
@@ -484,7 +662,7 @@ button.danger {
 }
 
 .stage {
-  font-size: 12px;
+  font-size: var(--font-xs);
   padding: 3px 10px;
   border-radius: 999px;
   background: var(--bg-subtle);
@@ -505,11 +683,16 @@ button.danger {
   flex: 1;
   overflow-y: auto;
   padding: 20px 24px 40px;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
 }
 
 .notify {
   white-space: pre-wrap;
   margin: 6px 0;
+  font-size: var(--font-md);
+  line-height: 1.7;
   color: var(--fg-notify);
 }
 
@@ -520,37 +703,48 @@ button.danger {
   text-align: center;
 }
 
-.viewcard {
+/* ===== 卡片（右栏预览与会话视图共用的卡壳：圆角 + 浅阴影） ===== */
+
+.viewcard,
+.question {
   background: var(--bg-panel);
   border: 1px solid var(--border-default);
-  border-radius: 10px;
-  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 14px 18px;
   margin: 10px 0;
 }
 
 .viewcard h3 {
   margin: 0 0 8px;
-  font-size: 14px;
+  font-size: var(--font-lg);
 }
 
 .viewcard dl {
   display: grid;
   grid-template-columns: 76px 1fr;
-  gap: 4px 10px;
+  gap: 6px 16px;
   margin: 0;
 }
 
 .viewcard dt {
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: var(--font-sm);
 }
 
 .viewcard dd {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-md);
+  line-height: 1.7;
+}
+
+/* 角色卡姓名行：卡片标题级字号 */
+.viewcard .char-name {
+  font-size: var(--font-lg);
 }
 
 .viewcard .title-line {
+  font-size: var(--font-md);
   font-weight: 600;
   margin: 4px 0;
 }
@@ -560,6 +754,7 @@ button.danger {
 }
 
 .viewcard .part-name {
+  font-size: var(--font-md);
   font-weight: 600;
   margin: 8px 0 2px;
 }
@@ -570,26 +765,27 @@ button.danger {
 
 .viewcard .act p {
   margin: 2px 0;
+  line-height: 1.7;
 }
 
 /* 大纲节点预览两卡（OutlineNodeCard 专用）：标签 + 正文，与 ViewCard 共用卡壳 */
 .viewcard .card-label {
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: var(--font-xs);
   font-weight: 600;
   color: var(--fg-muted);
 }
 
 .viewcard .outline-summary {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-md);
   line-height: 1.7;
 }
 
 .viewcard .plot-list {
   margin: 0;
   padding-left: 20px;
-  font-size: 13px;
+  font-size: var(--font-sm);
 }
 
 .viewcard .plot-list li {
@@ -601,7 +797,7 @@ button.danger {
 .viewcard .prose-content {
   max-height: 420px;
   overflow-y: auto;
-  font-size: 13px;
+  font-size: var(--font-md);
   line-height: 1.9;
   white-space: pre-wrap;
   word-break: break-word;
@@ -614,7 +810,7 @@ button.danger {
   gap: 6px;
   margin: 0 0 8px;
   padding: 0;
-  font-size: 13px;
+  font-size: var(--font-sm);
 }
 
 .write-progress .progress-steps li {
@@ -641,7 +837,7 @@ button.danger {
 .write-progress .stage-feedback {
   margin: 4px 0 6px 20px;
   color: var(--fg-notify);
-  font-size: 12px;
+  font-size: var(--font-xs);
   font-weight: 400;
   line-height: 1.7;
 }
@@ -657,7 +853,7 @@ button.danger {
 
 .write-progress .report-verdict {
   margin: 0 0 4px;
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-weight: 600;
 }
 
@@ -670,7 +866,7 @@ button.danger {
 }
 
 .write-progress .write-report details summary {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--fg-muted);
   cursor: pointer;
 }
@@ -678,7 +874,7 @@ button.danger {
 .write-progress .report-issues {
   margin: 6px 0 0;
   padding-left: 18px;
-  font-size: 12px;
+  font-size: var(--font-xs);
   line-height: 1.7;
   color: var(--fg-notify);
 }
@@ -687,33 +883,158 @@ button.danger {
 .viewcard .plot {
   padding-left: 16px;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: var(--font-sm);
 }
 
-/* 角色编辑 / 新建表单（CharacterEditForm，编辑与新建共用） */
+/* ===== 详情卡分区展示（伏笔 / 地点预览）：核心块 + 属性表 + 回收计划 ===== */
+
+/* 核心两块：表面行为 / 隐藏真相并排小面板（窄窗口自动换行堆叠） */
+.fs-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  margin: 10px 0 12px;
+}
+
+.fs-block {
+  min-width: 0;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  padding: 10px 14px;
+}
+
+.fs-block-label {
+  margin: 0 0 4px;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.fs-block-text {
+  margin: 0;
+  font-size: var(--font-md);
+  line-height: 1.7;
+}
+
+/* 隐藏真相：强调浅底 + 左侧色条，与表面行为形成「台面 / 内幕」对比 */
+.fs-truth {
+  background: var(--bg-accent-subtle);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.fs-truth .fs-block-label {
+  color: var(--accent-strong);
+}
+
+/* 属性表：标签上 / 值下，自适应两列（窄窗一列），长值自动断行 */
+.fs-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px 18px;
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-default);
+}
+
+.fs-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fs-meta dt {
+  font-size: var(--font-xs);
+  color: var(--fg-muted);
+}
+
+.fs-meta dd {
+  margin: 0;
+  font-size: var(--font-md);
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+.fs-empty {
+  color: var(--fg-subtle);
+}
+
+/* 回收状态徽标（未回收 / 部分回收 / 已回收） */
+.fs-status {
+  display: inline-block;
+  padding: 1px 10px;
+  border-radius: 999px;
+  font-size: var(--font-xs);
+  background: var(--bg-subtle);
+  color: var(--fg-muted);
+}
+
+.fs-status.partial {
+  background: var(--bg-warning-subtle);
+  color: var(--fg-notify);
+}
+
+.fs-status.recovered {
+  background: var(--bg-success-subtle);
+  color: var(--success);
+}
+
+/* 回收计划：逐幕一条，幕名加粗 + 绑定详情 */
+.fs-recovery {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-default);
+}
+
+.fs-recovery-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fs-recovery-list li {
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  font-size: var(--font-sm);
+  line-height: 1.6;
+}
+
+.fs-recovery-act {
+  font-weight: 600;
+  color: var(--fg-default);
+}
+
+/* ===== 表单（角色 / 迁移 / 伏笔 / 文风编辑共用卡壳，输入控件走全局规格） ===== */
+
 .character-form {
   background: var(--bg-panel);
   border: 1px solid var(--border-default);
-  border-radius: 10px;
-  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 14px 18px;
   margin: 10px 0;
 }
 
 .character-form h3 {
   margin: 0 0 10px;
-  font-size: 14px;
+  font-size: var(--font-lg);
 }
 
 .character-form .form-fields {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .character-form .field label {
   display: block;
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--fg-muted);
-  margin-bottom: 2px;
+  margin-bottom: 4px;
 }
 
 .character-form .field .req {
@@ -724,69 +1045,33 @@ button.danger {
   color: var(--danger);
 }
 
-/* 字段选择器带 .field 前缀提高特异性，压过全局 input:not([type]) 规则 */
-.character-form .field input,
-.character-form .field textarea {
-  width: 100%;
-  padding: 6px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  font-size: 13px;
-  font-family: inherit;
-  line-height: 1.5;
-}
-
-.character-form .field textarea {
-  resize: vertical;
+/* 表单错误行（表单卡与会话弹框共用） */
+.form-error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: var(--font-sm);
+  line-height: 1.6;
 }
 
 .character-form .form-error {
-  margin: 8px 0 0;
-  color: var(--danger);
-  font-size: 12px;
+  margin: 10px 0 0;
 }
 
 .character-form .form-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.character-form .form-actions button {
-  padding: 6px 12px;
-  font-size: 13px;
-}
-
-/* 伏笔编辑表单（ForeshadowEditForm，与 CharacterEditForm 共用 character-form 字段样式）：
-   下拉对齐 input 外观；勾选行内排布——复选框还原原生尺寸（豁免上面 input 的 width:100% 规则） */
-.character-form .field select {
-  width: 100%;
-  padding: 6px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  font-size: 13px;
-  font-family: inherit;
-  line-height: 1.5;
-  background: var(--bg-panel);
-  color: var(--fg-default);
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .character-form .field .checkbox-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--font-sm);
   color: var(--fg-default);
   margin: 2px 0;
   cursor: pointer;
-}
-
-.character-form .field input[type="checkbox"] {
-  width: auto;
-  padding: 0;
-  margin: 0;
-  accent-color: var(--accent);
 }
 
 /* 文风编辑表单删除按钮（StyleEditForm，编辑态）：危险色实底，对齐弹框删除按钮观感 */
@@ -812,16 +1097,11 @@ button.danger {
   margin: 2px 0 4px;
 }
 
-.preview-actions button {
-  padding: 4px 10px;
-  font-size: 13px;
-}
-
 /* 章卡登场角色陈旧提示：影响本章的迁移计划在正文生成后确认（复用 warning 语义变量，暗色自适应） */
 .viewcard .cast-stale {
   background: var(--bg-warning-subtle);
   border: 1px solid var(--border-warning);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 8px 12px;
   margin: 8px 0;
 }
@@ -852,8 +1132,8 @@ button.danger {
 
 .migration-row {
   border: 1px solid var(--border-default);
-  border-radius: 8px;
-  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
   background: var(--bg-subtle);
 }
 
@@ -864,6 +1144,7 @@ button.danger {
 
 .migration-row .migration-title {
   margin: 0 0 4px;
+  font-size: var(--font-md);
   font-weight: 600;
 }
 
@@ -874,27 +1155,22 @@ button.danger {
   margin-top: 8px;
 }
 
-.migration-actions button {
-  padding: 3px 9px;
-  font-size: 12px;
-}
-
 .migration-form .hint {
   margin: 8px 0 0;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-xs);
   line-height: 1.6;
 }
 
+/* 提问卡（问答流当前待答问题）：warning 语义底 + 卡壳 */
 .question {
+  border-color: var(--border-warning);
   background: var(--bg-warning-subtle);
-  border: 1px solid var(--border-warning);
-  border-radius: 10px;
-  padding: 12px 16px;
   margin: 14px 0;
 }
 
 .question .prompt {
+  font-size: var(--font-md);
   font-weight: 600;
   margin: 0 0 10px;
   white-space: pre-wrap;
@@ -909,53 +1185,19 @@ button.danger {
 .options {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 10px;
 }
 
 .options.column {
   flex-direction: column;
+  align-items: flex-start;
 }
 
-input[type="text"],
-input:not([type]) {
-  flex: 1;
-  padding: 8px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  font-size: 14px;
-}
-
-button {
-  padding: 8px 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--bg-panel);
-  font-size: 14px;
-  cursor: pointer;
-}
-
-button:hover:not(:disabled) {
-  background: var(--bg-button-hover);
-}
-
-button.primary {
-  background: var(--accent-emphasis);
-  border-color: var(--accent-emphasis);
-  color: var(--fg-on-emphasis);
-}
-
-button.primary:hover:not(:disabled) {
-  background: var(--accent-strong);
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-button.ghost {
-  border-style: dashed;
+.hint {
+  color: var(--fg-muted);
+  font-size: var(--font-xs);
+  line-height: 1.6;
 }
 
 /* Lucide 图标基线（客户端统一矢量图标，替代 emoji）：.ic = 图标后随文本、
@@ -977,20 +1219,15 @@ button.ghost {
   margin-left: 0.3em;
 }
 
-.hint {
-  color: var(--fg-muted);
-  font-size: 13px;
-}
-
 /* 头部动作区（设置入口 + 新建按钮） */
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
-/* 设置页（SettingsPage）：独立整页——左导航分类 + 右设置项内容区，
-   内容纵向铺开（不再受弹窗高度局限）；Key 走 password 输入 */
+/* ===== 设置页：左导航分类 + 右设置组卡片 ===== */
+
 .settings-page {
   display: flex;
   flex-direction: column;
@@ -1002,9 +1239,10 @@ button.ghost {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 10px 20px;
+  padding: 12px 20px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border-default);
+  box-shadow: var(--shadow-xs);
 }
 
 .settings-body {
@@ -1014,7 +1252,7 @@ button.ghost {
   min-height: 0;
 }
 
-/* 左导航：分类按钮纵向排列，选中态用强调色底 + 左侧色条 */
+/* 左导航：分类按钮纵向排列，选中态用强调色底 */
 .settings-nav {
   display: flex;
   flex-direction: column;
@@ -1032,10 +1270,10 @@ button.ghost {
   width: 100%;
   padding: 8px 10px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: var(--font-sm);
   text-align: left;
 }
 
@@ -1054,30 +1292,34 @@ button.ghost {
   background: var(--bg-accent-subtle);
 }
 
-/* 右内容区：设置项纵向铺开，底部固定保存 / 取消动作行 */
+/* 右内容区：设置组以卡片纵向铺开，底部固定保存 / 取消动作行 */
 .settings-content {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 14px;
   min-height: 0;
-  padding: 16px 20px 20px;
+  padding: 16px 24px 20px;
   overflow-y: auto;
 }
 
 .settings-actions {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   margin-top: auto;
   padding-top: 14px;
 }
 
 .settings-group {
-  margin: 10px 0 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 14px 18px 16px;
 }
 
 .settings-group-label {
-  margin: 0 0 6px;
-  font-size: 12px;
+  margin: 0 0 8px;
+  font-size: var(--font-xs);
   font-weight: 600;
   color: var(--fg-muted);
 }
@@ -1088,40 +1330,22 @@ button.ghost {
 
 .settings-page .field label {
   display: block;
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--fg-muted);
-  margin-bottom: 2px;
-}
-
-/* provider 下拉框（接口类型）与输入框同款观感 */
-.settings-page .field input,
-.settings-page .field select {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 6px 8px;
-  font-size: 13px;
-  font-family: inherit;
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  background: var(--bg-panel);
-  color: var(--fg-default);
+  margin-bottom: 4px;
 }
 
 .settings-hint {
-  margin: 2px 0 0;
-  font-size: 12px;
+  margin: 6px 0 0;
+  font-size: var(--font-xs);
+  line-height: 1.6;
   color: var(--fg-subtle);
 }
 
 /* 设置页「外观」主题分段三选：选中态复用主按钮填充语汇 */
 .theme-options {
   display: flex;
-  gap: 6px;
-}
-
-.theme-options button {
-  padding: 5px 12px;
-  font-size: 13px;
+  gap: 8px;
 }
 
 .theme-options button.selected {
@@ -1130,19 +1354,16 @@ button.ghost {
   color: var(--fg-on-emphasis);
 }
 
-/* 设置页字段附属动作行（产物输出目录：浏览 / 恢复默认）：小号描边钮，语义变量配色 */
+/* 设置页字段附属动作行（产物输出目录：浏览 / 恢复默认）：紧凑描边钮，语义变量配色 */
 .settings-page .field-actions {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   margin-top: 6px;
 }
 
 .settings-page .field-actions button {
-  padding: 4px 12px;
-  font-size: 12px;
   border: 1px solid var(--border-strong);
   background: transparent;
-  border-radius: 6px;
   color: var(--fg-muted);
   cursor: pointer;
 }

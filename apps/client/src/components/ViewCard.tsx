@@ -261,7 +261,7 @@ export function ViewCard({ view }: { view: View }) {
             <FileText className="ic" aria-hidden />
             角色卡汇总
           </h3>
-          <p className="title-line">
+          <p className="title-line char-name">
             <User className="ic" aria-hidden />
             {view.character.basicInfo.name}（{view.character.core.narrativeRole}
             {view.character.basicInfo.gender ? `，${view.character.basicInfo.gender}` : ""}）
