@@ -330,11 +330,6 @@ textarea {
   padding: 12px 16px 24px;
 }
 
-/* 右栏内容限宽，长正文不摊满超宽窗口 */
-.preview {
-  max-width: 860px;
-}
-
 /* 创作页：独立整页（不与浏览页三栏共存），CreationFlow 自带头部 + 滚动问答流 */
 .create-app {
   display: flex;
