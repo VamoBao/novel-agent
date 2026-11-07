@@ -267,7 +267,8 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 │                        #   字号阶梯同层级同字号（页面标题 18 / 卡片标题 15 / 正文与控件 14 /
 │                        #   紧凑正文 13 / 辅助说明 12）；卡片卡壳（viewcard/question/
 │                        #   character-form/设置组）圆角 + 浅阴影；详情卡分区展示（fs-pair
-│                        #   表面行为/隐藏真相双面板、fs-meta 属性表、fs-recovery 回收计划
+│                        #   表面行为/隐藏真相双面板、fs-meta 属性表（.viewcard 作用域覆盖通用 dl，
+│                        #   按可用宽度等分列、窄栏退为单列，长值换行）、fs-recovery 回收计划
 │                        #   ——伏笔/地点/角色预览共用）；细滚动条与 0.15s 过渡；Lucide 图标
 │                        #   行内基线（.ic/.ic-after/.ic-btn——客户端图标统一 lucide-react
 │                        #   矢量图标、界面零 emoji；agent 侧 notify 与 CLI renderView 文案

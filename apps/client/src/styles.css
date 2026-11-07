@@ -886,7 +886,7 @@ button.danger {
 /* 核心两块：表面行为 / 隐藏真相并排小面板（窄窗口自动换行堆叠） */
 .fs-pair {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   gap: 10px;
   margin: 10px 0 12px;
 }
@@ -922,10 +922,11 @@ button.danger {
   color: var(--accent-strong);
 }
 
-/* 属性表：标签上 / 值下，自适应两列（窄窗一列），长值自动断行 */
-.fs-meta {
+/* 属性表：标签上 / 值下，按预览栏宽度均分列，窄栏自动单列。
+   作用域须覆盖通用 .viewcard dl，避免首列被固定为 76px。 */
+.viewcard .fs-meta {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 10px 18px;
   margin: 12px 0 0;
   padding-top: 12px;
@@ -939,16 +940,16 @@ button.danger {
   min-width: 0;
 }
 
-.fs-meta dt {
+.viewcard .fs-meta dt {
   font-size: var(--font-xs);
   color: var(--fg-muted);
 }
 
-.fs-meta dd {
+.viewcard .fs-meta dd {
   margin: 0;
   font-size: var(--font-md);
   line-height: 1.6;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
 }
 
 .fs-empty {
