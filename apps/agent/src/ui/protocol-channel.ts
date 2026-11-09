@@ -1,4 +1,5 @@
-import { clientMessageSchema, type AgentMessage, type Ask, type Stage, type View } from "@novel/shared";
+import { clientMessageSchema, type Activity, type AgentMessage, type Ask, type Stage, type View } from "@novel/shared";
+import { currentActivityId } from "./activity-scope";
 import { UserAbortedError } from "./aborted";
 import type { UiChannel } from "./channel";
 
@@ -26,6 +27,10 @@ export class ProtocolChannel implements UiChannel {
   private closed = false;
 
   constructor(private readonly send: (message: AgentMessage) => void) {}
+
+  activity(activity: Activity): void {
+    if (!this.closed) this.send({ type: "activity", activity });
+  }
 
   /** headless 收到一行 client 消息时调用；JSON 非法或 id 未知时抛错（fail-fast） */
   handleLine(line: string): void {
@@ -66,6 +71,7 @@ export class ProtocolChannel implements UiChannel {
       if (kind === "line") return Promise.resolve(null as T);
       return Promise.reject(new UserAbortedError());
     }
+    const activityId = currentActivityId();
     return new Promise<T>((resolve, reject) => {
       const attempt = (): void => {
         const id = this.nextId++;
@@ -86,7 +92,7 @@ export class ProtocolChannel implements UiChannel {
               ? () => resolve(null as T)
               : () => reject(new UserAbortedError()),
         });
-        this.send({ type: "request", id, ask: buildAsk() });
+        this.send({ type: "request", id, ask: buildAsk(), ...(activityId ? { activityId } : {}) });
       };
       attempt();
     });

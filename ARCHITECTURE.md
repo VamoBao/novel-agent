@@ -4,6 +4,14 @@
 
 ## 分层结构
 
+### 新建小说卡片工作台（2026-11-09）
+
+- shared `activity.ts` 定义调用快照，stdio 协议升级 v3，新增 activity 消息与 request.activityId；Electron 继续使用 shared schema 校验后原样转发。
+- `agents/activity.ts` 观察 Agent/工具边界：SDK 的 onToolExecutionStart/End 分别在真实执行前后报告，工具 execute 经 `ui/activity-scope.ts` 的 AsyncLocalStorage 关联内部提问；协议通道在 request 建立时捕获作用域，重问保留关联。输入输出摘要限 12000 字符并过滤标识、路径和连接凭据，不发送 system/隐藏推理。
+- 世界观、角色、大纲、角色补全四个业务 Agent，以及主流程的受众分析和核心冲突整理接入活动；CLI 仍保持原有文本交互与确认门语义。
+- renderer `hooks/session-timeline.ts` 以稳定 key 保存阶段/通知/成果/请求与回答，以活动 id 原位更新调用；共享会话泵另保留旧 flow，章节规划和大纲重生成页兼容。首个待答请求经 ref 同步领取防重复提交，发送失败、fatal/exit 会收尾未完成活动，重试清空旧执行、按已缓存 runId 恢复。
+- `CreationFlow` 为顶部状态 + 阶段导航 + 卡片流；`components/creation/` 承载专属输入控件、调用详情、文案映射和样式。调用详情默认折叠，按 request.activityId 关联等待输入状态；回答原位保留。用户翻看历史不强制跟随；960px 以下导航转横向步骤条。状态保存在当前页面会话，不承诺重新进入后的完整交互重放。
+
 ```text
 apps/agent/src/
 ├── index.ts              # CLI 入口：API Key 检查、运行 createNovel、错误处理与优雅退出
@@ -61,7 +69,8 @@ apps/agent/src/
 │                         #   + NOVEL_STYLE_PASS_SCORE 环境变量（客户端 childEnv 注入；协议宿主/CLI 可直设），
 │                         #   非整数/越界静默归 null（该级未覆盖），与小说级共同交 shared 解析纯函数取生效值
 ├── agents/
-│   ├── react.ts          # 通用 ReAct Agent 运行器，按 SDK step 保存原生消息
+│   ├── react.ts          # 通用 ReAct Agent 运行器，按 SDK step 保存原生消息，工具开始/结束回调报告活动
+│   ├── activity.ts       # Agent/工具执行观察、业务摘要与元信息过滤；工具 execute 保持 ALS 提问归属
 │   └── session-context.ts # AsyncLocalStorage 传递工作流消息缓存上下文
 ├── tools/
 │   ├── ask-user.ts       # 提供给 LLM 的通用工具：向用户提问并等待回答
@@ -190,10 +199,11 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 │                        #   updateForeshadow / addStyle / updateStyle / deleteStyle +
 │                        #   诊断钩子读取）
 ├── src/                 # renderer（React）：App 页面级切换——三栏浏览主页（书库 / 结构树 /
-│                        #   预览）↔ 独立创作页（CreationFlow 问答流）↔ 独立章节规划页
+│                        #   预览）↔ 独立创作页（CreationFlow 阶段导航 + 卡片工作台）↔ 独立章节规划页
 │                        #   （ChapterPlanFlow 幕节点「规划本幕章节」问答流）↔ 独立大纲重生成页
 │                        #   （OutlineRegenFlow：弹框确认后进入，幕数/部数表单 + 大纲确认门）——
-│                        #   三会话页共用 hooks/use-agent-session（agent 会话泵：消息订阅 / 提问队列 / 重启）
+│                        #   三会话页共用 hooks/use-agent-session（消息订阅 / 提问队列 / 重启；
+│                        #   session-timeline reducer 独立保留输入历史与活动，不改变旧 flow 契约）
 │                        #   + NovelListPanel（右键菜单管理：重命名 / 置顶 / 收藏 / 写作偏好
 │                        #   （WritingPrefsDialog 弹窗）/ 删除
 │                        #   强确认——DeleteNovelDialog 输入小说名放行）/ StructureTreePanel
@@ -224,7 +234,8 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 │                        #   保留原 provider）+ API Key + 模型名 + Base URL；写作偏好 = 篇幅三字段
 │                        #   （留空=内置默认 2000~3000 / 80）+ 产物输出目录组；外观 = 主题三选，
 │                        #   默认跟随系统、保存即生效；与偏好弹窗共用 writing-prefs-form 表单解析）/
-│                        #   StageBar / ViewCard / QuestionCard
+│                        #   ViewCard / QuestionCard（workbench 外观委托 creation/CreationQuestion）/
+│                        #   components/creation（ActivityCard、CreationQuestion、内容映射与专属 CSS）
 ├── src/styles.css       # 样式：44 个语义 CSS 变量（:root 浅色基准——颜色语义分组 +
 │                        #   圆角/阴影/控件高度/字号阶梯设计令牌）+ prefers-color-scheme
 │                        #   暗色媒体查询（GitHub Primer Dark 基准），规则区零硬编码色值，

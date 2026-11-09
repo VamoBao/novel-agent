@@ -47,6 +47,7 @@ export async function collectWorldview(
   });
 
   const result = await runReactAgent({
+    activity: { channel, name: "世界观 Agent", input: initialDescription },
     system: SYSTEM_PROMPT,
     prompt: `用户提供的初始世界观描述如下：\n${initialDescription}`,
     tools: {

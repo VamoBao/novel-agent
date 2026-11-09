@@ -138,6 +138,7 @@ apps/agent/src/workflows/
 
 ## subAgent 协作协议（确认门四 Agent 共性，auto-character-agent 例外见末条）
 
+- **执行活动（2026-11-09）**：世界观、角色、大纲、自动角色补全入口传 activity 配置给通用 ReAct 运行器；createNovel 的受众分析与冲突归一化经 runAgentActivity 报告单轮模型活动。UiChannel 可选 activity 出口仅用于观察，确认门和原有消息缓存/落库语义保持；协议 v3、工具 ALS 提问归属与客户端工作台说明见根 ARCHITECTURE.md「新建小说卡片工作台」。
 - **终态工具模式**：`submit_worldview` / `submit_character` / `save_outline` / `save_chapters` 的 `inputSchema` 即结果 schema，execute 闭包记录结果，`isDone` 判定终态；终态未达成时抛错（带 stepCount 与最后输出）。结构化组装一律由代码完成（assembleCharacter / schema.parse），杜绝模型在提交时改写数据
 - **停止策略二分**（见根 ARCHITECTURE「ReAct 终态工具模式」）：
   - 提交不会被否决（worldview）：`stopTool: submit_worldview` + maxSteps 16

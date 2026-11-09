@@ -2,6 +2,7 @@ import { useState } from "react";
 import { PenLine } from "lucide-react";
 import type { AgentMessage, Ask } from "@novel/shared";
 import { ViewCard } from "./ViewCard";
+import { CreationQuestion } from "./creation/CreationQuestion";
 
 type RequestMsg = Extract<AgentMessage, { type: "request" }>;
 type Answer = string | string[] | boolean | number;
@@ -10,13 +11,19 @@ type Answer = string | string[] | boolean | number;
 export function QuestionCard({
   request,
   onAnswer,
+  appearance,
+  autoFocus = true,
 }: {
   request: RequestMsg;
   onAnswer: (id: number, answer: Answer) => void;
+  appearance?: "workbench";
+  autoFocus?: boolean;
 }) {
   const ask: Ask = request.ask;
   const [text, setText] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
+
+  if (appearance === "workbench") return <CreationQuestion key={request.id} request={request} onAnswer={onAnswer} autoFocus={autoFocus} />;
 
   switch (ask.type) {
     case "line":

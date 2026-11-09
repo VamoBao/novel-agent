@@ -197,6 +197,7 @@ export async function createCharacter(
   });
 
   const result = await runReactAgent({
+    activity: { channel, name: "角色 Agent", input: initialDescription },
     system: SYSTEM_PROMPT,
     prompt: `${existingLine}用户对新角色的初始描述：\n${initialDescription}`,
     tools: {

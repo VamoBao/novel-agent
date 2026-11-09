@@ -205,6 +205,7 @@ export async function createOutline(
   });
 
   const result = await runReactAgent({
+    activity: { channel, name: "大纲 Agent", input: `根据已确认的世界观、角色与创作条件生成 ${partCount} 部、${actCount} 幕大纲。` },
     system: SYSTEM_PROMPT,
     prompt: [
       `创作参数如下（JSON）：\n${JSON.stringify(params, null, 2)}`,

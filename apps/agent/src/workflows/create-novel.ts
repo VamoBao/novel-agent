@@ -14,6 +14,7 @@ import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-stor
 import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
 import { getDefaultLocationStore, type LocationStore } from "../state/location-store";
 import { collectWorldview } from "./agents/worldview-agent";
+import { runAgentActivity } from "../agents/activity";
 import { createCharacter } from "./agents/character-agent";
 import { createOutline } from "./agents/outline-agent";
 import { autoCreateCharacters, filterNewCharacters } from "./agents/auto-character-agent";
@@ -140,11 +141,12 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
     channel.stage("audience");
     channel.notify("\n【3/6】目标受众");
     channel.notify("正在根据类型推断典型受众群体…");
-    const suggestion = await cache.asyncStep("audience-suggestion", async () => (await generateObject({
+    const suggestion = await cache.asyncStep("audience-suggestion", () => runAgentActivity(
+      { channel, name: "受众分析", input: `小说类型：${genre}` }, async () => (await generateObject({
       model,
       schema: audienceSuggestionSchema,
       prompt: `小说类型：${genre}。请列出该类型小说常见且典型的目标受众群体（5-8 个），每个附一句话阅读偏好说明。`,
-    })).object);
+    })).object));
     const audienceOptions = suggestion.options.map((o) => `${o.label}——${o.description}`);
     const chosen = await cache.asyncStep("audience-selection", () => channel.askMultiSelect("请选择目标受众（可多选）", audienceOptions));
     const supplement = await cache.asyncStep("audience-supplement", () => channel.askText("补充说明（可直接回车跳过）> ", { optional: true }));
@@ -211,11 +213,12 @@ export async function createNovel(options: CreateNovelOptions): Promise<NovelSta
       "请描述核心冲突（由来 / 对角色的影响 / 理想的解决结果，写个大概即可）> ",
     ));
     channel.notify("正在整理核心冲突…");
-    const conflict = await cache.asyncStep("confirmed-conflict", async () => (await generateObject({
+    const conflict = await cache.asyncStep("confirmed-conflict", () => runAgentActivity(
+      { channel, name: "核心冲突整理", input: conflictDescription }, async () => (await generateObject({
       model,
       schema: coreConflictSchema,
       prompt: `小说类型：${genre}。用户对核心冲突的描述：\n${conflictDescription}\n\n请整理为结构化核心冲突，三项均需基于用户描述提炼，可合理细化但不得虚构冲突主轴。`,
-    })).object);
+    })).object));
     channel.present({ kind: "conflict", conflict });
     cache.step("save-conflict", () => novelStore.updateNovel(id, { coreConflict: conflict }));
 

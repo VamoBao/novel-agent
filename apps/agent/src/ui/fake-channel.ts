@@ -1,4 +1,4 @@
-import type { Stage, View } from "@novel/shared";
+import type { Activity, Stage, View } from "@novel/shared";
 import { UserAbortedError } from "./aborted";
 import type { UiChannel } from "./channel";
 
@@ -19,6 +19,11 @@ export class FakeChannel implements UiChannel {
   readonly calls: FakeChannelCall[] = [];
   readonly notifies: string[] = [];
   readonly stages: Stage[] = [];
+  readonly activities: Activity[] = [];
+
+  activity(activity: Activity): void {
+    this.activities.push(activity);
+  }
   /** 全部出现的视图（present 与确认门携带的 view 均记录） */
   readonly views: View[] = [];
 

@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-11-09 [feat] 新建小说执行活动接线：世界观/角色/大纲/角色补全传 activity 配置，受众分析与冲突整理使用单轮活动包装；通用运行器在 SDK 工具开始/结束报告并由 ALS 关联内部提问。确认门、业务缓存与落库语义保持，CLI 保留原输出。主设计、客户端工作台与验收见根 PROGRESS.md；AC：typecheck/lint/704 项全量测试与 Electron build 通过，独立复审无阻塞。
+
 - 2026-11-09 [refactor] 按调用关系归拢 Agent 专属模块：章节规划的登场角色绑定与伏笔回收细化移入 chapter-agent；正文生成及角色/前后章上下文、伏笔上下文、三段审校移入新目录 chapter-writing-agent；独立角色润色移入 character-polish-agent。共迁移 7 个实现与 8 个测试，公共伏笔入库/回收解析、地点入库、缓存恢复与顶层编排保留；模块出口、测试子进程路径/cwd、定向测试脚本及文档同步。AC：typecheck 三工程 / lint / 全量 696 项（65 文件）通过；17 个变动代码/测试文件除路径与 cwd 外内容一致，定向测试脚本路径存在。
 
 - 2026-11-09 [refactor] Agent 目录归拢：worldview-agent / character-agent / outline-agent / chapter-agent / auto-character-agent 各占一个目录（`index.ts` + 已有 `index.test.ts`），`agents/` 根目录不再散放 TypeScript 文件；只调整相对导入，外部导入与业务逻辑保持，同步根入口与两级架构文档。AC：typecheck 三工程 / lint / 全量 696 项（65 文件）通过；逐一还原导入路径后，9 个文件与 HEAD 原文件内容完全一致。
@@ -16,9 +18,9 @@
 
 - 2026-10-17 [feat] 数据布局改造（跨模块需求，主记录与验收见根 PROGRESS.md 同日条目）：本模块大纲 JSON 落盘退役——create-novel / regen-outline 确认后 title/logline/theme 回填 novels 行（不再写 `output/<id>.json`），plan-act-chapters 的 theme 改从 novels 行读取（readOutlineTheme 下线，依赖边界相应收缩）；write-chapter 正文落盘路径改 `<输出目录>/<小说ID>/<部名>/<章名>.md` 且 file_path 以绝对路径落库（写失败包「输出目录不可写」上下文），query.ts rename 零文件联动（moveDocumentArtifact / updateFilePaths 退役）。AC：全量 671 项通过（本模块 write-chapter / create-novel / regen-outline / plan-act-chapters 路径断言随新结构更新，净增 theme 库读断言）。
 
-- 2026-10-16 [fix] OpenAI 角色润色严格输出修复：polish-character.ts 使用本地 polishedCharacterSchema，将顶层和 basicInfo 的全部字段设为必填，角色输入/存储 characterSchema 保留原语义。新增 3 项独立子进程真实 SDK + 内存 SQLite 回归，模拟 OpenAI 递归 required/additionalProperties 校验，覆盖 DeepSeek/Claude 兼容及原基准不变。主记录见根 PROGRESS；AC：typecheck / lint / 全量 666 项通过，独立复审无阻塞。
-
 ## 历史归档
+
+- 2026-10-16 [fix] OpenAI 角色润色严格输出修复：polish-character.ts 使用本地 polishedCharacterSchema，将顶层和 basicInfo 的全部字段设为必填，角色输入/存储 characterSchema 保留原语义。新增 3 项独立子进程真实 SDK + 内存 SQLite 回归，模拟 OpenAI 递归 required/additionalProperties 校验，覆盖 DeepSeek/Claude 兼容及原基准不变。主记录见根 PROGRESS；AC：typecheck / lint / 全量 666 项通过，独立复审无阻塞。
 
 - 2026-10-16 [归档摘要] 写作模型 provider 显式选择：按 WRITING_MODEL_PROVIDER 使用官方 SDK，配置不足回落 Agent 模型，写作与校验语义保持；当时全量 657 项通过。完整实现与验收见 Git 历史。
 

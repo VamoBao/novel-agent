@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import type { AgentMessage, AgentStartOptions, Stage, View } from "@novel/shared";
+import { initialTimeline, timelineReducer } from "./session-timeline";
 
 type RequestMsg = Extract<AgentMessage, { type: "request" }>;
 type Phase = "running" | "error";
@@ -23,6 +24,8 @@ export function useAgentSession({ startOptions, onFinished }: UseAgentSessionOpt
   const [stage, setStage] = useState<Stage | null>(null);
   /** 到达但未作答的提问队列（agent 侧无效应答会以新 id 重问，自然入队） */
   const [requests, setRequests] = useState<RequestMsg[]>([]);
+  const requestsRef = useRef<RequestMsg[]>([]);
+  const [timeline, dispatch] = useReducer(timelineReducer, initialTimeline);
   const [error, setError] = useState<string | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
   const finishedRef = useRef(onFinished);
@@ -32,16 +35,24 @@ export function useAgentSession({ startOptions, onFinished }: UseAgentSessionOpt
   const startingRef = useRef(false);
   const generationRef = useRef(0);
   const completedRef = useRef(false);
+  const endedRef = useRef(false);
+
+  const clearRequests = (): void => {
+    requestsRef.current = [];
+    setRequests([]);
+  };
 
   const start = (): void => {
     if (startingRef.current) return;
     startingRef.current = true;
     completedRef.current = false;
+    endedRef.current = false;
     const generation = ++generationRef.current;
     setPhase("running");
     setFlow([]);
     setStage(null);
-    setRequests([]);
+    clearRequests();
+    dispatch({ type: "reset" });
     setError(null);
     setExitCode(null);
     void (async () => {
@@ -59,6 +70,9 @@ export function useAgentSession({ startOptions, onFinished }: UseAgentSessionOpt
         if (generation !== generationRef.current) return;
         setError(error instanceof Error ? error.message : String(error));
         setPhase("error");
+        endedRef.current = true;
+        clearRequests();
+        dispatch({ type: "interrupt" });
       } finally {
         if (generation === generationRef.current) startingRef.current = false;
       }
@@ -67,7 +81,8 @@ export function useAgentSession({ startOptions, onFinished }: UseAgentSessionOpt
 
   useEffect(() => {
     const offMessage = window.agent.onMessage((message) => {
-      if (startingRef.current) return;
+      if (startingRef.current || endedRef.current || completedRef.current) return;
+      dispatch({ type: "message", message });
       switch (message.type) {
         case "hello":
           setPhase("running");
@@ -85,7 +100,8 @@ export function useAgentSession({ startOptions, onFinished }: UseAgentSessionOpt
           runIdRef.current = message.runId;
           break;
         case "request":
-          setRequests((queue) => [...queue, message]);
+          requestsRef.current = [...requestsRef.current, message];
+          setRequests(requestsRef.current);
           break;
         case "run_finished":
           completedRef.current = true;
@@ -94,14 +110,17 @@ export function useAgentSession({ startOptions, onFinished }: UseAgentSessionOpt
         case "error":
           setError(message.message);
           if (message.fatal) {
-            setRequests([]);
+            endedRef.current = true;
+            clearRequests();
+            dispatch({ type: "interrupt" });
             setPhase("error");
           }
           break;
       }
     });
     const offExit = window.agent.onExit((code) => {
-      if (startingRef.current || completedRef.current) return;
+      if (startingRef.current || completedRef.current || endedRef.current) return;
+      endedRef.current = true;
       setExitCode(code);
       // agent 结束但流程未完成（异常退出 / 被中断 / 用户关闭）：错误视图提供重启；
       // run_finished 先于 exit 到达，完成路径由父级卸载页面，不走这里
@@ -110,7 +129,8 @@ export function useAgentSession({ startOptions, onFinished }: UseAgentSessionOpt
           ? "agent 已结束（本次会话未完成——被中断或输入通道关闭）"
           : `agent 异常退出（exit ${code}）`,
       );
-      setRequests([]);
+      clearRequests();
+      dispatch({ type: "interrupt" });
       setPhase((current) => (current === "running" ? "error" : current));
     });
     start();
@@ -124,9 +144,27 @@ export function useAgentSession({ startOptions, onFinished }: UseAgentSessionOpt
   }, []);
 
   const answer = (id: number, value: string | string[] | boolean | number): void => {
-    setRequests((queue) => queue.filter((request) => request.id !== id));
-    void window.agent.respond(id, value);
+    // 同一次渲染中的双击、Enter+click 也只能提交首个待答问题一次。
+    if (endedRef.current || requestsRef.current[0]?.id !== id) return;
+    requestsRef.current = requestsRef.current.slice(1);
+    setRequests(requestsRef.current);
+    dispatch({ type: "answer", id, answer: value });
+    const generation = generationRef.current;
+    void (async () => {
+      try {
+        await window.agent.respond(id, value);
+      } catch (error) {
+        if (generation !== generationRef.current || completedRef.current || endedRef.current) return;
+        const text = error instanceof Error ? error.message : String(error);
+        dispatch({ type: "delivery-error", id, error: text });
+        dispatch({ type: "interrupt" });
+        endedRef.current = true;
+        clearRequests();
+        setError(`回答发送失败：${text}`);
+        setPhase("error");
+      }
+    })();
   };
 
-  return { phase, flow, stage, requests, currentRequest: requests[0], error, exitCode, answer, start };
+  return { phase, flow, timeline: timeline.entries, stage, requests, currentRequest: requests[0], error, exitCode, answer, start };
 }

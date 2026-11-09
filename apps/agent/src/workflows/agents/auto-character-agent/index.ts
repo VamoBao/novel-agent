@@ -125,6 +125,7 @@ export async function autoCreateCharacters(
   });
 
   const result = await runReactAgent({
+    activity: { channel, name: "角色补全 Agent", input: newCharacters.map((c) => `${c.name}：${c.role}`).join("\n") },
     system: SYSTEM_PROMPT,
     prompt: [
       `世界观（JSON）：\n${JSON.stringify(worldview, null, 2)}`,

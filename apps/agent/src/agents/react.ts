@@ -7,8 +7,10 @@ import {
 } from "ai";
 import { model } from "../providers/agent-model";
 import { getAgentMessageCache } from "./session-context";
+import { AgentActivity, type AgentActivityOptions } from "./activity";
 
 export interface ReactAgentOptions {
+  activity?: AgentActivityOptions;
   system: string;
   prompt: string;
   tools: ToolSet;
@@ -64,6 +66,8 @@ export async function runReactAgent(options: ReactAgentOptions): Promise<ReactAg
   const cache = getAgentMessageCache();
   const traceId = cache?.store.beginTrace(cache.runId, cache.agentName, system, messages);
   let persistedMessages = messages;
+  const activity = options.activity ? new AgentActivity(options.activity) : undefined;
+  const observedTools = activity?.observeTools(tools) ?? tools;
 
   try {
     for (;;) {
@@ -76,7 +80,13 @@ export async function runReactAgent(options: ReactAgentOptions): Promise<ReactAg
         model,
         system,
         messages,
-        tools,
+        tools: observedTools,
+        onToolExecutionStart: ({ toolCall }) => activity?.startTool(toolCall),
+        onToolExecutionEnd: ({ toolCall, toolOutput }) => {
+          activity?.endTool(toolCall.toolCallId,
+            toolOutput.type === "tool-error" ? toolOutput.error : toolOutput.output,
+            toolOutput.type === "tool-error");
+        },
         stopWhen: [
           ...(stopTool ? [hasToolCall(stopTool)] : []),
           ...(isDone ? [() => isDone()] : []),
@@ -102,7 +112,9 @@ export async function runReactAgent(options: ReactAgentOptions): Promise<ReactAg
       messages = [...persistedMessages, { role: "user", content: hint }];
     }
     if (cache && traceId) cache.store.saveTrace(traceId, persistedMessages, "completed");
+    activity?.finish(isDone?.() === false ? "尚未完成任务，请继续流程重试" : text || `已完成 ${stepCount} 步执行`, isDone?.() === false);
   } catch (error) {
+    activity?.finish(error, true);
     if (cache && traceId) {
       cache.store.saveTrace(traceId, persistedMessages, "failed", error instanceof Error ? error.message : String(error));
     }

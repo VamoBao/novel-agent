@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { AgentMessage } from "@novel/shared";
 import { UserAbortedError } from "./aborted";
 import { ProtocolChannel } from "./protocol-channel";
+import { withActivityScope } from "./activity-scope";
 
 /** 出站消息收集器 + 按应答 id 回注 */
 function harness() {
@@ -15,6 +16,14 @@ function harness() {
 }
 
 describe("ProtocolChannel", () => {
+  test("无效回答在工具作用域外重问时，仍关联原工具活动", async () => {
+    const { channel, respond, requests } = harness();
+    const promise = withActivityScope("tool-active", () => channel.askInt("幕数", { min: 3, max: 20, default: 5 }));
+    respond(1, 99);
+    respond(2, 5);
+    await expect(promise).resolves.toBe(5);
+    expect(requests().map((request) => request.activityId)).toEqual(["tool-active", "tool-active"]);
+  });
   test("askText：空应答（非 optional）重问，新 request 用新 id", async () => {
     const { channel, respond, requests } = harness();
     const promise = channel.askText("问");

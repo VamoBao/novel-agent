@@ -43,7 +43,7 @@ test.each(["outline", "chapter", "preview", "legacy-preview"] as const)(
              foreshadowRecoverBindings: [{index: 2, chapterName: '破局章'}]};
         await act(async () => onMessage({type: 'request', id: 7, ask: {type: 'confirm', prompt: '确认计划？', view}}));
         const text = container.querySelector('.viewcard').textContent;
-        await act(async () => [...container.querySelectorAll('button')].find(b => b.textContent === '确认').click());
+        await act(async () => container.querySelector('.question button.primary').click());
         var result = {text, responses, questionClosed: !container.querySelector('.question')};
       } else {
         const entry = {id: 'f1', ...base, recoveryStatus: 'unrecovered', actNodeId: 'act1',

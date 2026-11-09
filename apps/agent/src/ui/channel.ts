@@ -1,4 +1,4 @@
-import type { Stage, View } from "@novel/shared";
+import type { Activity, Stage, View } from "@novel/shared";
 
 /**
  * 交互通道：agent 与用户之间的全部交互（提问、确认、展示）都经此接口，
@@ -14,6 +14,8 @@ import type { Stage, View } from "@novel/shared";
  * 告知模型优雅收尾，而非直接中止整个工作流。
  */
 export interface UiChannel {
+  /** 可选执行活动出口；终端保持既有输出，协议通道转发结构化快照。 */
+  activity?(activity: Activity): void;
   /** 原始一行输入；通道已关闭返回 null（仅 ask_user 工具使用） */
   askLine(prompt: string): Promise<string | null>;
 
