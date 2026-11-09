@@ -1,9 +1,9 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { runReactAgent } from "../../agents/react";
-import type { UiChannel } from "../../ui/channel";
-import { getDefaultCharacterStore, type CharacterStore } from "../../state/character-store";
-import { getDefaultLocationStore, type LocationStore } from "../../state/location-store";
+import { runReactAgent } from "../../../agents/react";
+import type { UiChannel } from "../../../ui/channel";
+import { getDefaultCharacterStore, type CharacterStore } from "../../../state/character-store";
+import { getDefaultLocationStore, type LocationStore } from "../../../state/location-store";
 import {
   outlineSchema,
   newCharacterSchema,
@@ -14,7 +14,7 @@ import {
   type OutlineNewForeshadow,
   type Outline,
 } from "@novel/shared";
-import type { NovelParams } from "../../state/types";
+import type { NovelParams } from "../../../state/types";
 
 const SYSTEM_PROMPT = `你是一名资深小说编辑与故事结构师。你的任务：基于给定的创作参数（类型、受众、世界观、角色、核心冲突，可能部分缺失）创作一本小说的大纲。
 

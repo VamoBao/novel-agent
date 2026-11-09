@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { outlineSchemaFor, saveOutlineInputSchemaFor } from "./outline-agent";
+import { outlineSchemaFor, saveOutlineInputSchemaFor } from "./index";
 import { outlineSchema, type Outline } from "@novel/shared";
 
 const act = (name: string) => ({

@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-11-09 [refactor] Agent 目录归拢：worldview-agent / character-agent / outline-agent / chapter-agent / auto-character-agent 各占一个目录（`index.ts` + 已有 `index.test.ts`），`agents/` 根目录不再散放 TypeScript 文件；只调整相对导入，外部导入与业务逻辑保持，同步根入口与两级架构文档。AC：typecheck 三工程 / lint / 全量 696 项（65 文件）通过；逐一还原导入路径后，9 个文件与 HEAD 原文件内容完全一致。
+
 - 2026-10-18 [perf] 正文修订复用原生写作对话与缓存（用户已确认调研建议，三任务串行完成后清单归一）：write-chapter 初稿资料/要求仅组装一次，后续保留原生 ModelMessage 历史并仅追加当前报告和修订最新稿指令，正文空白/推理签名/provider 元信息不重建；三段独立审校、三轮上限、保底落盘/覆盖失败保护保持。写作调用启用 canonical Claude 默认 5 分钟缓存；onUsage 提供成功调用 token/缓存读写/耗时，headless 经 stderr JSON 记录。根据 raw 白名单判断计数存在性，缺失 null/真实零 0，不输出 raw。AC：typecheck/lint/全量 684 项通过；新增原生历史回归 1 项与真实 SDK/SQLite/HTTP 边界测试 11 项，覆盖三协议/回落/缺失及部分 usage/零计数/协议隔离，独立复审通过。设计和计划见 docs/superpowers 同日 chapter-conversation-cache 文档；无真实服务调用，线上缓存与成本/文学质量待实际使用观察。
 
 - 2026-10-17 [feat] 数据布局改造（跨模块需求，主记录与验收见根 PROGRESS.md 同日条目）：本模块大纲 JSON 落盘退役——create-novel / regen-outline 确认后 title/logline/theme 回填 novels 行（不再写 `output/<id>.json`），plan-act-chapters 的 theme 改从 novels 行读取（readOutlineTheme 下线，依赖边界相应收缩）；write-chapter 正文落盘路径改 `<输出目录>/<小说ID>/<部名>/<章名>.md` 且 file_path 以绝对路径落库（写失败包「输出目录不可写」上下文），query.ts rename 零文件联动（moveDocumentArtifact / updateFilePaths 退役）。AC：全量 671 项通过（本模块 write-chapter / create-novel / regen-outline / plan-act-chapters 路径断言随新结构更新，净增 theme 库读断言）。
@@ -16,9 +18,9 @@
 
 - 2026-10-16 [feat] 模型 provider 显式选择（跨模块需求，主记录与验收见根 PROGRESS.md 同日条目）：本模块 `write-chapter.ts` 消费的写作模型改由 `providers/writing-model.ts` 按 `WRITING_MODEL_PROVIDER` 所选接口类型调用对应官方 SDK（模型名 / Key / Base URL 三字段齐才启用、未配置回落 Agent 模型、非法 provider 抛可读错误），写作初稿 prompt 与校验链路零改动；本模块 ARCHITECTURE.md 的写作模型描述同步。AC：全量 657 项通过（本模块用例零改动、全数保留）。
 
-- 2026-10-16 [feat] 伏笔多幕回收规划：大纲必填多幕计划；章节输入补完整当前树，优先安排本幕既有伏笔，确认前强校验覆盖、引用及先后。新增 foreshadow-plan.ts 负责计划解析与安全恢复合并，foreshadow-refinement.ts 处理已确认空章计划在暂停期间变为已有章时的受限细化；未确认重跑刷新清单，确认时固定序号，细化单独缓存。入库先处理既有绑定再新增，跨幕追加不覆盖，用户编辑优先；后续计划幕未细化时写作/审校保持阶段回收。跨模块主记录见根 PROGRESS.md。AC：typecheck / lint / 全量627项通过、独立复审通过；包含真实两幕交错恢复与细化确认后DB失败零重问回归，未调用真实模型。
-
 ## 历史归档
+
+- 2026-10-16 [归档摘要] 伏笔多幕回收规划：完整大纲上下文与计划校验、安全恢复与受限细化、跨幕追加绑定及阶段回收约束已完成；原 AC 为 typecheck / lint / 全量 627 项通过。完整实现与验收见 Git 历史。
 
 - 2026-10-18 历史滚动摘要：2026-10-14 写作偏好两级配置已归档：按小说/系统/默认解析篇幅与文风合格线，写作和审校同阈值；完整验收见根PROGRESS历史摘要与Git记录。；叙事视角创作条件；写作偏好反馈阈值一致性（完整实现与验收见对应提交。）；本次归并 2026-10-15 三条主流程缓存与恢复（确认结果/原生消息留存、幂等恢复，AC：590 项）及伏笔命名 prompt 约束（全书幕名/本幕章名唯一，AC：545 项），完整实现与验收见 Git 历史。
 

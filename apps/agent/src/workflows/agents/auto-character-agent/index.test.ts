@@ -38,11 +38,11 @@ mock.module("ai", () => ({
   stepCountIs: () => () => false,
 }));
 
-const { autoCreateCharacters, filterNewCharacters } = await import("./auto-character-agent");
-const { openDatabase } = await import("../../state/db");
-const { CharacterStore } = await import("../../state/character-store");
-const { NovelStore } = await import("../../state/novel-store");
-const { FakeChannel } = await import("../../ui/fake-channel");
+const { autoCreateCharacters, filterNewCharacters } = await import("./index");
+const { openDatabase } = await import("../../../state/db");
+const { CharacterStore } = await import("../../../state/character-store");
+const { NovelStore } = await import("../../../state/novel-store");
+const { FakeChannel } = await import("../../../ui/fake-channel");
 
 const worldview = { background: { geography: "九州大陆" }, taboos: ["不可出现现代科技"] };
 const outline = {
@@ -205,7 +205,7 @@ describe("autoCreateCharacters extraContext", () => {
     const tempDir2 = await mkdtemp(join(tmpdir(), "novel-auto-extra-"));
     const db = openDatabase(join(tempDir2, "test.db"));
     const characterStore = new CharacterStore(db);
-    new (await import("../../state/novel-store")).NovelStore(db).createNovel({ id: "novel-extra" });
+    new (await import("../../../state/novel-store")).NovelStore(db).createNovel({ id: "novel-extra" });
     const channel = new FakeChannel([]);
 
     const baseOptions = {

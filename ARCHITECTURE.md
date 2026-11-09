@@ -163,15 +163,15 @@ apps/agent/src/
     │                    #   清单内去重 / 空名剔除）+ plantNewLocations 逐条 addLocation（name+description）并 notify；
     │                    #   三编排（create-novel / regen-outline / plan-act-chapters）确认后、角色自动入库之前调用
     └── agents/
-        ├── worldview-agent.ts   # 世界观 ReAct Agent（多轮追问 + 终态提交）
-        ├── character-agent.ts   # 角色 ReAct Agent（逐字段「发散丰富→确认→保存」：标识性字段照存原词、描述性字段扩写；终态组装校验）
-        ├── outline-agent.ts     # 大纲 ReAct Agent（部→幕两级结构，用户确认门 + 幕/部数强校验；
+        ├── worldview-agent/index.ts   # 世界观 ReAct Agent（多轮追问 + 终态提交）
+        ├── character-agent/index.ts   # 角色 ReAct Agent（逐字段「发散丰富→确认→保存」：标识性字段照存原词、描述性字段扩写；终态组装校验）
+        ├── outline-agent/index.ts     # 大纲 ReAct Agent（部→幕两级结构，用户确认门 + 幕/部数强校验；
         │                         #   list_characters 角色库查询工具，save_outline 结构化入参附
         │                         #   newCharacters 新增角色清单、newForeshadows 伏笔清单（挂幕不挂章，清单内名字 /
         │                         #   表面行为不得重复）与 newLocations 新增地点清单（名字+一句话定位，名字不得重复）
         │                         #   随大纲进确认门连带确认；另配 list_locations 地点库查询工具；
         │                         #   入参 OutlineContext 松绑——genre/audience/coreConflict 可选，重生成会话仅喂库内数据）
-        ├── chapter-agent.ts     # 章节 ReAct Agent（单幕拆章：按幕梗概与情节点推荐章节数量与概述，用户确认门；单幕规划会话调用；
+        ├── chapter-agent/index.ts     # 章节 ReAct Agent（单幕拆章：按幕梗概与情节点推荐章节数量与概述，用户确认门；单幕规划会话调用；
         │                         #   list_characters 角色库查询工具 + prompt 已有角色行与本幕未绑伏笔行——概述尽量点名
         │                         #   出场角色、体现伏笔表面行为，save_chapters 经 saveChaptersInputSchema 结构化入参附顶层
         │                         #   newCharacters 新增角色清单（名字不得重复）、newForeshadows 新伏笔清单（登场章名，
@@ -179,7 +179,7 @@ apps/agent/src/
         │                         #   新增地点清单（名字不得重复）随规划进确认门连带确认；另配 list_locations 地点库查询工具
         │                         #   连带确认；产物 ChapterPlanSubmission = plan + newCharacters + newForeshadows
         │                         #   + foreshadowBindings）
-        └── auto-character-agent.ts  # 新增角色自动创建 Agent（无确认门：依据世界观与大纲为清单逐个填充角色卡并
+        └── auto-character-agent/index.ts  # 新增角色自动创建 Agent（无确认门：依据世界观与大纲为清单逐个填充角色卡并
                                      #   调 save_character 终态工具入库，isDone 按清单数量判定、maxSteps 耗尽抛
                                      #   可读错误保留已入库卡；增可选 extraContext 附加上下文——章节规划喂章级
                                      #   素材，既有调用方零改动；另导出 filterNewCharacters 编排层兜底 diff 纯函数——

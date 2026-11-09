@@ -1,8 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { runReactAgent } from "../../agents/react";
-import { createAskUserTool } from "../../tools";
-import type { UiChannel } from "../../ui/channel";
+import { runReactAgent } from "../../../agents/react";
+import { createAskUserTool } from "../../../tools";
+import type { UiChannel } from "../../../ui/channel";
 import { characterSchema, type Character } from "@novel/shared";
 
 /**

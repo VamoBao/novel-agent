@@ -1,6 +1,6 @@
 import { tool } from "ai";
-import { runReactAgent } from "../../agents/react";
-import type { UiChannel } from "../../ui/channel";
+import { runReactAgent } from "../../../agents/react";
+import type { UiChannel } from "../../../ui/channel";
 import {
   characterSchema,
   type ChapterPlan,
@@ -9,7 +9,7 @@ import {
   type Outline,
   type Worldview,
 } from "@novel/shared";
-import { getDefaultCharacterStore, type CharacterStore, type StoredCharacter } from "../../state/character-store";
+import { getDefaultCharacterStore, type CharacterStore, type StoredCharacter } from "../../../state/character-store";
 
 const SYSTEM_PROMPT = `你是一名专业的小说角色策划。你的任务：依据世界观与大纲，为「新增角色清单」中的每个角色自动填写完整角色卡并调用 save_character 入库。
 

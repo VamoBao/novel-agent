@@ -5,6 +5,8 @@
 
 ## 文件职责
 
+`agents/` 每个 Agent 独占同名目录，入口为 `index.ts`，已有测试放在同目录 `index.test.ts`；外部沿用 `./agents/<名称>-agent` 目录导入。
+
 ```text
 apps/agent/src/workflows/
 ├── index.ts                  # 模块出口：createNovel / planActChapters / regenerateOutline /
@@ -120,10 +122,10 @@ apps/agent/src/workflows/
 │                             #   （新伏笔带登场章与幕归属入库 + 绑定指令把既有未绑伏笔按 1-based 序号 patch
 │                             #   登场章，序号越界 / 章名未匹配跳过并警告）；模块内编排直接导入，不入 index.ts 出口
 └── agents/                   # 业务 subAgent（每个对应一个创作环节）
-    ├── worldview-agent.ts    # collectWorldview：多轮追问补全世界观（终态工具 submit_worldview）
-    ├── character-agent.ts    # createCharacter：字段协议逐字段确认角色卡（save_field / submit_character）
+    ├── worldview-agent/index.ts    # collectWorldview：多轮追问补全世界观（终态工具 submit_worldview）
+    ├── character-agent/index.ts    # createCharacter：字段协议逐字段确认角色卡（save_field / submit_character）
     │                         #   另导出 FIELD_NAMES / FIELD_SPECS / missingRequiredFields / assembleCharacter 纯函数
-    ├── outline-agent.ts      # createOutline：生成「部→幕」两级大纲并过用户确认门（save_outline）；
+    ├── outline-agent/index.ts      # createOutline：生成「部→幕」两级大纲并过用户确认门（save_outline）；
     │                         #   list_characters 角色库查询工具，save_outline 经 saveOutlineInputSchemaFor
     │                         #   结构化入参附 newCharacters 新增角色清单（清单内名字不得重复）与 newForeshadows
     │                         #   伏笔清单（挂幕不挂章，清单内表面行为不得重复）随大纲进确认门连带确认；
@@ -131,7 +133,7 @@ apps/agent/src/workflows/
     │                         #   入参 OutlineContext 松绑（genre/narrativePov/audience/coreConflict 可选，重生成仅喂库内数据）；
     │                         #   system prompt 含叙事视角要求（限知视角的信息遮蔽与揭示节奏、多视角轮换在幕梗概体现切换安排、全书不得漂移）
     │                         #   另导出 outlineSchemaFor（恰好 M 部共 N 幕 refine 强校验）
-    ├── chapter-agent.ts      # planChapters：单幕拆章——按幕梗概与情节点推荐章节数量、概述与
+    ├── chapter-agent/index.ts      # planChapters：单幕拆章——按幕梗概与情节点推荐章节数量、概述与
     │                         #   逐章登场角色清单（chapters[].characters——库内与新角色全列、
     │                         #   全员必填 role：库内=在本章中的作用 / 新角色=设定级一句话定位），
     │                         #   过用户确认门（save_chapters；chapterPlanSchema 强约束 1~12 章、
@@ -145,7 +147,7 @@ apps/agent/src/workflows/
     │                         #   foreshadowBindings 绑定指令（序号不得重复）随规划进确认门连带确认；
     │                         #   产物 ChapterPlanSubmission = { plan, newForeshadows, foreshadowBindings }
     │                         #   （第三参注入 novelId / characterStore / unboundForeshadows）
-    ├── auto-character-agent.ts # 新增角色自动创建 autoCreateCharacters（无确认门，仅 notify 通报）：
+    ├── auto-character-agent/index.ts # 新增角色自动创建 autoCreateCharacters（无确认门，仅 notify 通报）：
     │                         #   依据世界观与大纲为清单逐个填充角色卡并调 save_character 终态工具入库，
     │                         #   isDone 按清单数量判定、maxSteps=4+清单×2 耗尽抛可读错误保留已入库卡；
     │                         #   增可选 extraContext 附加上下文块（章节规划全文等填卡一手素材，纯增量、
@@ -154,16 +156,16 @@ apps/agent/src/workflows/
     │                         #   已有名 / 清单内同名去重保留首个 / 空名剔除）与 collectChapterCharacters
     │                         #   （章节规划逐章登场清单→幕级并集，跨章同名保首个 role——确认视图派生
     │                         #   与编排层建卡共用）；独立导出供写作期工作流复用
-    ├── character-agent.test.ts  # 字段协议纯函数单测（规格完整性 / 缺失列表 / 组装校验）
-    ├── outline-agent.test.ts    # 结构校验单测（outlineSchemaFor 恰好 M 部共 N 幕：通过 / 拒绝含提示 /
+    ├── character-agent/index.test.ts  # 字段协议纯函数单测（规格完整性 / 缺失列表 / 组装校验）
+    ├── outline-agent/index.test.ts    # 结构校验单测（outlineSchemaFor 恰好 M 部共 N 幕：通过 / 拒绝含提示 /
     │                         #   底座每部至少一幕；saveOutlineInputSchemaFor：清单合规通过 / 项内字段
     │                         #   空串拒绝 / 清单内名字重复拒绝 / 部幕强校验仍生效；newForeshadows
     │                         #   必填数组、空数组合法 / 清单内表面行为重复拒绝）
-    ├── chapter-agent.test.ts    # saveChaptersInputSchema 单测（规划含逐章登场清单合规通过 / 清单缺省、
+    ├── chapter-agent/index.test.ts    # saveChaptersInputSchema 单测（规划含逐章登场清单合规通过 / 清单缺省、
     │                         #   空清单、空名空定位、同章重名拒绝 / 章节数量约束 1~12 不回归；
     │                         #   newForeshadows / foreshadowBindings 必填数组、空数组合法 /
     │                         #   伏笔表面行为与绑定序号重复拒绝）
-    ├── auto-character-agent.test.ts # 角色自动创建单测（filterNewCharacters 剔除库内已有名与去重 /
+    ├── auto-character-agent/index.test.ts # 角色自动创建单测（filterNewCharacters 剔除库内已有名与去重 /
     │                         #   空清单透传；autoCreateCharacters 全清单入库含守卫拒绝后修正 /
     │                         #   maxSteps 耗尽抛可读错误且已入库卡保留；extraContext 进 prompt、
     │                         #   不传不出现）

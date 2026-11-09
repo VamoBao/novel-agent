@@ -4,7 +4,7 @@ import {
   FIELD_NAMES,
   FIELD_SPECS,
   missingRequiredFields,
-} from "./character-agent";
+} from "./index";
 
 const completeRecord = {
   name: "陈默",

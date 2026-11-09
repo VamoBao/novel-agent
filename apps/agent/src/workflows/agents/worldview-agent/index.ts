@@ -1,7 +1,7 @@
 import { tool } from "ai";
-import { runReactAgent } from "../../agents/react";
-import { createAskUserTool } from "../../tools";
-import type { UiChannel } from "../../ui/channel";
+import { runReactAgent } from "../../../agents/react";
+import { createAskUserTool } from "../../../tools";
+import type { UiChannel } from "../../../ui/channel";
 import { worldviewSchema, type Worldview } from "@novel/shared";
 
 const SUBMIT_TOOL = "submit_worldview";

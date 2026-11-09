@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { saveChaptersInputSchema, validateChapterForeshadowPlan, type PlanChaptersInput } from "./chapter-agent";
+import { saveChaptersInputSchema, validateChapterForeshadowPlan, type PlanChaptersInput } from "./index";
 import { chapterPlanSchema, type ChapterPlan } from "@novel/shared";
 
 const threeChapterPlan: ChapterPlan = chapterPlanSchema.parse({

@@ -1,11 +1,11 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { runReactAgent } from "../../agents/react";
-import type { UiChannel } from "../../ui/channel";
-import { getDefaultCharacterStore, type CharacterStore } from "../../state/character-store";
-import { getDefaultLocationStore, type LocationStore } from "../../state/location-store";
-import type { StoredForeshadow } from "../../state/foreshadow-store";
-import { collectChapterCharacters, filterNewCharacters } from "./auto-character-agent";
+import { runReactAgent } from "../../../agents/react";
+import type { UiChannel } from "../../../ui/channel";
+import { getDefaultCharacterStore, type CharacterStore } from "../../../state/character-store";
+import { getDefaultLocationStore, type LocationStore } from "../../../state/location-store";
+import type { StoredForeshadow } from "../../../state/foreshadow-store";
+import { collectChapterCharacters, filterNewCharacters } from "../auto-character-agent";
 import {
   chapterPlanSchema,
   newLocationSchema,
