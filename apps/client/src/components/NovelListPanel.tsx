@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Library, Pencil, Pin, RefreshCw, Ruler, Star, Trash2 } from "lucide-react";
+import { BookOpen, CircleAlert, Library, LoaderCircle, MoreHorizontal, Pencil, Pin, RefreshCw, Ruler, Star, Trash2 } from "lucide-react";
 import type { NovelListItem } from "@novel/shared";
 import { DeleteNovelDialog } from "./DeleteNovelDialog";
 
@@ -79,28 +79,27 @@ export function NovelListPanel({
   return (
     <div className="library">
       <div className="library-head">
-        <strong>
-          <Library className="ic" aria-hidden />
-          书库
-        </strong>
-        <button className="icon-btn" onClick={onRefresh} title="刷新列表">
+        <span className="browse-panel-icon"><Library size={19} aria-hidden /></span>
+        <div className="browse-panel-title"><strong>书库</strong><span>故事与灵感</span></div>
+        {novels ? <span className="browse-count" aria-label={`${novels.length} 本小说`}>{novels.length}</span> : null}
+        <button className="icon-btn" onClick={onRefresh} title="刷新列表" aria-label="刷新列表">
           <RefreshCw className="ic-btn" aria-hidden />
         </button>
       </div>
 
-      {novels === null ? <p className="pane-hint">加载中…</p> : null}
+      {novels === null ? <p className="pane-hint browse-panel-state" role="status"><LoaderCircle className="ic browse-spinner" aria-hidden />正在加载书库…</p> : null}
 
       {novels !== null && error ? (
-        <p className="pane-error">
-          {error}
+        <div className="pane-error browse-panel-state" role="alert">
+          <CircleAlert className="ic" aria-hidden /><p>{error}</p>
           <button className="ghost" onClick={onRefresh}>
             重试
           </button>
-        </p>
+        </div>
       ) : null}
 
       {novels !== null && !error && novels.length === 0 ? (
-        <p className="pane-hint">还没有小说，点右上角「新建小说」按钮开始创作。</p>
+        <div className="pane-hint browse-panel-state"><BookOpen size={24} aria-hidden /><strong>第一本故事，等你开始</strong><p>点击右上角「新建小说」，把一个想法慢慢写成故事。</p></div>
       ) : null}
 
       <ul className="novel-list">
@@ -122,6 +121,8 @@ export function NovelListPanel({
             <li key={novel.id}>
               <button
                 className={`novel-item${novel.id === selectedId ? " active" : ""}`}
+                aria-pressed={novel.id === selectedId}
+                title={novel.name ?? "未命名小说"}
                 onClick={() => onSelect(novel.id)}
                 onContextMenu={(event) => {
                   event.preventDefault();
@@ -129,16 +130,21 @@ export function NovelListPanel({
                   setMenu({ novelId: novel.id, x: event.clientX, y: event.clientY });
                 }}
               >
+                <span className="novel-cover" aria-hidden><BookOpen size={19} /></span>
                 <span className="novel-name">
-                  {novel.pinned ? <Pin className="ic" aria-hidden /> : null}
                   {novel.name ?? "未命名小说"}
-                  {novel.favorite ? <Star className="ic-after" aria-hidden /> : null}
                 </span>
+                {novel.pinned || novel.favorite ? <span className="novel-flags">
+                  {novel.pinned ? <Pin size={12} aria-hidden /> : null}
+                  {novel.favorite ? <Star size={12} aria-hidden /> : null}
+                </span> : null}
               </button>
             </li>
           ),
         )}
       </ul>
+
+      {novels && novels.length > 0 ? <p className="library-footer"><MoreHorizontal size={15} aria-hidden />右键小说可管理与设置偏好</p> : null}
 
       {menu && menuNovel ? (
         <div

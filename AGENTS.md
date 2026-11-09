@@ -6,6 +6,10 @@
 
 新建/恢复创作页 `CreationFlow` 使用阶段导航与卡片时间流，问题、已提交答案、成果、通知、工具及子 Agent 执行均由卡片展示；调用详情可展开，运行/等待输入/完成/失败/中断状态按真实事件更新。专属组件、文案与样式位于 `apps/client/src/components/creation/`，`hooks/session-timeline.ts` 管理有序历史，共享 `useAgentSession` 保留其他会话页原 flow 契约；当前页面保留交互历史，恢复流程复用业务缓存而不完整重放旧会话。shared `activity.ts` 定义快照，stdio 协议 v3 新增 activity 与 request.activityId；agent `agents/activity.ts` 经 SDK 工具生命周期回调和 `ui/activity-scope.ts` ALS 关联工具内部提问，ProtocolChannel 转发、FakeChannel 记录、CLI 保留原输出。世界观/角色/大纲/角色补全及受众分析/冲突整理已接通。完整结构与验证见根 ARCHITECTURE.md / PROGRESS.md。
 
+## 书库、结构与预览界面（2026-11-09）
+
+浏览页以 `App` 的 `browse-app` 根类承接三栏面板，专属样式位于 `apps/client/src/components/library/library-workspace.css`；书库卡片保留选中、置顶/收藏、右键管理与内联重命名，结构按资料类型分组并保留折叠/新增/刷新入口。`ReadOnlyProfiles.tsx` 负责浏览专用世界背景/禁忌与角色身份/内核/经历/创作方向分区，角色固定基准与迁移维护语义保持；共享 `ViewCard` 仍服务创作确认视图。正文通过主预览区完整滚动阅读，窄窗口自适应，700px 以下书库转为顶部横向列表。视觉与交互约定见根 `DESIGN.md`，数据接口和 Agent 协议不受此展示优化影响。
+
 ## 技术栈
 
 - 运行时：Bun 1.4（`bun.lock` 锁定依赖，`bun install` 安装）

@@ -16,6 +16,7 @@ import { PreviewPane } from "./components/PreviewPane";
 import { SettingsPage } from "./components/SettingsPage";
 import { StructureTreePanel, type Selection } from "./components/StructureTreePanel";
 import { WritingPrefsDialog } from "./components/WritingPrefsDialog";
+import "./components/library/library-workspace.css";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -366,13 +367,15 @@ export function App() {
   }
 
   return (
-    <div className="app">
+    <div className="app browse-app">
       <header className="header">
         <div className="header-left">
           <button
             className="icon-btn"
             onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
             title={sidebarCollapsed ? "展开小说列表" : "折叠小说列表"}
+            aria-label={sidebarCollapsed ? "展开小说列表" : "折叠小说列表"}
+            aria-expanded={!sidebarCollapsed}
           >
             <Menu className="ic-btn" aria-hidden />
           </button>
@@ -380,9 +383,10 @@ export function App() {
             <BookOpen className="ic" aria-hidden />
             novel-agent
           </h1>
+          <span className="browse-header-caption">创作书库</span>
         </div>
         <div className="header-actions">
-          <button className="icon-btn" onClick={() => setSettingsOpen(true)} title="设置">
+          <button className="icon-btn" onClick={() => setSettingsOpen(true)} title="设置" aria-label="设置">
             <Settings className="ic-btn" aria-hidden />
           </button>
           <button className="primary" onClick={() => setCreating(true)}>
@@ -393,7 +397,7 @@ export function App() {
       </header>
 
       <div className={`workspace${sidebarCollapsed ? " collapsed" : ""}`}>
-        <aside className="sidebar">
+        <aside className="sidebar" aria-label="小说书库">
           <NovelListPanel
             novels={novels}
             error={libraryError}
@@ -407,10 +411,10 @@ export function App() {
             onDelete={(id) => void handleDelete(id)}
           />
         </aside>
-        <nav className="tree-pane">
+        <nav className="tree-pane" aria-label="小说资料与结构">
           {detail?.novel.id === selectedId && !detailLoading && !detailError && detail.pendingRuns?.length ? (
-            <div className="structure">
-              <p className="hint">未完成的创作流程</p>
+            <section className="resume-card">
+              <p className="resume-card-title"><Play className="ic" aria-hidden />继续上次创作</p>
               {detail.pendingRuns.map((run) => {
                 const actName = run.kind === "plan-chapters"
                   ? detail.outlineNodes.find((node) => node.id === run.targetId)?.name
@@ -421,13 +425,13 @@ export function App() {
                     ? `继续本幕章节规划${actName ? ` · ${actName}` : ""}`
                     : "继续大纲重生成";
                 return (
-                  <button key={run.id} className="tree-node" onClick={() => setResumeRunId(run.id)}>
+                  <button key={run.id} className="tree-node resume-entry" onClick={() => setResumeRunId(run.id)}>
                     <Play className="ic" aria-hidden />
                     {label}
                   </button>
                 );
               })}
-            </div>
+            </section>
           ) : null}
           <StructureTreePanel
             detail={detail}

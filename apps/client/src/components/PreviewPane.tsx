@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CircleCheck, CirclePause, Pencil } from "lucide-react";
+import { BookOpen, CircleAlert, CircleCheck, CirclePause, LoaderCircle, Pencil } from "lucide-react";
 import type { ReactElement } from "react";
 import type {
   CharacterEntry,
@@ -8,14 +8,13 @@ import type {
   NovelDetail,
   OutlineNodeEntry,
   StyleReferenceEntry,
-  View,
 } from "@novel/shared";
 import { CharacterEditForm } from "./CharacterEditForm";
 import { CharacterMigrationPanel } from "./CharacterMigrationPanel";
 import { ChapterRegenDialog } from "./ChapterRegenDialog";
 import { ForeshadowEditForm, recoveryLabel } from "./ForeshadowEditForm";
 import { StyleEditForm } from "./StyleEditForm";
-import { ViewCard } from "./ViewCard";
+import { CharacterProfile, WorldviewProfile } from "./library/ReadOnlyProfiles";
 import { OutlineNodeCard } from "./OutlineNodeCard";
 import type { ChapterForeshadow, ChapterWriteProgress } from "./OutlineNodeCard";
 import type { Selection } from "./StructureTreePanel";
@@ -90,9 +89,13 @@ function toChapterCastNames(node: OutlineNodeEntry, detail: NovelDetail): string
   return node.characterIds.map((id) => nameById.get(id) ?? id);
 }
 
-/** worldview 选中项 → 只读视图（角色预览带编辑入口自成一节；大纲节点不经此处） */
-function toWorldviewView(detail: NovelDetail): View | null {
-  return detail.worldview ? { kind: "worldview", worldview: detail.worldview } : null;
+function PreviewState({ loading, error, hasNovel = false }: { loading?: boolean; error?: string | null; hasNovel?: boolean }) {
+  const Icon = loading ? LoaderCircle : error ? CircleAlert : BookOpen;
+  return <section className={`viewcard browse-empty${error ? " is-error" : ""}`} role={loading ? "status" : error ? "alert" : undefined}>
+    <span className="browse-empty-icon"><Icon size={28} className={loading ? "browse-spinner" : undefined} aria-hidden /></span>
+    <h2>{loading ? "正在载入故事资料" : error ? "资料暂时无法加载" : hasNovel ? "选择一份故事资料" : "在这里，展开你的故事"}</h2>
+    <p>{loading ? "稍等片刻，即可继续浏览。" : error ?? (hasNovel ? "点击左侧结构中的世界、人物或章节，查看设定与正文。" : "从书库选择一本小说，让世界设定、人物与故事脉络在这里展开。")}</p>
+  </section>;
 }
 
 /**
@@ -112,7 +115,7 @@ function CharacterPreview({
 }) {
   return (
     <>
-      <ViewCard view={{ kind: "character-card", character: entry }} />
+      <CharacterProfile character={entry} />
       <CharacterMigrationPanel
         novelId={novelId}
         character={entry}
@@ -464,11 +467,7 @@ export function PreviewPane({
 
   let body: ReactElement;
   if (!detail) {
-    body = (
-      <p className="pane-hint">
-        {loading ? "加载中…" : error ?? "← 从书库选择一本小说，点击中间结构树预览内容。"}
-      </p>
-    );
+    body = <PreviewState loading={loading} error={loading ? null : error} />;
   } else if (creatingCharacter) {
     body = (
       <CharacterEditForm
@@ -487,7 +486,7 @@ export function PreviewPane({
       />
     );
   } else if (!selection) {
-    body = <p className="pane-hint">← 点击中间结构树节点预览对应内容。</p>;
+    body = <PreviewState hasNovel />;
   } else if (selection.kind === "outline") {
     const node = detail.outlineNodes.find((n) => n.id === selection.outlineNodeId);
     body = node ? (
@@ -571,9 +570,8 @@ export function PreviewPane({
       <p className="pane-error">该文风内容未能加载（数据缺失或已删除）。</p>
     );
   } else {
-    const view = toWorldviewView(detail);
-    body = view ? (
-      <ViewCard view={view} />
+    body = detail.worldview ? (
+      <WorldviewProfile worldview={detail.worldview} />
     ) : (
       <p className="pane-error">该节点内容未能加载（数据缺失）。</p>
     );

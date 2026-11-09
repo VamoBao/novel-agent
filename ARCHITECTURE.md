@@ -12,6 +12,14 @@
 - renderer `hooks/session-timeline.ts` 以稳定 key 保存阶段/通知/成果/请求与回答，以活动 id 原位更新调用；共享会话泵另保留旧 flow，章节规划和大纲重生成页兼容。首个待答请求经 ref 同步领取防重复提交，发送失败、fatal/exit 会收尾未完成活动，重试清空旧执行、按已缓存 runId 恢复。
 - `CreationFlow` 为顶部状态 + 阶段导航 + 卡片流；`components/creation/` 承载专属输入控件、调用详情、文案映射和样式。调用详情默认折叠，按 request.activityId 关联等待输入状态；回答原位保留。用户翻看历史不强制跟随；960px 以下导航转横向步骤条。状态保存在当前页面会话，不承诺重新进入后的完整交互重放。
 
+### 书库、结构与资料预览（2026-11-09）
+
+- `App` 浏览页根类 `browse-app` 引入 `components/library/library-workspace.css`，仅统一三栏面板、书库卡片、结构分组与预览卡壳；创作工作台和设置页沿用各自布局。书库可手动折叠，700px 以下转为顶部横向列表；预览使用剩余宽度、正文随主内容区滚动。
+- `NovelListPanel` 保留管理/重命名/强确认删除与偏好入口，选中卡片带 `aria-pressed`；图标、书名及置顶/收藏标识独立排布，长书名截断并有完整标题。
+- `StructureTreePanel` 通过 `StructureGroup` 统一地点、角色、伏笔、大纲、文风分组；世界观为独立入口。分组、大纲节点及伏笔幕的折叠集合分别维护，选中和展开状态用 `aria-current` / `aria-expanded` 表达，原查询/生成/新增回调保持。
+- `components/library/ReadOnlyProfiles.tsx` 承载浏览专用的角色与世界观分区。`PreviewPane` 用角色身份/内核/经历/创作方向及世界背景/禁忌替代长字段连排，全部已设字段保留；迁移面板与伏笔/文风编辑、地点、大纲/章节、正文生成订阅与确认弹框保持。共享 `ViewCard` 的创作确认视图不变。
+- 专属样式显式保留局部按钮的键盘焦点环，属性区域随字段数量换行填满剩余宽度；规范与来源链接见根 `DESIGN.md`。
+
 ```text
 apps/agent/src/
 ├── index.ts              # CLI 入口：API Key 检查、运行 createNovel、错误处理与优雅退出
