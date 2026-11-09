@@ -76,6 +76,9 @@
 .browse-app .preview .viewcard h3, .browse-app .preview .character-form h3 { margin: 0 0 18px; font-size: var(--font-lg); line-height: 1.7; }
 .browse-app .preview .viewcard .card-label { display: flex; align-items: center; gap: 7px; margin: 0 0 14px; font-size: var(--font-sm); color: var(--fg-default); }
 .browse-app .preview .viewcard .card-label > .ic { color: var(--accent); }
+.browse-app .preview .migration-head { margin-bottom: 14px; }
+.browse-app .preview .migration-head .card-label { margin: 0; }
+.browse-app .preview .migration-head .tree-group-btn { margin-left: auto; flex: none; }
 .browse-app .preview .viewcard .outline-summary { line-height: 1.9; white-space: pre-wrap; }
 .browse-app .preview .viewcard dl:not(.fs-meta):not(.profile-fields) { grid-template-columns: minmax(70px, 112px) minmax(0, 1fr); gap: 12px 18px; }
 .browse-app .preview .viewcard dd { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
