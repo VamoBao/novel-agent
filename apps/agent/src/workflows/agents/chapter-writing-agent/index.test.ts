@@ -6,19 +6,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
 // store / channel 不依赖 'ai'，可静态导入；被测模块（间接引 ai）须在 mock 注册后动态导入
-import { openDatabase } from "../state/db";
-import { NovelStore } from "../state/novel-store";
-import { OutlineStore } from "../state/outline-store";
-import { WorldviewStore } from "../state/worldview-store";
-import { CharacterStore } from "../state/character-store";
-import { DocumentStore } from "../state/document-store";
-import { StyleReferenceStore } from "../state/style-reference-store";
-import { ForeshadowStore } from "../state/foreshadow-store";
-import { CharacterMigrationStore } from "../state/migration-store";
-import { FakeChannel } from "../ui/fake-channel";
-import { writeDocumentArtifact } from "../output/document-writer";
+import { openDatabase } from "../../../state/db";
+import { NovelStore } from "../../../state/novel-store";
+import { OutlineStore } from "../../../state/outline-store";
+import { WorldviewStore } from "../../../state/worldview-store";
+import { CharacterStore } from "../../../state/character-store";
+import { DocumentStore } from "../../../state/document-store";
+import { StyleReferenceStore } from "../../../state/style-reference-store";
+import { ForeshadowStore } from "../../../state/foreshadow-store";
+import { CharacterMigrationStore } from "../../../state/migration-store";
+import { FakeChannel } from "../../../ui/fake-channel";
+import { writeDocumentArtifact } from "../../../output/document-writer";
 import type { Character, Worldview } from "@novel/shared";
-import type { WriteProgressEvent } from "./write-chapter";
+import type { WriteProgressEvent } from "./index";
 
 /**
  * writeChapter 集成测试：mock 掉 'ai' 模块（generateText 按脚本返回正文；
@@ -99,9 +99,9 @@ mock.module("ai", () => ({
   },
 }));
 
-const { writeChapter } = await import("./write-chapter");
+const { writeChapter } = await import("./index");
 // 回落目标：Agent 会话模型实例（providers 静态导入，不受 mock 'ai' 影响）
-const { model: agentModel } = await import("../providers/agent-model");
+const { model: agentModel } = await import("../../../providers/agent-model");
 
 const DUMMY_MODEL = { modelId: "dummy-writing-model" } as unknown as LanguageModelV4;
 

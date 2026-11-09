@@ -15,13 +15,13 @@ export {
   polishCharacter,
   type PolishCharacterOptions,
   type PolishCharacterResult,
-} from "./polish-character";
+} from "./agents/character-polish-agent";
 export {
   writeChapter,
   type WriteChapterOptions,
   type WriteChapterResult,
   type WriteChapterUsage,
-} from "./write-chapter";
+} from "./agents/chapter-writing-agent";
 export { collectWorldview } from "./agents/worldview-agent";
 export { createOutline } from "./agents/outline-agent";
 export { planChapters, type PlanChaptersInput } from "./agents/chapter-agent";

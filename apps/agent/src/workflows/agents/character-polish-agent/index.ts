@@ -1,10 +1,10 @@
 import { generateObject } from "ai";
-import { model } from "../providers/agent-model";
-import type { UiChannel } from "../ui/channel";
+import { model } from "../../../providers/agent-model";
+import type { UiChannel } from "../../../ui/channel";
 import { characterSchema, type Character } from "@novel/shared";
-import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
-import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
-import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
+import { getDefaultNovelStore, type NovelStore } from "../../../state/novel-store";
+import { getDefaultWorldviewStore, type WorldviewStore } from "../../../state/worldview-store";
+import { getDefaultCharacterStore, type CharacterStore } from "../../../state/character-store";
 
 /** 润色要求补齐全部字段；使用独立输出契约，兼容 OpenAI 严格 schema，
  * 角色卡的存储与输入仍允许省略可选字段。 */

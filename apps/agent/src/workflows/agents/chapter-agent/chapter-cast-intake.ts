@@ -1,8 +1,8 @@
-import type { UiChannel } from "../ui/channel";
+import type { UiChannel } from "../../../ui/channel";
 import type { ChapterPlan } from "@novel/shared";
-import type { OutlineStore, StoredOutlineNode } from "../state/outline-store";
-import type { StoredCharacter } from "../state/character-store";
-import { resolveCharacterIds } from "./foreshadow-intake";
+import type { OutlineStore, StoredOutlineNode } from "../../../state/outline-store";
+import type { StoredCharacter } from "../../../state/character-store";
+import { resolveCharacterIds } from "../../foreshadow-intake";
 
 /** bindChapterCasts 结果：绑定统计与被剔除名单（notify 汇总用） */
 export interface BindChapterCastsResult {

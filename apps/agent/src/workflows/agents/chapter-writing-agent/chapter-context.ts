@@ -8,11 +8,11 @@ import {
   type CharacterMigration,
   readCharacterField,
 } from "@novel/shared";
-import type { CharacterStore, StoredCharacter } from "../state/character-store";
-import type { CharacterMigrationStore } from "../state/migration-store";
-import type { DocumentStore } from "../state/document-store";
-import type { OutlineStore, StoredOutlineNode } from "../state/outline-store";
-import { readDocumentArtifact } from "../output/document-writer";
+import type { CharacterStore, StoredCharacter } from "../../../state/character-store";
+import type { CharacterMigrationStore } from "../../../state/migration-store";
+import type { DocumentStore } from "../../../state/document-store";
+import type { OutlineStore, StoredOutlineNode } from "../../../state/outline-store";
+import { readDocumentArtifact } from "../../../output/document-writer";
 
 /**
  * 章节上下文组装（纯函数、零 LLM）：为「生成本章正文」提供两件此前缺失的东西——

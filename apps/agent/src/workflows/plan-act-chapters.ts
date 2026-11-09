@@ -1,5 +1,5 @@
 import { WorkflowRunStore } from "../state/workflow-run-store";
-import { pendingForeshadowRecoveries, refineForeshadowRecoveries } from "./foreshadow-refinement";
+import { pendingForeshadowRecoveries, refineForeshadowRecoveries } from "./agents/chapter-agent/foreshadow-refinement";
 import { runCachedWorkflow, type WorkflowCacheOptions } from "./workflow-cache";
 import type { UiChannel } from "../ui/channel";
 import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
@@ -12,7 +12,7 @@ import type { Outline } from "@novel/shared";
 import { planChapters, type PlanChaptersInput } from "./agents/chapter-agent";
 import { autoCreateCharacters, collectChapterCharacters, filterNewCharacters } from "./agents/auto-character-agent";
 import { plantChapterForeshadows } from "./foreshadow-intake";
-import { bindChapterCasts } from "./chapter-cast-intake";
+import { bindChapterCasts } from "./agents/chapter-agent/chapter-cast-intake";
 import { filterNewLocations, plantNewLocations } from "./location-intake";
 
 export interface PlanActChaptersOptions extends WorkflowCacheOptions {

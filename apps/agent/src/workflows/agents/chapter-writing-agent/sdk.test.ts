@@ -67,7 +67,7 @@ const bootstrap = `
 `;
 
 const directRun = `
-  const { writeChapter } = await import('./src/workflows/write-chapter');
+  const { writeChapter } = await import('./src/workflows/agents/chapter-writing-agent');
   const { FakeChannel } = await import('./src/ui/fake-channel');
   const metrics = [];
   await writeChapter({ channel: new FakeChannel([]), novelId: 'sdk-novel', chapterNodeId: process.env.SDK_CHAPTER_ID, onUsage: event => metrics.push(event) });
@@ -95,13 +95,13 @@ async function runProbe(provider: string, options: { fallback?: boolean; noUsage
     let argv = [process.execPath, "--eval", bootstrap + directRun];
     if (options.headless) {
       // preload 在 cwd 外，使用绝对 import 确保加载同一应用模块。
-      const appDir = fileURLToPath(new URL("../..", import.meta.url));
+      const appDir = fileURLToPath(new URL("../../../..", import.meta.url));
       const preload = join(dir, "preload.ts");
       await writeFile(preload, bootstrap.replaceAll("from './src/", `from '${appDir}/src/`));
       argv = [process.execPath, "--preload", preload, "src/headless.ts", "write-chapter", "sdk-novel", "sdk-chapter"];
     }
     const proc = Bun.spawn(argv, {
-      cwd: fileURLToPath(new URL("../..", import.meta.url)), env,
+      cwd: fileURLToPath(new URL("../../../..", import.meta.url)), env,
       stdin: "pipe", stdout: "pipe", stderr: "pipe",
     });
     try {

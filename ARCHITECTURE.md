@@ -109,81 +109,48 @@ apps/agent/src/
 │                         #   （顶层即小说创作 ID——同名小说天然分属不同文件夹、改名零联动；sanitize 段清理 +
 │                         #   章名冲突 -N 后缀不覆盖）+ 读 / 删除原语（resolveArtifactPath 绝对/相对兼容）+ countWords
 └── workflows/
-    ├── index.ts         # 模块出口（createNovel / planActChapters / regenerateOutline / polishCharacter
-    │                    #   / writeChapter / collectWorldview / createOutline / planChapters）
-    ├── foreshadow-plan.ts # 多幕回收计划解析、幕序与缓存绑定合并判断
-    ├── foreshadow-refinement.ts # 暂停后未来幕已有章时，仅细化原回收计划并确认
-    ├── workflow-cache.ts # 主步骤缓存执行器：同步入库与标记共事务，异步复用完成值
-    ├── resume-workflow.ts # 按 runId 分发原模式、小说与幕目标
-    ├── create-novel.ts  # 主编排：初始化 → 参数收集 → 大纲生成确认入库 → state 收尾回填 → 新增地点确定性入库
-    │                    #   → 新增角色自动入库 → 伏笔清单挂幕入库 → 会话收尾（章节规划由单幕会话手动发起）
-    ├── plan-act-chapters.ts # 单幕章节规划编排：校验（含世界观已确认）并从库组装上下文（含本幕未绑伏笔）→
-    │                    #   复用章节 Agent（save_chapters 附新增角色与新伏笔清单及绑定指令连带确认）→
-    │                    #   saveChapters 幕下建章 → 新增地点确定性入库 → 新增角色兜底 diff + 自动入库
-    │                    #   → 新伏笔入库与既有未绑伏笔绑定登场章（同大纲两条流程的收尾动作）
-    ├── regen-outline.ts # 大纲重新生成编排：读库校验 → 幕数/部数表单 → 复用大纲 Agent（入参松绑，仅库内数据）
-    │                    #   → saveOutlineTreeNewVersion 新版本入库（旧版与旧章降级归档）→ 回填 description 与 theme
-    │                    #   → 新增地点确定性入库（同新建流程，地点只增不改）→ 新增角色自动入库
-    │                    #   （兜底 diff + autoCreateCharacters，同新建流程）→ 伏笔清单挂接新版幕入库
-    │                    #   （同新建流程；旧伏笔行保留不动——决策见 DECISIONS）
-    ├── polish-character.ts # 角色 AI 润色编排：读库校验（小说/角色/世界观）→ generateObject 以表单值+世界观
-    │                    #   全字段润色（无确认门，结果回填客户端表单，不自动入库）
-    ├── write-chapter.ts # 章节正文生成编排：读库校验（小说/章节点/概述/无正文/世界观）→ 库内组上下文
-    │                    #   （部/幕/前后章/角色摘要）+ 本章绑定伏笔（foreshadow-context：登场卡片 /
-    │                    #   回收卡片+登场章上下文——正文优先概述兜底+预算护栏）+ 参考文风（style-reference-store
-    │                    #   按启用过滤，非空注入【参考文风】段于 prompt 尾部 + 模仿要求 + notify 名单，无启用零改动）
-    │                    #   → 生成-校验-修订循环（最多 MAX_REVIEW_ROUNDS=3 轮）：写作模型 getWritingModel()
-    │                    #   generateText（持续追加原生写作消息，无确认门）→ chapter-review 三段校验（Agent 模型）产出整改报告
-    │                    #   → isReportPassing 通过跳出 / 未达标在原生写作对话尾部追加报告、修订最新一稿，
-    │                    #   3 轮仍未达标保底保存最后一版并警告 → 正文落文件（层级目录）+
-    │                    #   saveChapterDocument 元数据入库绑定；进度经 Options 注入的 onProgress 回调透传
-    │                    #   （单段结束即回传 stageResult，完整报告在 revising/saving 回传；headless 映射 write-progress 协议消息）
-    ├── chapter-review.ts # 校验 subAgent 模块（无 ReAct）：reviewChapter 三段独立单轮 generateObject——
-    │                    #   ①内容约束（世界观/章节概述/本章伏笔——与写作者同源的 foreshadowContext.lines）
-    │                    #   ②文风相似度评分（合格线经 input.stylePassScore 注入——write-chapter 按写作偏好
-    │                    #   两级配置解析；无启用样本 skipped 零调用）
-    │                    #   ③前后自洽（仅正文全文，kind 由代码补全 consistency）+ isReportPassing 通过判定
-    │                    #   + formatRevisionBlock 报告→修订 prompt 块；校验模型与 onProgress 注入；
-    │                    #   调用异常直接抛错（编排层终止会话零残留），不入 index.ts 出口
-    ├── foreshadow-context.ts # 本章伏笔 prompt 块构建纯函数（无 LLM）：绑定到本章的伏笔分登场/回收两组
-    │                    #   （同章种收只归回收组标「登场于本章」），登场注入卡片；回收组按登场章全局章序升序
-    │                    #   注入卡片 + 登场章上下文（正文优先——FORESHADOW_PROSE_BUDGET=8000 预算内整条注入
-    │                    #   不截断，未生成/文件缺失/超预算降级该章概述；归档旧版章按 ID 直查照常解析）+
-    │                    #   多步回收既往回收章概述；按目标树全书章序最大的回收点标最终回收，要求揭露完整
-    │                    #   真相并收尾，前段阶段回收保留核心真相；无绑定伏笔空 lines（调用方零注入零通知）；
-    │                    #   write-chapter 直接导入，不入 index.ts 出口
-    ├── foreshadow-intake.ts # 确定性伏笔入库模块（无 LLM）：resolveCharacterIds 角色名→ID（trim 全等 / 重复名幂等 /
-    │                    #   未解析名单返回）+ buildChapterOrder 全书章全局序（部sort→幕sort→章sort，回收/登场
-    │                    #   顺序校验依据）+ plantOutlineForeshadows 大纲路径（幕名→幕节点、服务角色名→ID、
-    │                    #   回收幕名→回收幕节点——漂移不阻塞伏笔入库仅留空警告，其余未匹配跳过并警告）
-    │                    #   + plantChapterForeshadows 章节路径（新伏笔带登场章与幕归属入库 + 登场绑定指令 patch
-    │                    #   登场章（对称校验：已有回收章时登场须更早）+ 回收绑定指令把本幕待回收伏笔 patch
-    │                    #   回收章（同伏笔多条合并=多步回收；越界/章名漂移/登场未绑/回收不晚于登场跳过并警告）
-    ├── location-intake.ts  # 确定性地点入库模块（无 LLM）：filterNewLocations 兜底 diff（trim 全等剔除库内已有名 /
-    │                    #   清单内去重 / 空名剔除）+ plantNewLocations 逐条 addLocation（name+description）并 notify；
-    │                    #   三编排（create-novel / regen-outline / plan-act-chapters）确认后、角色自动入库之前调用
+    ├── index.ts                         # 对外出口，保留 writeChapter / polishCharacter 等函数契约
+    ├── create-novel.ts                  # 新建小说：参数收集、大纲确认入库与收尾
+    ├── plan-act-chapters.ts             # 单幕规划编排：读库、缓存、建章与确认产物入库
+    ├── regen-outline.ts                 # 大纲重生成、版本切换与收尾
+    ├── resume-workflow.ts               # 按运行记录分发以上三类可恢复工作流
+    ├── workflow-cache.ts                # 以上工作流共用的步骤缓存与事务执行器
+    ├── foreshadow-intake.ts             # 大纲/章节规划共用：伏笔入库、角色解析、登场/回收绑定
+    ├── foreshadow-plan.ts               # 伏笔入库/正文上下文共用：幕序、计划解析与安全恢复判断
+    ├── location-intake.ts               # 新建/重生成/章节规划共用：地点去重与确定性入库
+    ├── *.test.ts                        # 顶层编排、缓存与公共入库逻辑的测试
     └── agents/
-        ├── worldview-agent/index.ts   # 世界观 ReAct Agent（多轮追问 + 终态提交）
-        ├── character-agent/index.ts   # 角色 ReAct Agent（逐字段「发散丰富→确认→保存」：标识性字段照存原词、描述性字段扩写；终态组装校验）
-        ├── outline-agent/index.ts     # 大纲 ReAct Agent（部→幕两级结构，用户确认门 + 幕/部数强校验；
-        │                         #   list_characters 角色库查询工具，save_outline 结构化入参附
-        │                         #   newCharacters 新增角色清单、newForeshadows 伏笔清单（挂幕不挂章，清单内名字 /
-        │                         #   表面行为不得重复）与 newLocations 新增地点清单（名字+一句话定位，名字不得重复）
-        │                         #   随大纲进确认门连带确认；另配 list_locations 地点库查询工具；
-        │                         #   入参 OutlineContext 松绑——genre/audience/coreConflict 可选，重生成会话仅喂库内数据）
-        ├── chapter-agent/index.ts     # 章节 ReAct Agent（单幕拆章：按幕梗概与情节点推荐章节数量与概述，用户确认门；单幕规划会话调用；
-        │                         #   list_characters 角色库查询工具 + prompt 已有角色行与本幕未绑伏笔行——概述尽量点名
-        │                         #   出场角色、体现伏笔表面行为，save_chapters 经 saveChaptersInputSchema 结构化入参附顶层
-        │                         #   newCharacters 新增角色清单（名字不得重复）、newForeshadows 新伏笔清单（登场章名，
-        │                         #   表面行为不得重复）、foreshadowBindings 绑定指令（序号不得重复）与 newLocations
-        │                         #   新增地点清单（名字不得重复）随规划进确认门连带确认；另配 list_locations 地点库查询工具
-        │                         #   连带确认；产物 ChapterPlanSubmission = plan + newCharacters + newForeshadows
-        │                         #   + foreshadowBindings）
-        └── auto-character-agent/index.ts  # 新增角色自动创建 Agent（无确认门：依据世界观与大纲为清单逐个填充角色卡并
-                                     #   调 save_character 终态工具入库，isDone 按清单数量判定、maxSteps 耗尽抛
-                                     #   可读错误保留已入库卡；增可选 extraContext 附加上下文——章节规划喂章级
-                                     #   素材，既有调用方零改动；另导出 filterNewCharacters 编排层兜底 diff 纯函数——
-                                     #   剔除库内已有名 / 清单内去重 / 空名剔除；独立导出供写作期工作流复用）
+        ├── worldview-agent/
+        │   └── index.ts                 # 世界观多轮收集，submit_worldview 终态提交
+        ├── character-agent/
+        │   ├── index.ts                 # 角色逐字段收集/确认与最终组装
+        │   └── index.test.ts
+        ├── outline-agent/
+        │   ├── index.ts                 # 大纲生成、角色/地点查询与清单连带确认
+        │   └── index.test.ts
+        ├── auto-character-agent/
+        │   ├── index.ts                 # 根据确认清单自动建角色卡；共享角色去重/逐章清单派生
+        │   └── index.test.ts
+        ├── chapter-agent/
+        │   ├── index.ts                 # 章节规划、登场名单与伏笔计划校验/确认
+        │   ├── chapter-cast-intake.ts    # 规划确认及角色建卡后，绑定各章登场角色 ID
+        │   ├── foreshadow-refinement.ts  # 恢复时仅细化原空章回收幕，选择真实章并再次确认
+        │   ├── index.test.ts
+        │   ├── chapter-cast-intake.test.ts
+        │   └── foreshadow-refinement.test.ts
+        ├── chapter-writing-agent/
+        │   ├── index.ts                 # writeChapter：上下文→写作→审校/修订→落盘入库/覆盖
+        │   ├── chapter-context.ts       # 本章角色基准/迁移计划、树版本与跨幕前后章上下文
+        │   ├── foreshadow-context.ts    # 正文伏笔卡片、登场章正文预算与阶段/最终回收提示
+        │   ├── chapter-review.ts        # 独立三段审校、通过判定与整改报告格式化
+        │   ├── index.test.ts
+        │   ├── sdk.test.ts              # 独立进程真实 SDK/SQLite，替换 HTTP 边界
+        │   ├── chapter-context.test.ts
+        │   ├── foreshadow-context.test.ts
+        │   └── chapter-review.test.ts
+        └── character-polish-agent/
+            ├── index.ts                 # polishCharacter：表单+世界观单轮润色，不自动入库
+            └── index.test.ts
 
 packages/shared/src/     # @novel/shared：双端共享纯 zod 层——领域 schema（model-provider（provider
                          #   三选枚举与官方默认地址 + 按有效地址迁移的生效 provider 解析纯函数，agent
@@ -324,12 +291,12 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 6. **新增地点确定性入库**（同新建流程收尾动作，实际执行置于角色自动入库之前）：`filterNewLocations` 对新版大纲 `newLocations` 清单兜底 diff（剔除库内已有名——**地点只增不改**，旧版入库地点保留不动，空清单跳过）→ `plantNewLocations` 逐条 addLocation（name + description）入库并 notify
 7. **伏笔清单挂接新版幕入库**：同新建流程收尾动作——`plantOutlineForeshadows` 对新版大纲 `newForeshadows` 清单确定性创建（幕名取当前版本树即新版幕节点、服务角色名→角色 ID，未匹配跳过并警告，清单已在大纲确认门连带确认过）；**旧伏笔行保留不动**——regen 只降级大纲节点，伏笔不随归档也不清理（旧伏笔 act_node_id 指向已降级的旧幕节点，悬挂但无害——`listUnboundByAct` 按当前 act 查询天然不回传旧版伏笔，伏笔数据保留在库，同「正文行与归档章关联留存」先例；决策见 DECISIONS）
 
-## 章节正文生成工作流（src/workflows/write-chapter.ts）
+## 章节正文生成工作流（src/workflows/agents/chapter-writing-agent/index.ts）
 
 客户端章节点卡「生成本章正文」入口的会话编排（headless `write-chapter <novelId> <chapterNodeId>` 模式；写作模型未配置回落 Agent 会话模型——校验模型使用 Agent 模型，会话始终要求 AGENT_MODEL_API_KEY）：
 
 1. **前置校验**（全部抛可读错误，由协议入口转 fatal error）：小说存在 → 章节点存在、同小说且类型为 chapter → 章剧情概述非空（旧数据缺内容拒绝）→ 所属幕与部节点存在 → 世界观已确认（worldviews 表有记录）；已有正文不再拒绝——检测到既有 document 即走重新生成路径（isRegen 分流 notify 与保存路径，流程与首次生成完全一致）
-2. **上下文组装（全取自库）**：书名 / logline + 叙事视角（novels.narrative_pov，未采集零注入——随【小说】块注入并要求正文叙述全程保持该视角、人称与信息范围不得中途漂移）+ 世界观 JSON + 本章角色完整参考（全部已设定字段；人物属性与作者指导分开，基准叠加已结束迁移）+ 同大纲版本已确认的已结束完整迁移历史与本章变化计划（角色/字段/旧值→目标/起止章/诱因/过渡/序号/修订；未来、草案、取消不注入；计划区间结束不证明正文已兑现）+ 部名与部梗概 + 幕名与幕梗概及关键情节点 + 本章名与剧情概述 + 全书跨幕前后章衔接（上一章正文在 8000 字符预算内优先、缺失或超预算回退概述，下一章只取概述）+ **本章绑定伏笔（可选增强）**：`buildChapterForeshadowContext`（workflows/foreshadow-context）——登场注入卡片、回收组按登场章全局章序升序注入卡片 + 登场章上下文（正文优先、8000 字符预算内整条注入，未生成/文件缺失/超预算降级概述）+ 多步回收既往回收章概述，【本章伏笔】块插【下一章】块后【参考文风】段前、写作要求条件附加编号顺延、生成前 notify「🔮 本章伏笔」统计与降级计数；无绑定伏笔零注入零通知 + **参考文风（可选增强）**：style_references 表按启用过滤（enabled=1），非空在 prompt 尾部【下一章】块之后插【参考文风】段（每条「（名字）\n内容」，长样本置尾不推远核心上下文且紧邻风格指令）、写作要求附模仿条（模仿叙事语言 / 句式节奏 / 描写风格，不抄袭具体情节与专有名词）、生成前 notify「🖋️ 本次参考文风：名单」；无启用文风零注入零通知（行为与无此功能逐字节一致）
+2. **上下文组装（全取自库）**：书名 / logline + 叙事视角（novels.narrative_pov，未采集零注入——随【小说】块注入并要求正文叙述全程保持该视角、人称与信息范围不得中途漂移）+ 世界观 JSON + 本章角色完整参考（全部已设定字段；人物属性与作者指导分开，基准叠加已结束迁移）+ 同大纲版本已确认的已结束完整迁移历史与本章变化计划（角色/字段/旧值→目标/起止章/诱因/过渡/序号/修订；未来、草案、取消不注入；计划区间结束不证明正文已兑现）+ 部名与部梗概 + 幕名与幕梗概及关键情节点 + 本章名与剧情概述 + 全书跨幕前后章衔接（上一章正文在 8000 字符预算内优先、缺失或超预算回退概述，下一章只取概述）+ **本章绑定伏笔（可选增强）**：`buildChapterForeshadowContext`（workflows/agents/chapter-writing-agent/foreshadow-context）——登场注入卡片、回收组按登场章全局章序升序注入卡片 + 登场章上下文（正文优先、8000 字符预算内整条注入，未生成/文件缺失/超预算降级概述）+ 多步回收既往回收章概述，【本章伏笔】块插【下一章】块后【参考文风】段前、写作要求条件附加编号顺延、生成前 notify「🔮 本章伏笔」统计与降级计数；无绑定伏笔零注入零通知 + **参考文风（可选增强）**：style_references 表按启用过滤（enabled=1），非空在 prompt 尾部【下一章】块之后插【参考文风】段（每条「（名字）\n内容」，长样本置尾不推远核心上下文且紧邻风格指令）、写作要求附模仿条（模仿叙事语言 / 句式节奏 / 描写风格，不抄袭具体情节与专有名词）、生成前 notify「🖋️ 本次参考文风：名单」；无启用文风零注入零通知（行为与无此功能逐字节一致）
 3. **生成-校验-修订循环与落盘**：写作偏好生效值先行解析——`resolveSystemWritingPrefs`（providers/writing-prefs，环境变量读系统级）+ shared `resolveChapterLength` / `resolveStylePassScore`（小说级 novels 行 > 系统级 > 内置默认 2000~3000 字 / 80 分；篇幅 min/max 整体覆盖、半设乱序防御性跳过），小说级覆盖生效时 notify 通报。`getWritingModel()`（providers/writing-model，按 `WRITING_MODEL_PROVIDER` 所选接口类型调用对应官方 SDK，`WRITING_MODEL_*` 三环境变量齐才启用，任一未配置回落 Agent 会话模型）`generateText({ messages })`（非 ReAct——无工具无提问；初稿资料与要求只组装一次，历史原样保留），写作要求篇幅条用生效值（`篇幅约 X~Y 字`）、遵守世界观禁忌、只输出正文文本；空结果拒绝且零残留。每轮生成后经 `reviewChapter`（chapter-review，Agent 模型三段独立校验——①内容约束（世界观/章节概述/本章伏笔/**本章角色状态与变化计划**，与写作者同源）②文风相似度（合格线 = 生效阈值，评分 prompt 与判定同一条线；无启用样本 skipped）③前后自洽）产出结构化整改报告：`isReportPassing` 通过（①③零问题且文风达标）→ 落盘；未达标在写作对话尾部追加【整改报告】及针对最新稿的修订指令（合格线随 formatRevisionBlock 同行），正文保留在原生 assistant 响应中，不重拼资料或重建历史，最多 3 轮；第 3 轮仍未达标 → ⚠️ 警告（含文风分与问题计数）后保底保存最后一版。进度全程经 onProgress 回调透传（drafting/review-*/revising/saving，报告附着在 revising/saving 事件）。正文经 document-writer 写 `<输出目录>/<小说ID>/<部名>/<章名>.md`（sanitize 段清理，同名冲突加 `-N` 后缀不覆盖既有文件；顶层文件夹在首次生成正文时创建），file_path 以**绝对路径**落库（用户中途更换输出目录后旧正文仍指向真实位置；写失败包「输出目录不可写」上下文直达 fatal error），文件先落、库后入，库失败回滚删除文件
    三项校验各在开始与结束时发送 `write-progress`，结束事件附 `stageResult`；客户端按轮累积阶段结果，有问题即在对应阶段显示警告与建议，新轮清空阶段结果。完整 `report` 仍随修订 / 保存事件供末尾汇总。
 4. **元数据入库绑定**：首次生成走 `saveChapterDocument`、重新生成走 `replaceChapterDocument`（单事务删旧行插新行）插 documents 行（file_path 绝对路径 + 字数，内容不进库）+ 章节点回写 `document_id` 并置 `status=completed`；重生成在事务提交后清理旧正文文件（新旧路径相同——旧文件本就缺失——时跳过防误删新文件；幂等容忍缺失）；任一环节失败回滚删新文件，旧正文行与文件零影响；notify 保存路径与字数；run_finished 携带小说 ID 供客户端刷新详情（章节点 ID 稳定，选中与正文展示保持）；大纲重生成只降级归档章节点，documents 行与正文文件保留（旧正文与归档章的关联留存）
@@ -418,7 +385,7 @@ shared `outlineNewForeshadowSchema` 要求 `recoverActNames` 非空且不重复�
 
 主流程恢复既保存确认产物，也固定确认时清单序号映射。未确认子步骤重跑刷新本幕两清单及当前大纲；已确认缓存沿用原映射。`foreshadow-plan.ts` 将普通编辑修订与工作流绑定追加区分：用户显式更新递增 `editRevision`，自动绑定指定 workflow 来源保持计数；只有核心设定不变、绑定单调增加且编辑版本一致的新快照可合并，旧无版本快照保守保护。原空章回收幕在暂停期间已规划时，通过受限细化步骤选择真实章，再确认并缓存后入库，不丢弃已确认伏笔。
 
-React/CLI 确认门展示全部回收计划，预览逐幕列已绑定章或待细化。`foreshadow-context.ts` 根据目标树版本与后续计划幕检查最终回收；仍有更晚计划幕未细化时只给阶段回收，写作和审校继续复用同源材料。工作流实现与边界详见模块 ARCHITECTURE.md。
+React/CLI 确认门展示全部回收计划，预览逐幕列已绑定章或待细化。`agents/chapter-writing-agent/foreshadow-context.ts` 根据目标树版本与后续计划幕检查最终回收；仍有更晚计划幕未细化时只给阶段回收，写作和审校继续复用同源材料。工作流实现与边界详见模块 ARCHITECTURE.md。
 
 ### Provider 审查修复（2026-10-16）
 
@@ -426,10 +393,10 @@ React/CLI 确认门展示全部回收计划，预览逐幕列已绑定章或待�
 
 ## 正文写作对话与诊断（2026-10-18）
 
-`write-chapter.ts` 在一次会话内维护 SDK `ModelMessage[]`：首条 user 含原有完整资料和写作要求；每次生成后原样追加 `result.response.messages`（含正文空白、推理及 provider 元信息），未通过时再追加当前审校报告和仅修订最新稿的 user 指令。三段审校继续独立调用，仅审当前稿；三轮上限、保底保存、覆盖替换与失败保护不变。历史只在内存保留，不接入持久化恢复。
+`agents/chapter-writing-agent/index.ts` 在一次会话内维护 SDK `ModelMessage[]`：首条 user 含原有完整资料和写作要求；每次生成后原样追加 `result.response.messages`（含正文空白、推理及 provider 元信息），未通过时再追加当前审校报告和仅修订最新稿的 user 指令。三段审校继续独立调用，仅审当前稿；三轮上限、保底保存、覆盖替换与失败保护不变。历史只在内存保留，不接入持久化恢复。
 
 写作调用使用 canonical `providerOptions.anthropic.cacheControl: { type: "ephemeral" }` 开启 Claude 默认 5 分钟自动缓存，兼容独立写作模型与回落 Agent 模型；OpenAI/DeepSeek 忽略该厂商命名空间，沿用服务侧自动缓存。保留完整历史增加逻辑输入与网络载荷，不保证实际命中、节费或提速，默认 TTL 也可能在长时间生成和审校后过期。
 
 `onUsage(WriteChapterUsage)` 返回每次成功写作调用的小说/章、轮次、阶段、provider/modelId、durationMs 和输入/输出/缓存读写计数。根据 `usage.raw` 白名单判断供应商是否提供相应字段，再使用 SDK 标准计数；缺失记 null、显式零记 0，raw 不输出。headless 写入 stderr 单行 JSON（type=`chapter-writing-usage`），Electron 继承该流；stdout 协议及客户端内容提示不变，诊断不包含 API Key、Base URL、正文、报告或请求载荷。调用抛错时不生成用量事件；durationMs 仅覆盖该次写作调用，包含 SDK 自动重试时间，不包含审校或落盘，不是整个会话耗时。
 
-真实 SDK/SQLite/HTTP 边界替身回归见 `workflows/write-chapter-sdk.test.ts`；该验证不模拟服务端 KV 缓存，也不证明线上命中率、账单或文学质量。
+真实 SDK/SQLite/HTTP 边界替身回归见 `workflows/agents/chapter-writing-agent/sdk.test.ts`；该验证不模拟服务端 KV 缓存，也不证明线上命中率、账单或文学质量。

@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-11-09 [refactor] Agent 专属辅助模块归拢：章节规划辅助移入 chapter-agent，正文链路归 chapter-writing-agent，独立角色润色归 character-polish-agent；跨流程公共模块保留顶层。共迁移 15 文件，详见 workflows/ARCHITECTURE.md 的逐文件归属表与模块 PROGRESS.md。AC：typecheck 三工程 / lint / 全量 696 项（65 文件）通过，路径与子进程 cwd 以外无逻辑变动。
+
 - 2026-11-09 [refactor] 工作流 Agent 按目录组织：`apps/agent/src/workflows/agents/` 下 5 个 Agent 各自使用同名目录，入口 `index.ts`、已有测试 `index.test.ts` 同目录；外部目录导入路径保持，内部相对引用与入口/架构文档同步。模块记录见 `apps/agent/src/workflows/PROGRESS.md`。AC：typecheck 三工程 / lint / 全量 696 项（65 文件）通过；9 个迁移文件除相对导入路径外与原文件完全一致。
 
 - 2026-11-07 [fix] 伏笔预览属性区均匀分列：定位到通用 `.viewcard dl` 的选择器优先级高于 `.fs-meta`，导致属性首列被固定为 76px、注意度与登场章等长值挤窄。属性区改用 `.viewcard .fs-meta` 作用域正确覆盖网格、间距与字体规则；属性表与表面行为/隐藏真相面板的最小列宽均受可用宽度约束，极窄预览栏自动单列，长值可换行。地点预览共用属性区同步修复。AC：typecheck 三工程 / lint / 全量 696 项（65 文件）通过；真实 PreviewPane 静态渲染 + 完整样式在 Electron 中对比，浅暗两主题 × 1600/1280/1024/900/800px 共 10 组尺寸验证等宽列、正确间距、长章名无溢出；1600px 三列、1280px 两列、窄栏单列（800px 窗口列宽 220px），截图目测通过。
@@ -16,9 +18,9 @@
 
 - 2026-10-24 [feat] 校审模型设置先行（用户直接指令：在 Agent / 写作两族模型之外新增校审模型用于审核功能——设置形态与 Agent 模型一致、未配置回落 Agent 模型，本期只做设置与注入、不接消费端）：①shared `model-provider.ts` 新增 `resolveReviewModelProvider`（显式值优先、缺省按有效地址迁移，与写作同规则——地址留空落 OpenAI）并导出；②agent 新建 `providers/review-model.ts`——`resolveReviewModelConfig`（REVIEW_MODEL_PROVIDER 非法抛可读错误；模型名 / Key / Base URL 三项齐才启用，任一未配置返回 null）+ `getReviewModel()` 惰性工厂（未配置回落同一 Agent model 实例；配置先行尚无调用方——chapter-review 仍用 Agent 会话模型），`.env.example` 补 REVIEW_MODEL_* 四变量；③client `electron/settings.ts`：AppSettings 增 reviewModel 组（同四字段，normalize 兼容旧 settings.json 缺省归空）、MODEL_ENV_ENTRIES 增 REVIEW_MODEL_* 四条（resolveModelEnv 输出 8→12 个模型变量，三级优先级与空串删除语义不变）、EffectiveProviders 增 review（resolveEffectiveProviders 同组纯函数解析，设置页回显生效接口类型）；④SettingsPage「模型设置」分类增第三组「校审模型——章节正文审校专用」（provider 下拉三族共用渲染经 PROVIDER_FORM_KEYS / MODEL_GROUP_FIELDS 映射重构，未触碰写回原值与 modelTouched 分组跟踪语义逐项保留；提示注明三项齐才启用、留空回落 Agent 模型、当前版本审校仍用 Agent 会话模型——配置先行保存）。AC：typecheck 3 工程 / lint / 全量 696 项（65 文件）通过（净增 12：shared 1 + agent review-model 9 + client settings 1 + 设置页交互 provider 固化用例扩展 review 组 1）；三段审校切换独立校审模型为后续独立需求。
 
-- 2026-10-18 [perf] 正文修订复用原生写作对话（用户确认调研方案后实施，主任务与设计见 workflows 及 docs/superpowers 同日 chapter-conversation-cache 文档）：初稿资料/要求只组装一次，每轮原样追加 SDK response.messages（保留空白/推理签名/provider 元信息），未通过时只追加当前整改报告和修订最新稿指令；三段审校继续独立、三轮及所有落盘/重生成保护不变。Claude 启用默认 5 分钟缓存（含回落 Agent 模型），其他协议沿用自动缓存。onUsage 将成功写作调用的输入/输出/缓存读写和耗时送 headless stderr JSON，raw 白名单判存在性以区分未知 null 与实际 0，不输出原始载荷/正文/密钥。AC：typecheck 三工程 / lint / 全量 684 项（64 文件）通过；11 项真实 SDK + 临时 SQLite + HTTP 替身回归覆盖三种协议、三轮前缀、缓存与回落、缺失/部分 usage/显式零及 stdout/stderr 隔离；独立审查问题已修复并复核。未调用真实服务，实际命中、账单、耗时及文学质量不由替身验证。
-
 ## 历史归档
+
+- 2026-10-18 [归档摘要] 正文修订对话复用与缓存：保留原生消息、独立审校和写作用量诊断，真实 SDK/SQLite/HTTP 替身测试覆盖缓存配置与缺失用量；当时 typecheck / lint / 全量 684 项通过，线上缓存效果待实际测量。完整记录见 Git 历史。
 
 - 2026-10-18 [归档摘要] 独立设置页：模型设置、写作偏好、外观三分类及原保存语义、交互测试和双主题截图验证已完成；原 AC 为 typecheck / lint / 全量 672 项通过。完整记录见 Git 历史。
 

@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 // store / channel 不依赖 'ai'，可静态导入；被测模块（间接引 ai）须在 mock 注册后动态导入
-import { openDatabase } from "../state/db";
-import { NovelStore } from "../state/novel-store";
-import { WorldviewStore } from "../state/worldview-store";
-import { CharacterStore } from "../state/character-store";
-import { FakeChannel } from "../ui/fake-channel";
+import { openDatabase } from "../../../state/db";
+import { NovelStore } from "../../../state/novel-store";
+import { WorldviewStore } from "../../../state/worldview-store";
+import { CharacterStore } from "../../../state/character-store";
+import { FakeChannel } from "../../../ui/fake-channel";
 import type { Character, Worldview } from "@novel/shared";
 
 /**
@@ -35,7 +35,7 @@ mock.module("ai", () => ({
   },
 }));
 
-const { polishCharacter } = await import("./polish-character");
+const { polishCharacter } = await import("./index");
 
 const NOVEL_ID = "eeeeeeee-4444-7444-8555-666677778888";
 const OTHER_NOVEL_ID = "eeeeeeee-4444-7444-8555-666677778889";
@@ -73,7 +73,7 @@ test.each(["openai", "deepseek", "claude"])("%s 真实 SDK 润色全字段角色
     import { WorldviewStore } from './src/state/worldview-store';
     import { CharacterStore } from './src/state/character-store';
     import { FakeChannel } from './src/ui/fake-channel';
-    import { polishCharacter } from './src/workflows/polish-character';
+    import { polishCharacter } from './src/workflows/agents/character-polish-agent';
     globalThis.AI_SDK_LOG_WARNINGS = false;
     const polished = JSON.parse(process.env.POLISH_RESULT);
     const form = JSON.parse(process.env.POLISH_FORM);
@@ -129,7 +129,7 @@ test.each(["openai", "deepseek", "claude"])("%s 真实 SDK 润色全字段角色
     } finally { db.close(); }
   `;
   const proc = Bun.spawn([process.execPath, "--eval", probe], {
-    cwd: fileURLToPath(new URL("../..", import.meta.url)),
+    cwd: fileURLToPath(new URL("../../../..", import.meta.url)),
     env: {
       ...process.env, AGENT_MODEL_PROVIDER: provider, AGENT_MODEL_API_KEY: "test-polish-key",
       AGENT_MODEL_NAME: provider === "claude" ? "claude-sonnet-5" : "test-model",

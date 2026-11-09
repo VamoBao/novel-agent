@@ -4,13 +4,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { characterSchema, type Character } from "@novel/shared";
-import { openDatabase } from "../state/db";
-import { CharacterStore } from "../state/character-store";
-import { CharacterMigrationStore } from "../state/migration-store";
-import { DocumentStore } from "../state/document-store";
-import { NovelStore } from "../state/novel-store";
-import { OutlineStore, type StoredOutlineNode } from "../state/outline-store";
-import { writeDocumentArtifact } from "../output/document-writer";
+import { openDatabase } from "../../../state/db";
+import { CharacterStore } from "../../../state/character-store";
+import { CharacterMigrationStore } from "../../../state/migration-store";
+import { DocumentStore } from "../../../state/document-store";
+import { NovelStore } from "../../../state/novel-store";
+import { OutlineStore, type StoredOutlineNode } from "../../../state/outline-store";
+import { writeDocumentArtifact } from "../../../output/document-writer";
 import {
   PREVIOUS_CHAPTER_PROSE_BUDGET,
   buildCharacterStateContext,

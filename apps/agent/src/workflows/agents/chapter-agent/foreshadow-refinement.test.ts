@@ -1,8 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
 import { modelMessageSchema } from "ai";
-import type { ChapterPlanSubmission, PlanChaptersInput } from "./agents/chapter-agent";
-import { FakeChannel } from "../ui/fake-channel";
-import { UserAbortedError } from "../ui/aborted";
+import type { ChapterPlanSubmission, PlanChaptersInput } from "./index";
+import { FakeChannel } from "../../../ui/fake-channel";
+import { UserAbortedError } from "../../../ui/aborted";
 
 const sdkModelMessageSchema = modelMessageSchema;
 let calls: unknown[][] = [];

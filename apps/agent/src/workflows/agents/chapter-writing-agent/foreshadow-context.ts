@@ -1,9 +1,9 @@
-import { recoveryActIds } from "./foreshadow-plan";
-import { readDocumentArtifact } from "../output/document-writer";
-import type { CharacterStore } from "../state/character-store";
-import type { DocumentStore } from "../state/document-store";
-import type { ForeshadowStore } from "../state/foreshadow-store";
-import type { OutlineStore } from "../state/outline-store";
+import { recoveryActIds } from "../../foreshadow-plan";
+import { readDocumentArtifact } from "../../../output/document-writer";
+import type { CharacterStore } from "../../../state/character-store";
+import type { DocumentStore } from "../../../state/document-store";
+import type { ForeshadowStore } from "../../../state/foreshadow-store";
+import type { OutlineStore } from "../../../state/outline-store";
 import { resolveChapterTreePosition } from "./chapter-context";
 
 /** 回收伏笔登场章正文的字符预算（小上下文写作模型护栏）：超出整条降级概述，不截断 */

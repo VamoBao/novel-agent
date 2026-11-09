@@ -8,21 +8,21 @@ import type {
   WritingPrefsOverride,
 } from "@novel/shared";
 import { resolveChapterLength, resolveStylePassScore } from "@novel/shared";
-import type { UiChannel } from "../ui/channel";
-import { getWritingModel } from "../providers/writing-model";
-import { model as agentSessionModel } from "../providers/agent-model";
-import { resolveSystemWritingPrefs } from "../providers/writing-prefs";
-import { getDefaultNovelStore, type NovelStore } from "../state/novel-store";
-import { getDefaultOutlineStore, type OutlineStore } from "../state/outline-store";
-import { getDefaultWorldviewStore, type WorldviewStore } from "../state/worldview-store";
-import { getDefaultCharacterStore, type CharacterStore } from "../state/character-store";
-import { getDefaultDocumentStore, type DocumentStore } from "../state/document-store";
-import { getDefaultStyleReferenceStore, type StyleReferenceStore } from "../state/style-reference-store";
-import { getDefaultForeshadowStore, type ForeshadowStore } from "../state/foreshadow-store";
+import type { UiChannel } from "../../../ui/channel";
+import { getWritingModel } from "../../../providers/writing-model";
+import { model as agentSessionModel } from "../../../providers/agent-model";
+import { resolveSystemWritingPrefs } from "../../../providers/writing-prefs";
+import { getDefaultNovelStore, type NovelStore } from "../../../state/novel-store";
+import { getDefaultOutlineStore, type OutlineStore } from "../../../state/outline-store";
+import { getDefaultWorldviewStore, type WorldviewStore } from "../../../state/worldview-store";
+import { getDefaultCharacterStore, type CharacterStore } from "../../../state/character-store";
+import { getDefaultDocumentStore, type DocumentStore } from "../../../state/document-store";
+import { getDefaultStyleReferenceStore, type StyleReferenceStore } from "../../../state/style-reference-store";
+import { getDefaultForeshadowStore, type ForeshadowStore } from "../../../state/foreshadow-store";
 import {
   getDefaultCharacterMigrationStore,
   type CharacterMigrationStore,
-} from "../state/migration-store";
+} from "../../../state/migration-store";
 import { buildChapterForeshadowContext } from "./foreshadow-context";
 import {
   buildCharacterStateContext,
@@ -33,14 +33,14 @@ import {
   formatRevisionBlock,
   reviewChapter,
 } from "./chapter-review";
-import { OUTPUT_DIR } from "../output/outline-writer";
+import { OUTPUT_DIR } from "../../../output/outline-writer";
 import {
   buildChapterDocumentPath,
   countWords,
   removeDocumentArtifact,
   resolveArtifactPath,
   writeDocumentArtifact,
-} from "../output/document-writer";
+} from "../../../output/document-writer";
 
 /** 正文生成流程进度事件：单段完成附 stageResult；完整 report 附在 revising / saving。 */
 export interface WriteProgressEvent {

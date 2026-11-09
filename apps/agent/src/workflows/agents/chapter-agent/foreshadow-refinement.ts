@@ -1,9 +1,9 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { ChapterNewForeshadow } from "@novel/shared";
-import { runReactAgent } from "../agents/react";
-import type { UiChannel } from "../ui/channel";
-import { validateChapterForeshadowPlan, type ChapterPlanSubmission, type PlanChaptersInput } from "./agents/chapter-agent";
+import { runReactAgent } from "../../../agents/react";
+import type { UiChannel } from "../../../ui/channel";
+import { validateChapterForeshadowPlan, type ChapterPlanSubmission, type PlanChaptersInput } from "./index";
 
 type FullOutline = NonNullable<PlanChaptersInput["fullOutline"]>;
 

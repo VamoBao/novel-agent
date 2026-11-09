@@ -2,11 +2,11 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDatabase } from "../state/db";
-import { NovelStore } from "../state/novel-store";
-import { CharacterStore, type StoredCharacter } from "../state/character-store";
-import { OutlineStore } from "../state/outline-store";
-import { FakeChannel } from "../ui/fake-channel";
+import { openDatabase } from "../../../state/db";
+import { NovelStore } from "../../../state/novel-store";
+import { CharacterStore, type StoredCharacter } from "../../../state/character-store";
+import { OutlineStore } from "../../../state/outline-store";
+import { FakeChannel } from "../../../ui/fake-channel";
 
 const { bindChapterCasts } = await import("./chapter-cast-intake");
 
