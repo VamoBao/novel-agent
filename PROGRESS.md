@@ -91,6 +91,8 @@
 
 ## 已知 Bug
 
+- 2026-11-11 macOS 27.2（26B123）拖动标题栏可能出现 `Warning: Window move completed without beginning`。Electron 38.8.6 最小静态窗口在默认参数与项目兼容参数下均复现，真实客户端隔离运行同样复现；应用没有移动回调或自定义拖动，证据指向 Chromium → AppKit 原生拖动路径。当前未根治，未屏蔽日志或改动窗口行为；上游报告注销重登可临时恢复，本机未执行，物理鼠标及注销后验收待人工完成。工程 typecheck / lint / 715 项测试 / 客户端 build 通过。证据、来源与恢复步骤见 [排查记录](docs/macos-window-move.md)。
+
 - （非阻塞）deepseek-flash 在主角归一化时仍可能小幅补全用户未提及字段——已有「确认门」兜底，用户答 n 可重新描述；若换更强模型（deepseek-v4-pro）可进一步降低漂移
 
 ## 流程复盘记录

@@ -4,6 +4,10 @@
 
 ## 分层结构
 
+### macOS 原生窗口移动边界（2026-11-11）
+
+- 客户端使用 Electron 默认标题栏，拖动由 Chromium / AppKit 处理，应用未实现移动回调或手动定位。macOS 27.2 的 `Window move completed without beginning` 已在最小窗口和真实客户端隔离运行中复现，当前作为未解决的环境兼容问题跟踪；未改变窗口实现。证据、验证限制与恢复步骤见 [排查记录](docs/macos-window-move.md) 和 PROGRESS.md 已知 Bug。
+
 ### 新建小说卡片工作台（2026-11-09）
 
 - shared `activity.ts` 定义调用快照，stdio 协议升级 v3，新增 activity 消息与 request.activityId；Electron 继续使用 shared schema 校验后原样转发。
