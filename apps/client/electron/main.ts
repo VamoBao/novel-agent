@@ -215,9 +215,6 @@ app.commandLine.appendSwitch("disable-gpu");
 app.commandLine.appendSwitch("no-sandbox");
 // GPU 子进程在本环境启动即崩（error_code=1002），并入主进程以软件渲染运行
 app.commandLine.appendSwitch("in-process-gpu");
-// 隐藏系统菜单栏（File/Edit/View 等——本地工具用不到；菜单内建快捷键 F11/Ctrl+R
-// 随之失效，开发期刷新走 HMR、DevTools 需代码调用）
-Menu.setApplicationMenu(null);
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -233,6 +230,23 @@ function createWindow(): BrowserWindow {
       nodeIntegration: false,
       sandbox: false,
     },
+  });
+
+  // Electron 默认没有右键菜单；统一为可编辑输入提供原生编辑操作。
+  // 非输入区域不弹出，保留书库等页面自行管理的业务菜单。
+  win.webContents.on("context-menu", (_event, params) => {
+    if (!params.isEditable) return;
+    const { editFlags } = params;
+    Menu.buildFromTemplate([
+      { label: "撤销", role: "undo", enabled: editFlags.canUndo },
+      { label: "重做", role: "redo", enabled: editFlags.canRedo },
+      { type: "separator" },
+      { label: "剪切", role: "cut", enabled: editFlags.canCut },
+      { label: "复制", role: "copy", enabled: editFlags.canCopy },
+      { label: "粘贴", role: "paste", enabled: editFlags.canPaste },
+      { type: "separator" },
+      { label: "全选", role: "selectAll", enabled: editFlags.canSelectAll },
+    ]).popup({ window: win, frame: params.frame ?? undefined });
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -526,6 +540,11 @@ ipcMain.handle("library:deleteStyle", (_event, styleId: string): Promise<{ delet
 );
 
 app.whenReady().then(() => {
+  // macOS 的 Cmd+C/V/X/A/Z 依赖原生编辑菜单，清空应用菜单会使其失效。
+  // Windows / Linux 继续隐藏窗口菜单栏。
+  Menu.setApplicationMenu(process.platform === "darwin"
+    ? Menu.buildFromTemplate([{ role: "appMenu" }, { label: "编辑", role: "editMenu" }, { role: "windowMenu" }])
+    : null);
   applyTheme();
   // 「跟随系统」模式：系统运行中切换主题时同步窗口底色（CSS 媒体查询由 Chromium 自动重算）
   nativeTheme.on("updated", () => {

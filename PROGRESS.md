@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-11-11 [fix] macOS 模型设置输入无法粘贴、右键无菜单：根因为全平台清空应用菜单导致 macOS 原生编辑快捷键失效，且 Electron 默认不提供右键菜单。macOS 恢复 appMenu/editMenu/windowMenu，其他平台继续隐藏菜单栏；所有可编辑输入按 editFlags 提供原生撤销/重做/剪切/复制/粘贴/全选菜单，并绑定所属窗口与 frame。AC：真实 macOS 27.2 Electron 修复前后对比，三组共 9 个输入的右键事件→popup 调用从 0 变 1；桌面自动化实际完成全部 9 框粘贴（含 3 个 password）、原生右键菜单可见及 ⌘Z/⌘⇧Z 撤销/重做；非编辑区域不弹输入菜单。使用临时设置、合成文本、空书库替身，不保存用户设置。typecheck/lint/707 项测试与客户端 build 通过，独立审查无阻塞；合成 sendInputEvent 绕过 macOS 系统菜单，不作为原生快捷键验收依据。
+
 - 2026-11-09 [fix] 角色迁移标题与新增按钮对齐：通用 card-label 的 14px 底部间距使 flex 行内标题中心比按钮高约 7px，且结构按钮的局部 margin 重置影响右对齐。仅为 migration-head 将间距移至整行下方、清除标题外边距并恢复按钮靠右，业务逻辑保持。AC：真实 Electron 浅暗主题 × 900/1600px 四组修复前后对比，中心线差由约 6.99px 降至约 0.008px、按钮与右边缘间距为 0，新增入口均正常打开迁移表单；typecheck/lint/707 项测试与 Electron build 通过。纯样式修复，无新增测试。
 
 - 2026-11-09 [feat] 书库、结构与预览按 DESIGN 统一：browse-app 专属三栏面板与卡片样式，书库名称/置顶收藏标识独立排布、选中语义明确；结构按资料类型分组，保留大纲/伏笔幕层级、独立折叠集合和原新增/刷新/管理入口，补充 aria 状态。浏览专用 ReadOnlyProfiles 分区呈现世界背景/禁忌与角色身份/内核/经历/创作方向，全部字段和迁移维护保留；伏笔/地点/文风/章节卡统一层次，正文随主预览完整滚动；窄窗适配，700px 以下书库转顶部横向列表。AC：typecheck 三工程 / lint / 707 项全量测试（69 文件，净增 3）/ Electron build 通过；真实 App+IPC 替身在浅暗主题 × 1600/1100/900/800/640px × 10 状态共 100 组无横向溢出，截图与目标选中逐场景核对；真实键盘浅暗×选中/未选中验证焦点环修复前后，独立审查已指出问题修复。相关规范/架构/入口同步，计划见 docs/superpowers/plans/2026-11-09-library-workspace.md；无线上模型调用和用户数据库写入。
@@ -16,9 +18,9 @@
 
 - 2026-11-09 [feat] 新建小说卡片工作台（用户已确认设计与任务包）：阶段导航 + 自适应卡片流，输入与回答原位保留，工具/子 Agent 展示实际运行、等待输入、完成、失败和中断状态，详情可展开；页面专属组件与样式沿用现有语义令牌，支持多行/输入法/自定义/多选/数字/确认、历史阅读不强制跟随。shared Activity + stdio v3，ReAct 在真实 SDK 工具边界报告，ALS 关联并发提问与无效回答重问，受众分析/冲突整理及四业务 Agent 接通；会话泵防重复提交、发送失败和退出收尾，原 flow 兼容其他会话页。AC：typecheck 三工程 / lint / 全量 704 项（68 文件，净增 8）/ Electron build 通过；真实 SDK+HTTP 边界及真 React+IPC 交互验证，Electron 浅暗主题 × 900/1600px × 5 状态共 20 组无横向溢出，输入/确认/错误卡与展开详情截图目测通过；独立复审无阻塞。设计/计划见 docs/superpowers 同日 creation-workbench 文档；未调用线上模型，当前页面保留历史、重新进入不全文重放。
 
-- 2026-11-09 [refactor] Agent 专属辅助模块归拢：章节规划辅助移入 chapter-agent，正文链路归 chapter-writing-agent，独立角色润色归 character-polish-agent；跨流程公共模块保留顶层。共迁移 15 文件，详见 workflows/ARCHITECTURE.md 的逐文件归属表与模块 PROGRESS.md。AC：typecheck 三工程 / lint / 全量 696 项（65 文件）通过，路径与子进程 cwd 以外无逻辑变动。
-
 ## 历史归档
+
+- 2026-11-09 [归档摘要] Agent 专属辅助模块归拢：章节规划、正文及润色辅助模块移入各自 Agent 目录，共迁移 15 文件；typecheck/lint/696 项测试通过。详见 workflows 状态文档与 Git 历史。
 
 - 2026-11-09 [refactor] 工作流 Agent 按目录组织：`apps/agent/src/workflows/agents/` 下 5 个 Agent 各自使用同名目录，入口 `index.ts`、已有测试 `index.test.ts` 同目录；外部目录导入路径保持，内部相对引用与入口/架构文档同步。模块记录见 `apps/agent/src/workflows/PROGRESS.md`。AC：typecheck 三工程 / lint / 全量 696 项（65 文件）通过；9 个迁移文件除相对导入路径外与原文件完全一致。
 
