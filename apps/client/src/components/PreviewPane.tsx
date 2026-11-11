@@ -16,7 +16,8 @@ import { ForeshadowEditForm, recoveryLabel } from "./ForeshadowEditForm";
 import { StyleEditForm } from "./StyleEditForm";
 import { CharacterProfile, WorldviewProfile } from "./library/ReadOnlyProfiles";
 import { OutlineNodeCard } from "./OutlineNodeCard";
-import type { ChapterForeshadow, ChapterWriteProgress } from "./OutlineNodeCard";
+import type { ChapterForeshadow } from "./OutlineNodeCard";
+import { advanceWriteSession, isWriting, type ChapterWriteSession } from "./chapter-writing/write-session";
 import type { Selection } from "./StructureTreePanel";
 import { chapterOptions } from "../chapter-options";
 import { globalChapterOrder } from "../chapter-order";
@@ -395,74 +396,68 @@ export function PreviewPane({
   onStyleSaved,
   onStyleDeleted,
 }: PreviewPaneProps) {
-  /** 正文生成中的章节点 ID（null = 空闲）；agent 会话单例，进行中禁用各章入口 */
-  const [writingNodeId, setWritingNodeId] = useState<string | null>(null);
-  /** 目标章的生成进度；单段结果按轮累积，完整报告在轮次间保持展示。 */
-  const [writeProgress, setWriteProgress] = useState<ChapterWriteProgress | null>(null);
-  /** 待确认重生成的章节点（弹框确认后发起会话；生成与重生成走同一 write-chapter 会话） */
+  const [writeSession, setWriteSession] = useState<ChapterWriteSession | null>(null);
+  const sessionRef = useRef<ChapterWriteSession | null>(null);
+  const generationRef = useRef(0);
+  const startingRef = useRef(false);
+  const onSavedRef = useRef(onDocumentSaved);
+  onSavedRef.current = onDocumentSaved;
   const [regenConfirmNode, setRegenConfirmNode] = useState<OutlineNodeEntry | null>(null);
-  const [writeError, setWriteError] = useState<string | null>(null);
+  const writing = isWriting(writeSession);
+  const updateSession = (next: ChapterWriteSession): void => {
+    sessionRef.current = next;
+    setWriteSession(next);
+  };
 
-  // 正文生成会话消息订阅（对齐 CharacterEditForm 润色订阅模式）：
-  // write-progress → 更新目标章流程进度；run_finished → 清生成态并刷新详情；
-  // error → 展示错误；exit 兜底复位
+  // 订阅只读 ref 中的当前任务，切章不丢会话，也不因状态更新反复解绑。
   useEffect(() => {
     const offMessage = window.agent.onMessage((message) => {
-      if (writingNodeId === null) return;
-      if (message.type === "run_finished") {
-        setWritingNodeId(null);
-        setWriteProgress(null);
-        setWriteError(null);
-        onDocumentSaved?.();
-      } else if (message.type === "write-progress" && message.chapterNodeId === writingNodeId) {
-        setWriteProgress((previous) => {
-          const sameRound = previous?.round === message.round;
-          const priorResults = sameRound ? previous.stageResults : [];
-          return {
-            round: message.round,
-            totalRounds: message.totalRounds,
-            phase: message.phase,
-            stylePassScore: message.stylePassScore ?? previous?.stylePassScore,
-            report: message.report ?? previous?.report,
-            stageResults: message.stageResult
-              ? [...priorResults.filter((item) => item.phase !== message.stageResult?.phase), message.stageResult]
-              : priorResults,
-          };
-        });
-      } else if (message.type === "error") {
-        setWritingNodeId(null);
-        setWriteProgress(null);
-        setWriteError(message.message);
-        // 收尾兜底：确保单例 agent 空闲（对已退出进程是空操作）
+      const current = sessionRef.current;
+      if (!current || !isWriting(current)) return;
+      if (message.type === "run_finished" && message.novelId === current.novelId) {
+        updateSession({ ...current, status: "completed", endedAt: Date.now() });
+        onSavedRef.current?.();
+      } else if (message.type === "write-progress") {
+        updateSession(advanceWriteSession(current, message));
+      } else if (message.type === "error" && message.fatal) {
+        updateSession({ ...current, status: "failed", endedAt: Date.now(), error: message.message });
         void window.agent.stop();
       }
     });
     const offExit = window.agent.onExit(() => {
-      setWritingNodeId(null);
-      setWriteProgress(null);
+      const current = sessionRef.current;
+      // start 可能等待上一任务退出；那次退出不属于新任务。
+      if (!current || !isWriting(current) || startingRef.current) return;
+      updateSession({ ...current, status: "failed", endedAt: Date.now(), error: "生成意外结束，未收到保存完成确认。请检查模型配置或稍后重试。" });
     });
-    return () => {
-      offMessage();
-      offExit();
-    };
-  }, [writingNodeId, onDocumentSaved]);
+    return () => { offMessage(); offExit(); };
+  }, []);
 
-  // 卸载时若生成仍在进行（离开浏览页 / 切换小说）：中止会话
-  const writingRef = useRef(writingNodeId);
-  writingRef.current = writingNodeId;
-  useEffect(
-    () => () => {
-      if (writingRef.current !== null) void window.agent.stop();
-    },
-    [],
-  );
+  useEffect(() => () => {
+    generationRef.current++;
+    if (isWriting(sessionRef.current)) void window.agent.stop();
+  }, []);
 
-  /** 发起本章正文生成（write-chapter 会话，写作模型生成 → 三段校验 → 修订循环 → 入库） */
   const startWriteChapter = (novelId: string, chapterNodeId: string): void => {
-    setWritingNodeId(chapterNodeId);
-    setWriteProgress(null);
-    setWriteError(null);
-    void window.agent.start({ mode: "write-chapter", novelId, chapterNodeId });
+    if (isWriting(sessionRef.current)) return;
+    const generation = ++generationRef.current;
+    const session: ChapterWriteSession = {
+      novelId, chapterNodeId, status: "preparing", startedAt: Date.now(),
+      replacing: detail?.documents.some((document) => document.chapterId === chapterNodeId) ?? false,
+      progress: null, reports: [],
+    };
+    startingRef.current = true;
+    updateSession(session);
+    void (async () => {
+      try {
+        await window.agent.start({ mode: "write-chapter", novelId, chapterNodeId });
+      } catch (error) {
+        if (generation !== generationRef.current || !isWriting(sessionRef.current)) return;
+        updateSession({ ...sessionRef.current!, status: "failed", endedAt: Date.now(), error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        if (generation === generationRef.current) startingRef.current = false;
+      }
+    })();
   };
 
   let body: ReactElement;
@@ -491,7 +486,6 @@ export function PreviewPane({
     const node = detail.outlineNodes.find((n) => n.id === selection.outlineNodeId);
     body = node ? (
       <>
-        {writeError ? <p className="pane-error">{writeError}</p> : null}
         <OutlineNodeCard
           node={node}
           hasChapters={detail.outlineNodes.some(
@@ -506,8 +500,8 @@ export function PreviewPane({
           foreshadows={
             node.type === "chapter" ? toChapterForeshadows(detail, node.id) : undefined
           }
-          writing={writingNodeId !== null}
-          writeProgress={writingNodeId === node.id ? (writeProgress ?? undefined) : undefined}
+          writing={writing}
+          writeSession={writeSession?.novelId === detail.novel.id && writeSession.chapterNodeId === node.id ? writeSession : undefined}
           onWriteChapter={
             node.type === "chapter"
               ? () => startWriteChapter(detail.novel.id, node.id)

@@ -40,7 +40,7 @@ test("生成进度使用协议中的会话阈值，并在后续消息中保留",
       } },
     })));
     await act(async () => onMessage(agentMessageSchema.parse({ ...base, phase: 'review-consistency' })));
-    const styleStep = container.querySelectorAll('.progress-steps > li')[2].textContent;
+    const styleStep = container.querySelector('.writing-review[data-stage="review-style"]').textContent;
     await act(async () => root.unmount());
     await dom.happyDOM.close();
     process.stdout.write(JSON.stringify({ styleStep }));

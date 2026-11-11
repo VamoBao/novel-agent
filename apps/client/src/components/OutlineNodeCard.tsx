@@ -1,15 +1,13 @@
 import {
-  Check,
-  CircleCheck,
   Drama,
   ListOrdered,
-  Minus,
-  PenLine,
   RefreshCw,
   TriangleAlert,
 } from "lucide-react";
-import type { DocumentEntry, OutlineNodeEntry, ReviewReport, ReviewStageResult, WriteProgressPhase } from "@novel/shared";
-import { DEFAULT_STYLE_PASS_SCORE } from "@novel/shared";
+import type { DocumentEntry, OutlineNodeEntry } from "@novel/shared";
+import { ChapterWritingProgress } from "./chapter-writing/ChapterWritingProgress";
+import { isWriting, type ChapterWriteProgress, type ChapterWriteSession } from "./chapter-writing/write-session";
+export type { ChapterWriteProgress } from "./chapter-writing/write-session";
 import type { StaleCastMigration } from "../character-staleness";
 
 /** 章卡伏笔显示模型（PreviewPane 过滤登场/回收两组并解析角色名后传入，卡片纯渲染） */
@@ -22,35 +20,6 @@ export interface ChapterForeshadow {
   attentionLevel: number;
   characterNames: string[];
 }
-
-/** 正文生成进度显示模型（PreviewPane 从 write-progress 消息提取后传入） */
-export interface ChapterWriteProgress {
-  round: number;
-  totalRounds: number;
-  phase: WriteProgressPhase;
-  /** 生成会话实际生效的阈值；旧消息缺省使用内置默认 */
-  stylePassScore?: number;
-  report?: ReviewReport;
-  stageResults: ReviewStageResult[];
-}
-
-/** 进度步骤（drafting 与 revising 同属「正文生成」步——修订轮即新一轮生成） */
-const PROGRESS_STEPS: { phases: WriteProgressPhase[]; label: string }[] = [
-  { phases: ["drafting", "revising"], label: "正文生成" },
-  { phases: ["review-content"], label: "内容约束校验" },
-  { phases: ["review-style"], label: "文风校验" },
-  { phases: ["review-consistency"], label: "前后自洽校验" },
-  { phases: ["saving"], label: "保存入库" },
-];
-
-/** 问题类别 → 中文标签（与 agent 侧 ISSUE_KIND_LABELS 同义；client 不依赖 agent 代码故独立维护） */
-const ISSUE_KIND_LABELS: Record<ReviewReport["content"]["issues"][number]["kind"], string> = {
-  worldview: "世界观",
-  foreshadow: "伏笔",
-  summary: "剧情概述",
-  character: "角色变化",
-  consistency: "前后矛盾",
-};
 
 interface OutlineNodeCardProps {
   node: OutlineNodeEntry;
@@ -70,6 +39,8 @@ interface OutlineNodeCardProps {
   writing?: boolean;
   /** 本章正文生成进度（write-progress 消息；仅目标章传入，其余章 undefined） */
   writeProgress?: ChapterWriteProgress;
+  /** 目标章本次会话，包含准备/完成/失败与各轮报告。 */
+  writeSession?: ChapterWriteSession;
   /** 触发本章正文生成（write-chapter 会话）；不传则不显示入口 */
   onWriteChapter?: () => void;
   /** 触发本章正文重新生成（覆盖替换，经弹框确认后调用）；有正文且传入时显示入口 */
@@ -78,22 +49,15 @@ interface OutlineNodeCardProps {
   foreshadows?: ChapterForeshadow[];
 }
 
-/** 报告 → 摘要行（内容 N 处 · 文风 X 分或无文风要求 · 自洽 M 处） */
-function reportSummary(report: ReviewReport): string {
-  const styleText = report.style.skipped ? "无文风要求" : `文风 ${report.style.score} 分`;
-  return `内容 ${report.content.issues.length} 处 · ${styleText} · 自洽 ${report.consistency.issues.length} 处`;
-}
-
 /**
  * 大纲节点只读预览：梗概与关键情节点（仅幕节点有）分上下两张卡片展示，
  * 「规划本幕章节」入口固定在两张卡片下方右对齐——节点名与类型以左栏结构
  * 树为准（点击时已高亮），右栏不再重复；入口仅未规划过章节的幕显示，旧数
  * 据幕缺梗概/情节点（无规划种子内容），禁用并提示原因。
  * 章节点：无正文时同样右对齐显示「生成本章正文」入口（写作模型生成，
- * write-chapter 会话）；生成中由 writeProgress 渲染流程进度区块（步骤条 +
- * 单段校验反馈及整改报告摘要，write-progress 消息驱动）；已有正文则在梗概卡下追加正文卡
- * （约 N 字 + 全文——内容存 output 落盘文件，库内只留元数据；重写/修订流为
- * 后续需求）。
+ * write-chapter 会话）；chapter-writing/ChapterWritingProgress 在章卡顶部呈现准备、
+ * 五步流程、分项校验、各轮报告与完成/失败状态；已有正文则在梗概卡下追加正文卡
+ * （约 N 字 + 全文——内容存 output 落盘文件，库内只留元数据；重新生成经覆盖确认）。
  * 浏览路径专用，不进 shared 的 View 体系——
  * 避免浏览专用视图渗入创作流协议（protocol.ts 内嵌 viewSchema）。
  * 历史数据（6 版迁移前入库）summary / keyPlotPoints 为 null，展示空占位。
@@ -107,31 +71,29 @@ export function OutlineNodeCard({
   staleMigrations,
   writing = false,
   writeProgress,
+  writeSession,
   onWriteChapter,
   onRegenerateChapter,
   foreshadows,
 }: OutlineNodeCardProps) {
   const legacy = node.summary === null || node.keyPlotPoints === null;
   const showEntry = node.type === "act" && !hasChapters && onPlanChapters !== undefined;
-  const showWriteEntry =
-    node.type === "chapter" && !document && onWriteChapter !== undefined;
-  // 有正文且传入回调时显示重新生成入口（覆盖替换，确认弹框由调用方渲染）
-  const showRegenEntry =
-    node.type === "chapter" && document !== undefined && onRegenerateChapter !== undefined;
-  const showProgress = node.type === "chapter" && writing && writeProgress !== undefined;
-  const currentStep = writeProgress
-    ? PROGRESS_STEPS.findIndex((step) => step.phases.includes(writeProgress.phase))
-    : -1;
-  const report = writeProgress?.report;
-  const reportIssues = report
-    ? [
-        ...report.content.issues.map((issue) => ({ ...issue, key: `c-${issue.description}` })),
-        ...report.consistency.issues.map((issue) => ({ ...issue, key: `s-${issue.description}` })),
-      ]
-    : [];
+  const session = writeSession ?? (writing && writeProgress ? {
+    novelId: "", chapterNodeId: node.id, status: "running" as const, replacing: !!document,
+    startedAt: Date.now(), progress: writeProgress, reports: writeProgress.report ? [writeProgress.report] : [],
+  } : undefined);
+  const targetActive = isWriting(session);
+  const showWriteEntry = node.type === "chapter" && !document && onWriteChapter !== undefined;
+  const showProgress = node.type === "chapter" && (session !== undefined || showWriteEntry);
+  const showRegenEntry = node.type === "chapter" && document !== undefined && onRegenerateChapter !== undefined
+    && !targetActive && session?.status !== "failed";
 
   return (
     <>
+      {showProgress ? <ChapterWritingProgress chapterName={node.name} session={session}
+        disabled={(writing && !targetActive) || node.summary === null}
+        disabledReason={node.summary === null ? "缺少章节概述" : undefined}
+        onStart={onWriteChapter} onRetry={document ? onRegenerateChapter : onWriteChapter} /> : null}
       <section className="viewcard">
         <p className="card-label">梗概</p>
         {node.summary ? (
@@ -194,85 +156,6 @@ export function OutlineNodeCard({
           ))}
         </section>
       ) : null}
-      {showProgress && writeProgress ? (
-        <section className="viewcard write-progress">
-          <p className="card-label">
-            生成进度 · 第 {writeProgress.round}/{writeProgress.totalRounds} 轮
-          </p>
-          <ol className="progress-steps">
-            {PROGRESS_STEPS.map((step, index) => {
-              const stage = writeProgress.stageResults.find((item) => step.phases.includes(item.phase));
-              const failed = stage?.phase === "review-style"
-                ? !stage.result.skipped && stage.result.score < (writeProgress.stylePassScore ?? DEFAULT_STYLE_PASS_SCORE)
-                : stage !== undefined && stage.result.issues.length > 0;
-              const skipped = stage?.phase === "review-style" && stage.result.skipped;
-              return (
-                <li
-                  key={step.label}
-                  className={failed ? "warning" : skipped ? "skipped" : index === currentStep && !stage ? "current" : stage || index < currentStep ? "done" : undefined}
-                >
-                  <span>
-                    {failed ? (
-                      <TriangleAlert className="ic" aria-hidden />
-                    ) : skipped ? (
-                      <Minus className="ic" aria-hidden />
-                    ) : stage || index < currentStep ? (
-                      <Check className="ic" aria-hidden />
-                    ) : null}
-                    {step.label}
-                    {skipped ? "（已跳过）" : ""}
-                  </span>
-                  {stage?.phase === "review-style" && !stage.result.skipped ? (
-                    <div className="stage-feedback">
-                      <p>文风 {stage.result.score} 分：{stage.result.rationale}</p>
-                      {failed && stage.result.suggestions.length > 0 ? (
-                        <ul>{stage.result.suggestions.map((suggestion, i) => <li key={i}>{suggestion}</li>)}</ul>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {stage && stage.phase !== "review-style" && stage.result.issues.length > 0 ? (
-                    <ul className="stage-feedback">
-                      {stage.result.issues.map((issue, i) => (
-                        <li key={i}>[{ISSUE_KIND_LABELS[issue.kind]}] {issue.description} → {issue.suggestion}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ol>
-          {report ? (
-            <div className="write-report">
-              <p className={report.passed ? "report-verdict pass" : "report-verdict fail"}>
-                {report.passed ? (
-                  <>
-                    <CircleCheck className="ic" aria-hidden />
-                    已达标
-                  </>
-                ) : (
-                  <>
-                    <TriangleAlert className="ic" aria-hidden />
-                    未达标
-                  </>
-                )}
-                （{reportSummary(report)}）
-              </p>
-              {reportIssues.length > 0 ? (
-                <details>
-                  <summary>{reportIssues.length} 条问题与建议</summary>
-                  <ul className="report-issues">
-                    {reportIssues.map((issue) => (
-                      <li key={issue.key}>
-                        [{ISSUE_KIND_LABELS[issue.kind]}] {issue.description} → {issue.suggestion}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              ) : null}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
       {showEntry ? (
         <div className="act-actions">
           <button
@@ -286,25 +169,6 @@ export function OutlineNodeCard({
           </button>
         </div>
       ) : null}
-      {showWriteEntry ? (
-        <div className="act-actions">
-          <button
-            className="primary"
-            disabled={writing || node.summary === null}
-            title={
-              node.summary === null
-                ? "旧数据未入库章节概述，无法生成正文"
-                : writing
-                  ? "正文生成中…"
-                  : undefined
-            }
-            onClick={onWriteChapter}
-          >
-            <PenLine className="ic" aria-hidden />
-            {writing ? "正文生成中…" : "生成本章正文"}
-          </button>
-        </div>
-      ) : null}
       {showRegenEntry ? (
         <div className="act-actions">
           <button
@@ -313,7 +177,7 @@ export function OutlineNodeCard({
             onClick={onRegenerateChapter}
           >
             <RefreshCw className="ic" aria-hidden />
-            {writing ? "重新生成中…" : "重新生成"}
+            {writing ? "其他章节正在生成…" : "重新生成"}
           </button>
         </div>
       ) : null}

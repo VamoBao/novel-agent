@@ -102,10 +102,6 @@
 .browse-app .act-actions { padding: 14px 18px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: var(--bg-panel); }
 .browse-app .preview > .pane-error, .browse-app .preview > .pane-hint { padding: 18px 20px; margin: 0 0 16px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: var(--bg-panel); }
 .browse-app .preview > .pane-error { border-color: var(--border-danger); background: var(--bg-danger-subtle); }
-.browse-app .write-progress .progress-steps { gap: 8px; }
-.browse-app .write-progress .progress-steps > li { border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 11px 14px; background: var(--bg-sidebar); }
-.browse-app .write-progress .progress-steps > li.current { border-color: color-mix(in srgb, var(--accent) 30%, var(--border-default)); background: var(--bg-accent-subtle); }
-.browse-app .write-progress .write-report { padding-top: 16px; margin-top: 16px; }
 .browse-app .preview .profile-card-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
 .browse-app .preview .profile-card-heading h3 { margin: 0; }
 .profile-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 9px; color: var(--accent); background: var(--bg-accent-subtle); flex: none; }

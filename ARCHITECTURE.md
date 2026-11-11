@@ -19,6 +19,13 @@
 - `App` 发起规划时从当前详情传递所属部、幕梗概与关键情节点，零新增 IPC。`chapter-planning/chapter-plan-workbench.css` 仅负责章节页资料、导航和章节确认项样式，消费全局令牌与现有工作台卡片样式。960px 以下资料默认收起、导航转横排；详情可展开，长内容完整可读。
 - 确认视图继续使用 `ViewCard` 完整清单，逐章将章名/剧情概述/登场人物分层显示；确认修改、自动入库、失败按 runId 恢复、完成后保留幕选中的契约均沿用既有路径。恢复复用业务缓存，不重放上次交互历史。
 
+### 正文生成章内过程卡（2026-11-11）
+
+- 章内入口保持在浏览预览中，`OutlineNodeCard` 将正文创作卡置于章节资料前方，委托 `components/chapter-writing/ChapterWritingProgress.tsx`。卡片包含真实状态/轮次/耗时、五步流程、三项审校详情和按轮保留的报告；生成完成后默认收起过程，以正文阅读为主，保底保存仍标注待复核。
+- `chapter-writing/write-session.ts` 定义客户端会话及进度归并：当前轮累积分项、跨轮清分项但保留完整报告，评分使用会话阈值。完整报告仅在 `report.round` 与当前轮一致时补全当前轮结果，不将旧稿报告冒充修订稿结论。
+- `PreviewPane` 用稳定订阅和 ref 管理目标章会话；启动即准备，write-progress 推进，run_finished 才完成并刷新详情。启动拒绝/fatal/异常退出保留进度和报告、显示重新尝试；旧进程退出不误伤尚在启动的新任务。切章继续后台会话且只在目标章显示过程，其他章入口禁用，离开浏览页仍中止。
+- 重生成继续通过覆盖确认，生成与失败期间保留旧正文；失败重试再次确认覆盖。新一轮客户端任务替换会话历史，不做跨会话持久化重放。专属 CSS 使用全局令牌与容器查询适配窄预览，旧的 write-progress 样式退役。协议、模型调用与保存流程未变。
+
 ### 书库、结构与资料预览（2026-11-09）
 
 - `App` 浏览页根类 `browse-app` 引入 `components/library/library-workspace.css`，仅统一三栏面板、书库卡片、结构分组与预览卡壳；创作工作台和设置页沿用各自布局。书库可手动折叠，700px 以下转为顶部横向列表；预览使用剩余宽度、正文随主内容区滚动。
@@ -227,7 +234,7 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 │                        #   在大纲之后可整组收起、空组占位、停用条目带后缀；大纲树部/幕可
 │                        #   展开收起，「大纲」组头刷新按钮 → OutlineRegenDialog 警示弹框）/
 │                        #   PreviewPane（角色卡只读 + 迁移清单、新建角色态渲染表单；伏笔/文风卡带
-│                        #   编辑入口与新建文风态）/ OutlineNodeCard（幕卡
+│                        #   编辑入口与新建文风态；管理正文任务状态与恢复）/ OutlineNodeCard（幕卡
 │                        #   含规划入口；章卡含正文卡与「伏笔」区块——详情 foreshadows 过滤登场/
 │                        #   回收两组并解析服务角色名，`toChapterForeshadows` → `ChapterForeshadow`）/
 │                        #   CharacterEditForm（仅新增：13 字段 + 7 必填校验 + AI 润色回填——基准卡只读，
@@ -254,6 +261,7 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 │                        #   components/creation（SessionTimeline、ActivityCard、CreationQuestion、内容映射与共享 CSS）
 │                        #   + hooks/use-timeline-scroll（历史阅读/跟随）
 │                        #   + components/chapter-planning（章节页专属资料/导航/确认项 CSS）
+│                        #   + components/chapter-writing（章内过程卡、会话模型与进度归并、专属 CSS）
 ├── src/styles.css       # 样式：44 个语义 CSS 变量（:root 浅色基准——颜色语义分组 +
 │                        #   圆角/阴影/控件高度/字号阶梯设计令牌）+ prefers-color-scheme
 │                        #   暗色媒体查询（GitHub Primer Dark 基准），规则区零硬编码色值，
@@ -327,7 +335,7 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 1. **前置校验**（全部抛可读错误，由协议入口转 fatal error）：小说存在 → 章节点存在、同小说且类型为 chapter → 章剧情概述非空（旧数据缺内容拒绝）→ 所属幕与部节点存在 → 世界观已确认（worldviews 表有记录）；已有正文不再拒绝——检测到既有 document 即走重新生成路径（isRegen 分流 notify 与保存路径，流程与首次生成完全一致）
 2. **上下文组装（全取自库）**：书名 / logline + 叙事视角（novels.narrative_pov，未采集零注入——随【小说】块注入并要求正文叙述全程保持该视角、人称与信息范围不得中途漂移）+ 世界观 JSON + 本章角色完整参考（全部已设定字段；人物属性与作者指导分开，基准叠加已结束迁移）+ 同大纲版本已确认的已结束完整迁移历史与本章变化计划（角色/字段/旧值→目标/起止章/诱因/过渡/序号/修订；未来、草案、取消不注入；计划区间结束不证明正文已兑现）+ 部名与部梗概 + 幕名与幕梗概及关键情节点 + 本章名与剧情概述 + 全书跨幕前后章衔接（上一章正文在 8000 字符预算内优先、缺失或超预算回退概述，下一章只取概述）+ **本章绑定伏笔（可选增强）**：`buildChapterForeshadowContext`（workflows/agents/chapter-writing-agent/foreshadow-context）——登场注入卡片、回收组按登场章全局章序升序注入卡片 + 登场章上下文（正文优先、8000 字符预算内整条注入，未生成/文件缺失/超预算降级概述）+ 多步回收既往回收章概述，【本章伏笔】块插【下一章】块后【参考文风】段前、写作要求条件附加编号顺延、生成前 notify「🔮 本章伏笔」统计与降级计数；无绑定伏笔零注入零通知 + **参考文风（可选增强）**：style_references 表按启用过滤（enabled=1），非空在 prompt 尾部【下一章】块之后插【参考文风】段（每条「（名字）\n内容」，长样本置尾不推远核心上下文且紧邻风格指令）、写作要求附模仿条（模仿叙事语言 / 句式节奏 / 描写风格，不抄袭具体情节与专有名词）、生成前 notify「🖋️ 本次参考文风：名单」；无启用文风零注入零通知（行为与无此功能逐字节一致）
 3. **生成-校验-修订循环与落盘**：写作偏好生效值先行解析——`resolveSystemWritingPrefs`（providers/writing-prefs，环境变量读系统级）+ shared `resolveChapterLength` / `resolveStylePassScore`（小说级 novels 行 > 系统级 > 内置默认 2000~3000 字 / 80 分；篇幅 min/max 整体覆盖、半设乱序防御性跳过），小说级覆盖生效时 notify 通报。`getWritingModel()`（providers/writing-model，按 `WRITING_MODEL_PROVIDER` 所选接口类型调用对应官方 SDK，`WRITING_MODEL_*` 三环境变量齐才启用，任一未配置回落 Agent 会话模型）`generateText({ messages })`（非 ReAct——无工具无提问；初稿资料与要求只组装一次，历史原样保留），写作要求篇幅条用生效值（`篇幅约 X~Y 字`）、遵守世界观禁忌、只输出正文文本；空结果拒绝且零残留。每轮生成后经 `reviewChapter`（chapter-review，Agent 模型三段独立校验——①内容约束（世界观/章节概述/本章伏笔/**本章角色状态与变化计划**，与写作者同源）②文风相似度（合格线 = 生效阈值，评分 prompt 与判定同一条线；无启用样本 skipped）③前后自洽）产出结构化整改报告：`isReportPassing` 通过（①③零问题且文风达标）→ 落盘；未达标在写作对话尾部追加【整改报告】及针对最新稿的修订指令（合格线随 formatRevisionBlock 同行），正文保留在原生 assistant 响应中，不重拼资料或重建历史，最多 3 轮；第 3 轮仍未达标 → ⚠️ 警告（含文风分与问题计数）后保底保存最后一版。进度全程经 onProgress 回调透传（drafting/review-*/revising/saving，报告附着在 revising/saving 事件）。正文经 document-writer 写 `<输出目录>/<小说ID>/<部名>/<章名>.md`（sanitize 段清理，同名冲突加 `-N` 后缀不覆盖既有文件；顶层文件夹在首次生成正文时创建），file_path 以**绝对路径**落库（用户中途更换输出目录后旧正文仍指向真实位置；写失败包「输出目录不可写」上下文直达 fatal error），文件先落、库后入，库失败回滚删除文件
-   三项校验各在开始与结束时发送 `write-progress`，结束事件附 `stageResult`；客户端按轮累积阶段结果，有问题即在对应阶段显示警告与建议，新轮清空阶段结果。完整 `report` 仍随修订 / 保存事件供末尾汇总。
+   三项校验各在开始与结束时发送 `write-progress`，结束事件附 `stageResult`；客户端按轮累积阶段结果，有问题即在对应阶段显示警告与建议，新轮清空阶段结果。完整 `report` 随修订 / 保存事件供按轮审校记录展示，任务结束后仍可查看。
 4. **元数据入库绑定**：首次生成走 `saveChapterDocument`、重新生成走 `replaceChapterDocument`（单事务删旧行插新行）插 documents 行（file_path 绝对路径 + 字数，内容不进库）+ 章节点回写 `document_id` 并置 `status=completed`；重生成在事务提交后清理旧正文文件（新旧路径相同——旧文件本就缺失——时跳过防误删新文件；幂等容忍缺失）；任一环节失败回滚删新文件，旧正文行与文件零影响；notify 保存路径与字数；run_finished 携带小说 ID 供客户端刷新详情（章节点 ID 稳定，选中与正文展示保持）；大纲重生成只降级归档章节点，documents 行与正文文件保留（旧正文与归档章的关联留存）
 
 > 伏笔回收按目标章所属树的全书章序区分阶段回收与最终回收；最终章要求完整揭露真相并收尾，内容审校按同源材料检查并产出伏笔整改项。缺失/跨版回收点不猜测最终章，保留既有三轮修订与保底警告策略。详细职责与边界见 [workflows 架构：伏笔最终回收与审校](apps/agent/src/workflows/ARCHITECTURE.md#伏笔最终回收与审校2026-10-14)。
@@ -386,7 +394,7 @@ apps/client/             # @novel/client：Electron 客户端（electron-vite �
 
 ## 写作偏好两级配置（2026-10-14）
 
-章节篇幅与文风合格线按「小说级 > 系统级 > 内置默认」解析，正文生成（writeChapter）在组上下文前解析一次生效值：篇幅条直接进写作 prompt（`篇幅约 X~Y 字`），合格线贯穿 chapter-review 的评分 prompt、`isReportPassing` 通过判定与 `formatRevisionBlock` 修订块文案。各阶段进度事件携带同一 `stylePassScore`，经 headless → shared `write-progress` 协议 → PreviewPane → OutlineNodeCard 传递，阶段警告与整改建议使用该会话阈值（含 0 分）；旧消息缺字段时使用内置默认 80。
+章节篇幅与文风合格线按「小说级 > 系统级 > 内置默认」解析，正文生成（writeChapter）在组上下文前解析一次生效值：篇幅条直接进写作 prompt（`篇幅约 X~Y 字`），合格线贯穿 chapter-review 的评分 prompt、`isReportPassing` 通过判定与 `formatRevisionBlock` 修订块文案。各阶段进度事件携带同一 `stylePassScore`，经 headless → shared `write-progress` 协议 → PreviewPane → OutlineNodeCard → ChapterWritingProgress 传递，阶段警告与整改建议使用该会话阈值（含 0 分）；旧消息缺字段时使用内置默认 80。
 
 - **小说级**：novels 表三可空列（chapter_length_min / chapter_length_max / style_pass_score，19→20 迁移、NULL=跟随系统设置），客户端书库右键「写作偏好」经 WritingPrefsDialog → set-writing-prefs 直写库（全量替换、schema 成对校验）；小说级覆盖生效时生成前 notify 通报。
 - **系统级**：settings.json `writing` 组（normalizeSettings 逐字段校验、非法归 null），childEnv 经 resolveWritingEnv 三级优先级（设置 > .env > 继承环境变量）注入 NOVEL_CHAPTER_LENGTH_MIN/MAX + NOVEL_STYLE_PASS_SCORE；agent 侧 `providers/writing-prefs.ts` 读取（非法值静默归 null），协议宿主 / CLI 亦可直设。
