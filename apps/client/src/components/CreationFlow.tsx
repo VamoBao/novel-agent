@@ -1,12 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowLeft, BookOpen, Check, CircleAlert, Feather, LoaderCircle, MessageSquare, ShieldCheck, Sparkles, UserRound } from "lucide-react";
+import { ArrowDown, ArrowLeft, Check, CircleAlert, Feather, LoaderCircle, MessageSquare, ShieldCheck, Sparkles } from "lucide-react";
 import type { Stage } from "@novel/shared";
 import { useAgentSession } from "../hooks/use-agent-session";
-import type { TimelineEntry } from "../hooks/session-timeline";
-import { QuestionCard } from "./QuestionCard";
-import { ViewCard } from "./ViewCard";
-import { ActivityCard } from "./creation/ActivityCard";
-import { CREATION_STEPS, creationNotice, creationStep, questionTitle } from "./creation/creation-content";
+import { useTimelineScroll } from "../hooks/use-timeline-scroll";
+import { SessionTimeline } from "./creation/SessionTimeline";
+import { CREATION_STEPS, creationStep } from "./creation/creation-content";
 import "./creation/creation-workbench.css";
 
 interface CreationFlowProps {
@@ -15,94 +12,20 @@ interface CreationFlowProps {
   onClose: () => void;
 }
 
-function AnswerCard({ entry }: { entry: Extract<TimelineEntry, { kind: "request" }> }) {
-  const value = entry.answer;
-  const answer = typeof value === "boolean" ? value ? "确认，继续下一步" : "我想调整一下"
-    : value === "" ? "暂时跳过" : value;
-  return <section className="creation-card answer-card" data-delivery={entry.deliveryError ? "failed" : "answered"}>
-    <div className="creation-card-heading"><span className="creation-avatar user"><UserRound size={17} aria-hidden /></span>
-      <span className="creation-card-label">你的回答</span><span className="creation-card-meta">{entry.deliveryError ? "发送失败" : "已提交"}</span></div>
-    <h3>{questionTitle(entry.request.ask.prompt)}</h3>
-    {entry.request.ask.type === "confirm" && entry.request.ask.view ? <ViewCard view={entry.request.ask.view} /> : null}
-    {Array.isArray(answer) ? <div className="answer-tags">{answer.map((item) => <span key={item}>{item}</span>)}</div>
-      : <p className="answer-content">{answer}</p>}
-    {entry.deliveryError ? <p className="creation-input-error">{entry.deliveryError}</p> : null}
-  </section>;
-}
-
 /** 新建/恢复创作：有序卡片时间流，原位更新调用，保留逐次输入。 */
 export function CreationFlow({ resumeRunId, onFinished, onClose }: CreationFlowProps) {
   const { phase, timeline, stage, requests, currentRequest, error, exitCode, answer, start } = useAgentSession({
     startOptions: resumeRunId ? { mode: "resume", runId: resumeRunId } : undefined, onFinished,
   });
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const streamRef = useRef<HTMLElement>(null);
-  const followingRef = useRef(true);
-  const [unread, setUnread] = useState(false);
+  const { bottomRef, streamRef, followingRef, unread, onScroll, latest, scrollTo } = useTimelineScroll(timeline);
   const currentIndex = CREATION_STEPS.findIndex((step) => step.stage === stage);
   const steps = stage === "chapter" ? [creationStep("chapter")] : CREATION_STEPS;
   const status = phase === "error" ? "创作已暂停" : currentRequest ? "等待你的输入" : "AI 正在处理";
   const StatusIcon = phase === "error" ? CircleAlert : currentRequest ? MessageSquare : LoaderCircle;
 
-  useEffect(() => {
-    if (!timeline.length) { followingRef.current = true; setUnread(false); }
-    if (followingRef.current) bottomRef.current?.scrollIntoView?.({ behavior: "instant", block: "end" });
-    else setUnread(true);
-  }, [timeline]);
-
   const close = (): void => { void window.agent.stop(); onClose(); };
   const jumpTo = (target: Stage | null): void => {
-    const section = streamRef.current?.querySelector(`[data-stage-anchor="${target ?? "start"}"]`);
-    if (section) {
-      followingRef.current = false;
-      section.scrollIntoView?.({ behavior: "smooth", block: "start" });
-    }
-  };
-  const latest = (): void => {
-    followingRef.current = true; setUnread(false);
-    bottomRef.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
-  };
-  const waitingFor = (id: string): boolean => requests.some((request) => {
-    if (request.activityId === id) return true;
-    return timeline.some((entry) => entry.kind === "activity" && entry.activity.id === request.activityId && entry.activity.parentId === id);
-  });
-
-  const renderEntry = (entry: TimelineEntry) => {
-    switch (entry.kind) {
-      case "stage": {
-        const step = creationStep(entry.stage);
-        return <section className="creation-card creation-stage-card" data-stage-anchor={entry.stage}>
-          <div><span className="creation-eyebrow">{entry.stage === "chapter" ? "继续规划" : `步骤 ${String(CREATION_STEPS.findIndex((item) => item.stage === entry.stage) + 1).padStart(2, "0")}`}</span>
-            <h2>{step.label}</h2><p>{step.description}</p></div><BookOpen size={26} aria-hidden /></section>;
-      }
-      case "notify": {
-        const text = creationNotice(entry.text);
-        if (!text) return null;
-        const warning = /警告|跳过|⚠|失败|尚无|未匹配/u.test(entry.text);
-        return <section className="creation-card creation-notice" data-tone={entry.tone ?? (warning ? "warning" : "info")}>
-          {warning || entry.tone ? <CircleAlert size={16} aria-hidden /> : <Sparkles size={16} aria-hidden />}<p>{text}</p></section>;
-      }
-      case "view": return <section className="creation-card creation-result-card">
-        <div className="creation-card-heading"><span className="creation-avatar result"><BookOpen size={17} aria-hidden /></span>
-          <span className="creation-card-label">创作成果</span><span className="creation-card-meta"><Check size={13} aria-hidden />已整理</span></div>
-        <ViewCard view={entry.view} /></section>;
-      case "activity": {
-        const parent = timeline.find((item) => item.kind === "activity" && item.activity.id === entry.activity.parentId);
-        return <ActivityCard activity={entry.activity} waiting={waitingFor(entry.activity.id)}
-          parentName={parent?.kind === "activity" ? parent.activity.name : undefined} />;
-      }
-      case "request": {
-        if (entry.answer !== undefined) return <AnswerCard entry={entry} />;
-        const active = entry.request.id === currentRequest?.id && !entry.interrupted;
-        return <section className={`creation-card creation-input-card ${active ? "is-current" : "is-queued"}`}>
-          <div className="creation-card-heading"><span className="creation-avatar input"><MessageSquare size={17} aria-hidden /></span>
-            <span className="creation-card-label">{entry.interrupted ? "输入已中断" : active ? "轮到你了" : "接下来的问题"}</span>
-            <span className="creation-card-meta">{active ? "等待输入" : entry.interrupted ? "继续流程后重新开始" : "等待前一项回答"}</span></div>
-          {active ? <QuestionCard key={entry.request.id} request={entry.request} appearance="workbench" autoFocus={followingRef.current} onAnswer={answer} />
-            : <p>{questionTitle(entry.request.ask.prompt)}</p>}
-        </section>;
-      }
-    }
+    scrollTo(streamRef.current?.querySelector(`[data-stage-anchor="${target ?? "start"}"]`));
   };
 
   return <div className="creation-workbench">
@@ -131,12 +54,7 @@ export function CreationFlow({ resumeRunId, onFinished, onClose }: CreationFlowP
           <div><MessageSquare size={13} aria-hidden />已记录 {timeline.filter((entry) => entry.kind === "request" && entry.answer !== undefined).length} 次回答</div>
         </div>
       </aside>
-      <main className="creation-stream" ref={streamRef} onScroll={() => {
-        const node = streamRef.current;
-        if (!node) return;
-        followingRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 96;
-        if (followingRef.current) setUnread(false);
-      }}>
+      <main className="creation-stream" ref={streamRef} onScroll={onScroll}>
         <div className="creation-stream-content">
           <section className="creation-card creation-welcome" data-stage-anchor="start">
             <span className="creation-avatar welcome"><Feather size={25} aria-hidden /></span>
@@ -144,7 +62,7 @@ export function CreationFlow({ resumeRunId, onFinished, onClose }: CreationFlowP
               <p>你负责想象，AI 陪你搭建世界、塑造人物、梳理故事脉络。</p></div>
             <span className="creation-welcome-badge"><Sparkles size={14} aria-hidden />AI 协作创作</span>
           </section>
-          {timeline.map((entry) => <div className="creation-entry" key={entry.key}>{renderEntry(entry)}</div>)}
+          <SessionTimeline timeline={timeline} requests={requests} currentRequest={currentRequest} onAnswer={answer} autoFocus={followingRef.current} />
           {phase === "running" && !currentRequest ? <section className="creation-card creation-thinking" role="status"><LoaderCircle size={17} aria-hidden />
             <span>{timeline.length ? "正在整理你的故事，下一步即将开始…" : "正在准备创作空间…"}</span><span className="thinking-dots"><i /><i /><i /></span></section> : null}
           {phase === "error" ? <section className="creation-card error-panel creation-error">

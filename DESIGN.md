@@ -12,6 +12,8 @@
 | [创作工作台样式](apps/client/src/components/creation/creation-workbench.css) | 卡片层次、阶段导航、选项卡、活动详情与响应式布局参考 |
 | [新建小说页](apps/client/src/components/CreationFlow.tsx) | 阶段、输入、回答、成果、提示与错误的整体组织参考 |
 | [调用活动卡](apps/client/src/components/creation/ActivityCard.tsx) | 工具与 Agent 的状态、归属、耗时、详情折叠参考 |
+| [共享卡片时间流](apps/client/src/components/creation/SessionTimeline.tsx) | 新建小说与章节规划的提问、回答、成果、通知、活动卡片参考 |
+| [章节规划工作台](apps/client/src/components/ChapterPlanFlow.tsx) | 单幕资料、会话定位、完整方案确认与响应式布局参考 |
 | [工作台输入组件](apps/client/src/components/creation/CreationQuestion.tsx) | 单选、多选、自定义、多行、数字及确认的交互参考 |
 | [内容映射](apps/client/src/components/creation/creation-content.ts) | 面向作者的阶段说明、工具名称与终端文案转换参考 |
 | [书库工作区样式](apps/client/src/components/library/library-workspace.css) | 三栏面板、书库选中卡、资料分组、预览卡与键盘焦点参考 |
@@ -72,6 +74,7 @@
 | --- | --- |
 | 书库与资料浏览 | 书库、结构树、预览按职责分栏；详情卡随可用预览宽度展开 |
 | 多步骤创作 | 阶段导航 + 有序卡片流，当前阶段清晰，历史阶段可定位 |
+| 单幕章节规划 | 本幕资料 + 会话定位导航 + 有序卡片流，沿用真实状态，不套用多阶段进度 |
 | 全局设置 | 分类导航 + 设置组卡片，同类字段聚合 |
 | 单项短编辑或确认 | 表单卡或弹窗，标题、影响范围和提交动作清楚 |
 

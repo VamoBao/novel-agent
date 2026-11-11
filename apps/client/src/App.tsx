@@ -28,6 +28,9 @@ interface ChapterPlanTarget {
   novelName: string;
   actNodeId: string;
   actName: string;
+  partName?: string;
+  actSummary: string | null;
+  keyPlotPoints: string[] | null;
 }
 
 /** 大纲重新生成会话目标（弹框确认后转入会话页） */
@@ -214,6 +217,9 @@ export function App() {
       novelName: detail.novel.name ?? "未命名小说",
       actNodeId: node.id,
       actName: node.name,
+      partName: detail.outlineNodes.find((item) => item.id === node.parentId)?.name,
+      actSummary: node.summary,
+      keyPlotPoints: node.keyPlotPoints,
     });
   };
 
@@ -339,6 +345,9 @@ export function App() {
           novelName={chapterPlan.novelName}
           actNodeId={chapterPlan.actNodeId}
           actName={chapterPlan.actName}
+          partName={chapterPlan.partName}
+          actSummary={chapterPlan.actSummary}
+          keyPlotPoints={chapterPlan.keyPlotPoints}
           onFinished={handlePlanFinished}
           onClose={handleCloseChapterPlan}
         />

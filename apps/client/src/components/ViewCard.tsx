@@ -164,10 +164,9 @@ export function ViewCard({ view }: { view: View }) {
           ))}
           <p className="part-name">拟分 {view.plan.chapters.length} 章</p>
           {view.plan.chapters.map((chapter, index) => (
-            <div key={index} className="act">
-              <p>
-                第{index + 1}章 {chapter.name}：{chapter.summary}
-              </p>
+            <div key={index} className="act chapter-plan-item">
+              <h4><span>第{index + 1}章</span> {chapter.name}</h4>
+              <p className="chapter-plan-summary">{chapter.summary}</p>
               <p className="plot">登场：{chapter.characters.map((c) => c.name).join("、")}</p>
             </div>
           ))}
