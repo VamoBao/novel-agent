@@ -142,7 +142,7 @@ interface SettingsPageProps {
  * 模型设置：Agent 会话模型、写作模型与校审模型三组——各含**接口类型 provider**
  * （openai / deepseek / claude，决定调用哪家官方 SDK 与协议）、API Key、模型名与
  * Base URL（写作 / 校审两组三项需同时配置才启用独立模型，留空回落 Agent 模型；
- * 校审为配置先行——当前版本审校仍用 Agent 模型）；
+ * 校审用于章节正文生成后的三段审校，保存后下一次生成正文时生效）；
  * 写作偏好：章节篇幅范围与文风合格线的系统级默认（留空 = 内置默认 2000~3000 字 /
  * 80 分；单本小说可在书库右键「写作偏好」单独覆盖，优先级更高）+ 产物输出目录；
  * 外观：主题三选（保存即生效）。Key 输入用 password 型防旁窥。
@@ -399,7 +399,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     </div>
   );
 
-  /** 校审模型组（模型设置分类；配置先行——当前版本审校仍用 Agent 模型） */
+  /** 校审模型组（模型设置分类；章节正文三段审校专用，未配齐回落 Agent 模型） */
   const reviewModelGroup = (
     <div className="settings-group">
       <p className="settings-group-label">校审模型——章节正文审校专用</p>
@@ -433,7 +433,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       </div>
       <p className="settings-hint">
         三项需同时配置才启用独立校审模型（接口类型可与上面的 Agent / 写作模型不同）；留空则正文审校回落 Agent 模型。
-        当前版本审校流程仍使用 Agent 会话模型——本组配置先行保存，接入校审流程后生效。
+        保存后下一次生成正文时生效。
         编辑本组连接信息会保存当前接口类型；仅修改外观或写作偏好时，继续沿用已有接口类型配置。
       </p>
     </div>

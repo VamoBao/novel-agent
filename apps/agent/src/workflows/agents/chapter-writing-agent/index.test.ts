@@ -16,6 +16,8 @@ import { StyleReferenceStore } from "../../../state/style-reference-store";
 import { ForeshadowStore } from "../../../state/foreshadow-store";
 import { CharacterMigrationStore } from "../../../state/migration-store";
 import { FakeChannel } from "../../../ui/fake-channel";
+// agent-model 不依赖 'ai'（仅官方 SDK 工厂），可静态导入用于缺省回落断言
+import { model as agentSessionModel } from "../../../providers/agent-model";
 import { writeDocumentArtifact } from "../../../output/document-writer";
 import type { Character, Worldview } from "@novel/shared";
 import type { WriteProgressEvent } from "./index";
@@ -1050,6 +1052,42 @@ describe("writeChapter", () => {
 
     // 通知：通过轮次与摘要
     expect(channel.notifies.some((n) => n.includes("✅ 校验通过（第 1 轮）"))).toBeTrue();
+  });
+
+  test("缺省校审模型解析：REVIEW_MODEL_* 三项齐全用独立校审模型，任一未配置回落 Agent 会话模型", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+    ctx.styleReferenceStore.addStyleReference(NOVEL_ID, { name: "样本", content: "文风文本。" });
+    const channel = new FakeChannel([]);
+    // 本地 .env 可能配置 REVIEW_MODEL_*，用例内接管环境变量、结束恢复原值
+    const savedKeys = ["REVIEW_MODEL_PROVIDER", "REVIEW_MODEL_NAME", "REVIEW_MODEL_API_KEY", "REVIEW_MODEL_BASE_URL"]
+      .map((key) => [key, process.env[key]] as const);
+    try {
+      for (const [key] of savedKeys) delete process.env[key];
+      generateObjectCalls = [];
+      await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
+      expect(generateObjectCalls).toHaveLength(3);
+      expect(generateObjectCalls.every((call) => call.model === agentSessionModel)).toBeTrue();
+
+      process.env.REVIEW_MODEL_PROVIDER = "openai";
+      process.env.REVIEW_MODEL_NAME = "independent-reviewer";
+      process.env.REVIEW_MODEL_API_KEY = "test-review-secret";
+      process.env.REVIEW_MODEL_BASE_URL = "https://review.invalid/v1";
+      generateObjectCalls = [];
+      // 同章第二次生成为重生成路径，流程一致；此处聚焦校验模型实例来源
+      await writeChapter({ channel, novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
+      expect(generateObjectCalls).toHaveLength(3);
+      expect(generateObjectCalls.every((call) => call.model !== agentSessionModel)).toBeTrue();
+      expect(generateObjectCalls.every((call) =>
+        (call.model as { modelId?: string }).modelId === "independent-reviewer")).toBeTrue();
+    } finally {
+      for (const [key, value] of savedKeys) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 
   test("首轮不达标：第 2 轮保留原生正文消息并追加整改报告，修订稿通过后入库", async () => {

@@ -76,7 +76,7 @@ const directRun = `
   verifyDb.close();
 `;
 
-async function runProbe(provider: string, options: { fallback?: boolean; noUsage?: boolean; headless?: boolean; cacheUsage?: "missing" | "zero"; basicUsage?: string; reviewProvider?: string } = {}) {
+async function runProbe(provider: string, options: { fallback?: boolean; noUsage?: boolean; headless?: boolean; cacheUsage?: "missing" | "zero"; basicUsage?: string; reviewProvider?: string; reviewModel?: boolean } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "novel-writing-sdk-"));
   try {
     const env = {
@@ -90,6 +90,13 @@ async function runProbe(provider: string, options: { fallback?: boolean; noUsage
       SDK_NO_USAGE: options.noUsage ? "1" : "0",
       SDK_CACHE_USAGE: options.cacheUsage ?? "present",
       SDK_BASIC_USAGE: options.basicUsage ?? "present",
+      // 独立校审模型三项齐全：审校应改走校审端点，写作请求不受影响
+      ...(options.reviewModel ? {
+        REVIEW_MODEL_PROVIDER: "openai",
+        REVIEW_MODEL_NAME: "independent-reviewer",
+        REVIEW_MODEL_API_KEY: "test-review-secret",
+        REVIEW_MODEL_BASE_URL: "https://independent-review.invalid/v1",
+      } : {}),
     };
     let argv = [process.execPath, "--eval", bootstrap + directRun];
     if (options.headless) {
@@ -203,6 +210,22 @@ function sharedReviewRequest(body: Record<string, unknown>) {
   }
   return copy;
 }
+
+test("独立校审模型三项配置齐：审校请求走校审端点与模型名，写作请求保持写作端点，Key 不进日志", async () => {
+  const { stdout, stderr } = await runProbe("openai", { reviewModel: true });
+  expect(stderr).toBe("");
+  expect(stderr).not.toContain("test-review-secret");
+  const { requests } = JSON.parse(stdout);
+  const reviews = requests.filter((request: { review: boolean }) => request.review);
+  const writes = requests.filter((request: { review: boolean }) => !request.review);
+  expect(reviews).toHaveLength(9);
+  expect(writes).toHaveLength(3);
+  expect(reviews.every((request: { url: string; body: { model?: string } }) =>
+    request.url === "https://independent-review.invalid/v1/chat/completions"
+    && request.body.model === "independent-reviewer")).toBeTrue();
+  expect(writes.every((request: { url: string; body: { model?: string } }) =>
+    request.url === "https://writer.invalid/v1/chat/completions" && request.body.model === "test-writer")).toBeTrue();
+});
 
 test.each(["openai", "deepseek", "claude"])("%s 审校真实 HTTP：固定 schema、资料前缀、缓存断点及各稿隔离", async (provider) => {
   const { stdout, stderr } = await runProbe("openai", { reviewProvider: provider });

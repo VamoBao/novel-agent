@@ -20,7 +20,8 @@ import { OUTPUT_DIR } from "./output/outline-writer";
  * `write-chapter <novelId> <chapterNodeId>` = 章节正文生成（写作模型持续追加对话修订，
  * 三段独立校验 + 修订循环后入库；流程经 write-progress 消息实时回传；
  * 写作调用用量经 stderr JSON 记录，不进入 stdout 协议；
- * 校验经 Agent 会话模型，故本会话与其余会话同样需要 AGENT_MODEL_API_KEY）。
+ * 校验优先独立校审模型（REVIEW_MODEL_* 三项齐全时启用），未配齐整体回落
+ * Agent 会话模型，故本会话与其余会话同样需要 AGENT_MODEL_API_KEY）。
  */
 
 /** 会话模式：与 client 侧 AgentStartOptions（@novel/shared）一一对应 */
@@ -124,7 +125,7 @@ async function main(): Promise<void> {
     process.stderr.write(`NOVEL_AGENT_FATAL: ${configError}\n`);
     process.exit(1);
   }
-  // 所有会话（包括正文校验）均需要 Agent 模型 API Key。
+  // 所有会话（包括正文校验——校审模型未配齐时回落 Agent 会话模型）均需要 Agent 模型 API Key。
   if (!resolveAgentModelConfig().apiKey) {
     process.stderr.write("NOVEL_AGENT_FATAL: 未设置 AGENT_MODEL_API_KEY（兼容旧 DEEPSEEK_API_KEY）\n");
     process.exit(1);

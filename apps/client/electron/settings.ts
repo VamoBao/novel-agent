@@ -19,8 +19,8 @@ import {
  * 校审模型（同四字段，模型名 / Key / Base URL 三项需同时配置，留空回落
  * Agent 模型）与**写作偏好系统级默认**（章节篇幅 min/max + 文风合格线，
  * null=未设置回落内置默认 2000~3000 / 80；单本小说可在书库右键「写作偏好」
- * 单独覆盖，优先级更高）。校审模型为配置先行——当前版本审校流程仍用
- * Agent 模型，接入为后续需求。
+ * 单独覆盖，优先级更高）。校审模型用于章节正文三段审校，三项未配齐时
+ * 整体回落 Agent 模型。
  *
  * provider 为空串表示**历史配置未设置**：agent 侧按有效地址迁移（DeepSeek 官方
  * 地址 → deepseek，其余 → openai；Agent 地址留空沿用 DeepSeek，独立写作 / 校审
@@ -58,11 +58,11 @@ export interface ModelSettings {
 export interface AppSettings {
   /** 外观主题：跟随系统（默认）/ 浅色 / 深色；main 侧经 applyTheme 设 nativeTheme.themeSource */
   theme: ThemeSetting;
-  /** Agent 会话模型：世界观 / 角色 / 大纲 / 章节规划 / 正文校验等工作流共用 */
+  /** Agent 会话模型：世界观 / 角色 / 大纲 / 章节规划等工作流共用，也是写作 / 校审未配齐时的回落 */
   agentModel: ModelSettings;
   /** 写作模型：章节正文生成专用；三项留空回落 Agent 模型 */
   writingModel: ModelSettings;
-  /** 校审模型：章节正文三段审校专用（配置先行，当前版本审校仍用 Agent 模型）；三项留空回落 Agent 模型 */
+  /** 校审模型：章节正文三段审校专用；三项留空回落 Agent 模型 */
   reviewModel: ModelSettings;
   /** 写作偏好（章节正文生成）的系统级默认；单本小说的「写作偏好」覆盖优先级更高 */
   writing: WritingPrefsSettings;

@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-11-13 [feat] 三段审校接入独立校审模型（用户直接指令，根档同名条目）：writeChapter 缺省校审模型由 agent-model 单例改为 providers/review-model 的 `getReviewModel()`——REVIEW_MODEL_* 三项齐全用独立校审模型，任一未配置整体回落 Agent 会话模型；Options.reviewModel 注入、审校共享前缀/守卫/进度契约与 headless AGENT_MODEL_API_KEY 启动检查（回落兜底）保持，两级架构文档「配置先行」表述同步退役。AC：typecheck 3 工程 / lint / 全量 726 项（71 文件）通过——净增 writeChapter 缺省模型解析用例（三项齐独立实例 / 未配置 Agent 单例）与 sdk.test 独立校审端点用例（真实 SDK/HTTP 替身：审校走校审端点与模型名、写作端点不变、Key 不进日志）。
+
 - 2026-11-13 [perf] 正文审校共享前缀：reviewChapter 每稿组装公共 system/资料消息，内容、文风、自洽三次独立 generateObject 共用固定 schema，仅末尾任务变化；统一 styleRating/结构化 issues/rationale 经阶段评分及类别守卫转换为既有 ReviewReport。小说及相关部/幕资料与写作同源，角色/迁移/伏笔/文风/正文随前缀注入，Claude 显式断点位于资料末尾。AC：模块98项、全量724项（71文件）、typecheck/lint通过；真实三provider SDK/HTTP验证最终请求前缀/schema/断点/稿件隔离，修订/进度/失败保护回归通过，独立审查无阻塞。线上KV命中/费用和文学质量未验证；方案与计划见 docs/superpowers/plans/2026-11-13-chapter-review-prefix.md。
 
 - 2026-11-09 [feat] 新建小说执行活动接线：世界观/角色/大纲/角色补全传 activity 配置，受众分析与冲突整理使用单轮活动包装；通用运行器在 SDK 工具开始/结束报告并由 ALS 关联内部提问。确认门、业务缓存与落库语义保持，CLI 保留原输出。主设计、客户端工作台与验收见根 PROGRESS.md；AC：typecheck/lint/704 项全量测试与 Electron build 通过，独立复审无阻塞。
@@ -16,9 +18,9 @@
 
 - 2026-11-09 [refactor] Agent 目录归拢：worldview-agent / character-agent / outline-agent / chapter-agent / auto-character-agent 各占一个目录（`index.ts` + 已有 `index.test.ts`），`agents/` 根目录不再散放 TypeScript 文件；只调整相对导入，外部导入与业务逻辑保持，同步根入口与两级架构文档。AC：typecheck 三工程 / lint / 全量 696 项（65 文件）通过；逐一还原导入路径后，9 个文件与 HEAD 原文件内容完全一致。
 
-- 2026-10-18 [perf] 正文修订复用原生写作对话与缓存（用户已确认调研建议，三任务串行完成后清单归一）：write-chapter 初稿资料/要求仅组装一次，后续保留原生 ModelMessage 历史并仅追加当前报告和修订最新稿指令，正文空白/推理签名/provider 元信息不重建；三段独立审校、三轮上限、保底落盘/覆盖失败保护保持。写作调用启用 canonical Claude 默认 5 分钟缓存；onUsage 提供成功调用 token/缓存读写/耗时，headless 经 stderr JSON 记录。根据 raw 白名单判断计数存在性，缺失 null/真实零 0，不输出 raw。AC：typecheck/lint/全量 684 项通过；新增原生历史回归 1 项与真实 SDK/SQLite/HTTP 边界测试 11 项，覆盖三协议/回落/缺失及部分 usage/零计数/协议隔离，独立复审通过。设计和计划见 docs/superpowers 同日 chapter-conversation-cache 文档；无真实服务调用，线上缓存与成本/文学质量待实际使用观察。
-
 ## 历史归档
+
+- 2026-10-18 [归档摘要] 正文修订复用原生写作对话与缓存：保留原生 ModelMessage 历史、Claude 默认 5 分钟缓存与写作用量 stderr 诊断，三段审校与保底保护保持；当时全量 684 项通过，真实 SDK/SQLite/HTTP 替身测试覆盖。完整记录见根文档同名条目及 Git 历史。
 
 - 2026-10-17 [归档摘要] 大纲 JSON 产物退役、theme 入库、正文目录改小说 ID 且 file_path 绝对路径、rename 零文件联动；全量 671 项测试通过。完整实现与验收见 Git 历史及根文档。
 

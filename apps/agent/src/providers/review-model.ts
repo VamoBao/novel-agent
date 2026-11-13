@@ -23,8 +23,8 @@ export interface ReviewModelConfig {
  *   同一 Agent 模型实例）——半配置不拼凑请求，也不因新增默认 provider 而启用；
  * - 非法 provider 值直接抛可读错误（不静默换协议）。
  *
- * 配置先行：当前审校流程（chapter-review）仍使用 Agent 会话模型，本模块
- * 尚无消费方——接入为后续独立需求，届时经 Options 注入替换默认模型。
+ * 消费方：chapter-writing-agent 的三段审校经 `getReviewModel()` 取默认
+ * 校审模型（writeChapter 的 Options.reviewModel 可注入替身，测试用）。
  */
 export function resolveReviewModelConfig(
   env: Readonly<NodeJS.ProcessEnv> = process.env,
@@ -57,7 +57,8 @@ export function resolveReviewModelConfig(
  *
  * **任一未配置（含空串）时回落 Agent 会话模型**（agent-model.ts 的 `model`）
  * ——部分配置也整体回落，避免半配置产生难排查的请求错误。provider 实例在
- * 调用时才创建，本模块导入零副作用。当前尚无调用方（配置先行）。
+ * 调用时才创建，本模块导入零副作用。章节正文三段审校（chapter-review）
+ * 经本工厂取校审模型；非法 provider 值在审校启用前即抛可读错误。
  */
 export function getReviewModel(): LanguageModelV4 {
   const config = resolveReviewModelConfig();

@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-11-13 [feat] 正文三段审校接入独立校审模型（用户直接指令：审核流程优先用模型设置里的校审模型，未配置回落 Agent 会话模型）：writeChapter 缺省校审模型由 agent-model 单例改为 providers/review-model 的 `getReviewModel()`——REVIEW_MODEL_*（设置页「校审模型」组，childEnv 三级优先级注入）三项齐全时三段审校走独立校审模型，任一未配置整体回落 Agent 会话模型（半配置不拼凑请求）；Options.reviewModel 注入语义与 headless 的 AGENT_MODEL_API_KEY 启动检查（回落路径兜底）保持。设置页校审组提示、.env.example、README 与两级 ARCHITECTURE 同步去掉「配置先行」表述。AC：typecheck 3 工程 / lint / 全量 726 项（71 文件）通过（净增 2：writeChapter 缺省模型解析用例 + 真实 SDK/HTTP 替身独立校审端点用例——审校走校审端点与模型名、写作端点不变、校审 Key 不进日志）；2026-10-12「校验用 Agent 会话模型」决策随之退役，见 DECISIONS。
+
 - 2026-11-13 [perf] 正文三段审校共享固定 system、完整资料/当前稿前缀及统一输出 schema，各阶段仅追加专项任务；资料含小说、相关部/幕大纲、章概述、世界观、角色/迁移、伏笔和文风。Claude 显式资料断点，评分/类别校验后映射旧报告，进度/三轮修订/保底与覆盖保护保持。AC：typecheck/lint/全量724项（71文件）通过；真实三provider SDK/HTTP替身覆盖前缀/schema/断点与稿件隔离，独立审查无阻塞。主实现、边界与计划见 workflows/ARCHITECTURE.md 同名章节及 docs/superpowers/plans/2026-11-13-chapter-review-prefix.md；未调用线上模型，线上缓存/费用与文学质量未验证。
 
 - 2026-11-11 [feat] 正文生成升级章内过程卡：任务身份/真实状态/轮次/耗时、五步流程、三项审校详情与按轮保留的报告统一为现有卡片风格，完成后过程默认收起、优先阅读正文，保底保存明确待复核。PreviewPane 稳定订阅按目标章隔离会话，启动即准备、run_finished 才完成；启动拒绝/fatal/异常退出留存进度并可重试，旧进程退出不误伤新启动。重生成保留旧正文，失败重试仍需覆盖确认。旧内联进度和CSS退役，协议/模型/三轮上限/入库契约保持。AC：新增6项真实React+IPC用例覆盖准备/阈值/跨轮/保存/切章/重试/旧退出/覆盖确认；typecheck/lint/715项测试（71文件）/客户端build通过；真实App+协议替身在Electron浅暗×1600/1100/900/640px×10状态共80组状态正确且无横向溢出，另12组展开审校/历史报告检查通过，截图目测及独立复核无阻塞。未调用线上模型或写用户数据库。规格与计划见 docs/superpowers 同日 chapter-writing-process 文档。
@@ -16,11 +18,11 @@
 
 - 2026-11-11 [fix] macOS 模型设置输入无法粘贴、右键无菜单：根因为全平台清空应用菜单导致 macOS 原生编辑快捷键失效，且 Electron 默认不提供右键菜单。macOS 恢复 appMenu/editMenu/windowMenu，其他平台继续隐藏菜单栏；所有可编辑输入按 editFlags 提供原生撤销/重做/剪切/复制/粘贴/全选菜单，并绑定所属窗口与 frame。AC：真实 macOS 27.2 Electron 修复前后对比，三组共 9 个输入的右键事件→popup 调用从 0 变 1；桌面自动化实际完成全部 9 框粘贴（含 3 个 password）、原生右键菜单可见及 ⌘Z/⌘⇧Z 撤销/重做；非编辑区域不弹输入菜单。使用临时设置、合成文本、空书库替身，不保存用户设置。typecheck/lint/707 项测试与客户端 build 通过，独立审查无阻塞；合成 sendInputEvent 绕过 macOS 系统菜单，不作为原生快捷键验收依据。
 
-- 2026-11-09 [fix] 角色迁移标题与新增按钮对齐：通用 card-label 的 14px 底部间距使 flex 行内标题中心比按钮高约 7px，且结构按钮的局部 margin 重置影响右对齐。仅为 migration-head 将间距移至整行下方、清除标题外边距并恢复按钮靠右，业务逻辑保持。AC：真实 Electron 浅暗主题 × 900/1600px 四组修复前后对比，中心线差由约 6.99px 降至约 0.008px、按钮与右边缘间距为 0，新增入口均正常打开迁移表单；typecheck/lint/707 项测试与 Electron build 通过。纯样式修复，无新增测试。
-
 ## 历史归档
 
 - 2026-11-09 [归档摘要] 书库、结构树与预览按 DESIGN 统一，支持完整正文阅读及窄窗布局；707 项测试与 Electron build、浅暗主题宽窄窗口和键盘焦点检查通过。完整实现与验收见 Git 历史及 library-workspace 计划。
+
+- 2026-11-09 [归档摘要] 角色迁移标题与新增按钮对齐（纯样式修复）：通用 card-label 底部间距致标题中心偏高约 7px，migration-head 局部重置后中心线差归零、按钮恢复右对齐；当时 707 项测试与 Electron build 通过。完整记录见 Git 历史。
 
 - 2026-11-09 [归档摘要] DESIGN.md 固化客户端共同设计原则、令牌与卡片/过程/输入/响应式验收，接入AGENTS工作流；链接和引用校验通过，后续工作台与过程卡沿用。完整记录见Git历史。
 

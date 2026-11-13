@@ -10,7 +10,7 @@ import type {
 import { resolveChapterLength, resolveStylePassScore } from "@novel/shared";
 import type { UiChannel } from "../../../ui/channel";
 import { getWritingModel } from "../../../providers/writing-model";
-import { model as agentSessionModel } from "../../../providers/agent-model";
+import { getReviewModel } from "../../../providers/review-model";
 import { resolveSystemWritingPrefs } from "../../../providers/writing-prefs";
 import { getDefaultNovelStore, type NovelStore } from "../../../state/novel-store";
 import { getDefaultOutlineStore, type OutlineStore } from "../../../state/outline-store";
@@ -78,7 +78,8 @@ export interface WriteChapterOptions {
   chapterNodeId: string;
   /** 写作模型实例；缺省 getWritingModel()（按 WRITING_MODEL_PROVIDER 所选接口类型调用对应官方 SDK，测试注入替身） */
   model?: LanguageModelV4;
-  /** 校验模型实例（三段校验独立调用）；缺省 Agent 会话模型——配置了独立写作模型时天然「他评」 */
+  /** 校验模型实例（三段校验独立调用）；缺省 getReviewModel()——REVIEW_MODEL_* 三项齐全
+   *  时为独立校审模型，任一未配置回落 Agent 会话模型（配置了独立写作模型时天然「他评」） */
   reviewModel?: LanguageModelV4;
   /** 流程进度回调（headless 映射为 write-progress 协议消息；CLI / 测试可不传） */
   onProgress?: (event: WriteProgressEvent) => void;
@@ -151,7 +152,8 @@ function reportedWritingUsage(usage: LanguageModelUsage) {
  * 回收卡片+登场章上下文），交写作模型（OpenAI 接口
  * 兼容端点，与 Agent 会话模型解耦；WRITING_MODEL_* 未配置时回落 Agent
  * 会话模型）生成正文；生成后、落盘前经校验 subAgent（chapter-review，
- * Agent 模型三段独立调用——内容约束 / 文风相似度 / 前后自洽）产出结构化整改
+ * 校审模型三段独立调用——REVIEW_MODEL_* 三项齐全用独立校审模型，任一未配置
+ * 回落 Agent 会话模型——内容约束 / 文风相似度 / 前后自洽）产出结构化整改
  * 报告：通过（内容与自洽零问题且文风 skipped 或达到合格线）才落盘入库；未达标
  * 在原生写作对话尾部追加整改报告并修订最新正文，最多 MAX_REVIEW_ROUNDS
  * 轮，第 3 轮仍未达标保存最后一版并警告（产物优先，用户确认的决策）。
@@ -311,7 +313,8 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   }
 
   const model = options.model ?? getWritingModel();
-  const reviewModel = options.reviewModel ?? agentSessionModel;
+  // 审校优先独立校审模型（REVIEW_MODEL_* 三项齐全），未配齐整体回落 Agent 会话模型
+  const reviewModel = options.reviewModel ?? getReviewModel();
   const { onProgress } = options;
 
   // 写作和审校共享相同的小说与相关部/幕资料，避免两处独立拼装漂移。
@@ -437,7 +440,7 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
     // 原生响应包含推理签名/provider 元信息，不能用 trim 后的正文重建 assistant。
     messages = [...messages, ...result.response.messages];
 
-    // 三段校验（chapter-review，Agent 模型独立调用；异常直接抛错终止会话零残留）
+    // 三段校验（chapter-review，校审模型独立调用；异常直接抛错终止会话零残留）
     report = await reviewChapter(
       {
         novelId,
