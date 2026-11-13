@@ -269,12 +269,6 @@ textarea {
   box-shadow: var(--shadow-xs);
 }
 
-.header h1 {
-  font-size: var(--font-xl);
-  font-weight: 600;
-  margin: 0;
-}
-
 .header-left {
   display: flex;
   align-items: center;
@@ -293,30 +287,16 @@ textarea {
   line-height: 1;
 }
 
-/* 三栏工作区：左栏书库（可折叠为 0 宽）/ 中栏结构树 / 右栏预览；创作覆盖层借
-   grid-row/column 压在其中栏与右栏之上（z-index 高于普通栏） */
+/* 两栏工作区：左栏结构树 / 右栏预览（小说切换与书库管理在顶栏左上角） */
 .workspace {
   flex: 1;
   display: grid;
-  grid-template-columns: 232px 300px 1fr;
-  grid-auto-rows: 1fr;
+  grid-template-columns: 300px 1fr;
   min-height: 0;
 }
 
 .workspace > * {
-  grid-row: 1;
   min-height: 0;
-}
-
-.workspace.collapsed {
-  grid-template-columns: 0 300px 1fr;
-}
-
-.sidebar {
-  border-right: 1px solid var(--border-default);
-  background: var(--bg-sidebar);
-  overflow: hidden;
-  white-space: nowrap;
 }
 
 .tree-pane {

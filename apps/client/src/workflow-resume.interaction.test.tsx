@@ -113,7 +113,8 @@ test.each(["finish", "return"])("书库恢复未完成流程并在%s后刷新详
       };
     };
     await act(async () => root.render(createElement(App)));
-    await act(async () => container.querySelector('.novel-item').click());
+    await act(async () => container.querySelector('.novel-switcher-trigger').click());
+    await act(async () => container.querySelector('.switcher-option').click());
     await act(async () => [...container.querySelectorAll('.tree-row .tree-node')]
       .find(node => node.textContent === '渡河之夜').click());
     const oldSelectionWasVisible = !!container.querySelector('.tree-node.active');

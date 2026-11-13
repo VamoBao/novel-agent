@@ -45,11 +45,13 @@ test.each(["other", "current", "switch"] as const)(
       const root = createRoot(container);
       await act(async () => root.render(createElement(App)));
       const select = async id => {
+        await act(async () => container.querySelector('.novel-switcher-trigger').click());
         await act(async () => {
-          [...container.querySelectorAll('.novel-item')].find(n => n.textContent === '小说' + id).click();
+          [...container.querySelectorAll('.switcher-option')].find(n => n.textContent === '小说' + id).click();
         });
       };
       await select('A');
+      await act(async () => container.querySelector('[aria-label="书库管理"]').click());
       await act(async () => {
         const target = scenario === 'other' ? 'B' : 'A';
         [...container.querySelectorAll('.novel-item')].find(n => n.textContent === '小说' + target)
@@ -64,7 +66,7 @@ test.each(["other", "current", "switch"] as const)(
         await act(async () => finishRefresh());
       }
       const result = {
-        active: container.querySelector('.novel-item.active').textContent,
+        active: container.querySelector('.novel-switcher-trigger').textContent,
         tree: container.querySelector('.tree-pane').textContent,
         dialogClosed: container.querySelector('.dialog') === null,
       };

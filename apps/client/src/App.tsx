@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BookOpen, Menu, Play, Plus, Settings } from "lucide-react";
+import { Play, Plus, Settings } from "lucide-react";
 import type {
   CharacterEntry,
   NovelDetail,
@@ -9,7 +9,8 @@ import type {
 } from "@novel/shared";
 import { ChapterPlanFlow } from "./components/ChapterPlanFlow";
 import { CreationFlow } from "./components/CreationFlow";
-import { NovelListPanel } from "./components/NovelListPanel";
+import { LibraryManager } from "./components/library/LibraryManager";
+import { NovelSwitcher } from "./components/library/NovelSwitcher";
 import { OutlineRegenDialog } from "./components/OutlineRegenDialog";
 import { OutlineRegenFlow } from "./components/OutlineRegenFlow";
 import { PreviewPane } from "./components/PreviewPane";
@@ -40,12 +41,14 @@ interface OutlineRegenTarget {
 }
 
 /**
- * 页面级切换：三栏浏览主页（左栏书库可汉堡折叠 / 中栏结构树 / 右栏内容预览）
- * 与两个独立整页会话：创作页（CreationFlow 新建小说问答流）和章节规划页
- * （ChapterPlanFlow 单幕章节规划问答流）。会话完成后返回浏览页并刷新对应数据。
+ * 页面级切换：两栏浏览主页（顶栏左上角小说切换器 + 书库管理弹层，工作区为
+ * 结构树 / 右栏内容预览）与两个独立整页会话：创作页（CreationFlow 新建小说
+ * 问答流）和章节规划页（ChapterPlanFlow 单幕章节规划问答流）。会话完成后
+ * 返回浏览页并刷新对应数据。
  */
 export function App() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  /** 顶栏弹层开合（切换下拉与书库管理互斥，null = 全收起） */
+  const [popover, setPopover] = useState<"switcher" | "manager" | null>(null);
   const [creating, setCreating] = useState(false);
   const [resumeRunId, setResumeRunId] = useState<string | null>(null);
   const [chapterPlan, setChapterPlan] = useState<ChapterPlanTarget | null>(null);
@@ -379,20 +382,29 @@ export function App() {
     <div className="app browse-app">
       <header className="header">
         <div className="header-left">
-          <button
-            className="icon-btn"
-            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
-            title={sidebarCollapsed ? "展开小说列表" : "折叠小说列表"}
-            aria-label={sidebarCollapsed ? "展开小说列表" : "折叠小说列表"}
-            aria-expanded={!sidebarCollapsed}
-          >
-            <Menu className="ic-btn" aria-hidden />
-          </button>
-          <h1>
-            <BookOpen className="ic" aria-hidden />
-            novel-agent
-          </h1>
-          <span className="browse-header-caption">创作书库</span>
+          <NovelSwitcher
+            novels={novels}
+            error={libraryError}
+            selectedId={selectedId}
+            open={popover === "switcher"}
+            onOpenChange={(next) => setPopover(next ? "switcher" : null)}
+            onSelect={setSelectedId}
+            onRefresh={() => void refreshList()}
+          />
+          <LibraryManager
+            novels={novels}
+            error={libraryError}
+            selectedId={selectedId}
+            open={popover === "manager"}
+            onOpenChange={(next) => setPopover(next ? "manager" : null)}
+            onSelect={setSelectedId}
+            onRefresh={() => void refreshList()}
+            onRename={(id, name) => void handleRename(id, name)}
+            onSetPinned={(id, pinned) => void handleSetPinned(id, pinned)}
+            onSetFavorite={(id, favorite) => void handleSetFavorite(id, favorite)}
+            onSetWritingPrefs={handleOpenWritingPrefs}
+            onDelete={(id) => void handleDelete(id)}
+          />
         </div>
         <div className="header-actions">
           <button className="icon-btn" onClick={() => setSettingsOpen(true)} title="设置" aria-label="设置">
@@ -405,21 +417,7 @@ export function App() {
         </div>
       </header>
 
-      <div className={`workspace${sidebarCollapsed ? " collapsed" : ""}`}>
-        <aside className="sidebar" aria-label="小说书库">
-          <NovelListPanel
-            novels={novels}
-            error={libraryError}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onRefresh={() => void refreshList()}
-            onRename={(id, name) => void handleRename(id, name)}
-            onSetPinned={(id, pinned) => void handleSetPinned(id, pinned)}
-            onSetFavorite={(id, favorite) => void handleSetFavorite(id, favorite)}
-            onSetWritingPrefs={handleOpenWritingPrefs}
-            onDelete={(id) => void handleDelete(id)}
-          />
-        </aside>
+      <div className="workspace">
         <nav className="tree-pane" aria-label="小说资料与结构">
           {detail?.novel.id === selectedId && !detailLoading && !detailError && detail.pendingRuns?.length ? (
             <section className="resume-card">

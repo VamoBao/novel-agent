@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 
 // 真 App + React/DOM，仅替换 Electron IPC；导航状态错配、分组丢节点或管理入口失效应失败。
-test("三栏书库选中与结构分组可访问，管理和新增入口保持可用", async () => {
+test("顶栏切换器选中联动、弹层互斥，管理弹层与新增入口保持可用", async () => {
   const script = `
     import {Window} from 'happy-dom';
     const dom=new Window();Object.assign(globalThis,{window:dom,document:dom.document,IS_REACT_ACT_ENVIRONMENT:true});
@@ -11,14 +11,32 @@ test("三栏书库选中与结构分组可访问，管理和新增入口保持�
     const novel={id:'novel-private',name:'雾港来信',pinned:true,favorite:true,createdAt:'',updatedAt:''};
     const detail={novel,worldview:{background:{geography:'记忆可以买卖的海港'},taboos:['记忆无法改变过去']},characters:[],migrations:[],migrationVersions:[],documents:[],foreshadows:[],styleReferences:[],
       locations:[{id:'location-private',name:'旧灯塔',description:'主角藏身的废弃灯塔'}],outlineNodes:[]};
-    let renamed=null;
+    let renamed=null,pinned=null;
     dom.agent={isAutostart:()=>false,autoSelectNovelId:()=>null,isSettingsOpen:()=>false,
       listNovels:async()=>[novel],getNovelDetail:async()=>detail,renameNovel:async(id,name)=>{renamed={id,name};return {...novel,name}},
+      setNovelPinned:async(id,p)=>{pinned={id,p};return {...novel,pinned:p}},
       onMessage:()=>()=>{},onExit:()=>()=>{},stop:async()=>{}};
     const box=dom.document.createElement('div');dom.document.body.append(box);const root=createRoot(box);
     await act(async()=>root.render(createElement(App)));
-    await act(async()=>box.querySelector('.novel-item').click());
+    // 切换器：默认显示「选择小说」，展开后纯切换，当前项可辨
+    const switcher=()=>box.querySelector('.novel-switcher-trigger');
+    const managerBtn=()=>box.querySelector('[aria-label="书库管理"]');
+    const idleLabel=switcher().textContent;
+    await act(async()=>switcher().click());
+    const switcherOpen=switcher().getAttribute('aria-expanded');
+    const optionSelected=box.querySelector('.switcher-option').getAttribute('aria-selected');
+    await act(async()=>box.querySelector('.switcher-option').click());
+    const switcherClosed=switcher().getAttribute('aria-expanded');
+    const label=switcher().textContent;
+    // 互斥：打开切换器后点管理按钮，切换器收起、管理弹层展开；Esc 收起管理弹层
+    await act(async()=>switcher().click());
+    await act(async()=>managerBtn().click());
+    const mutualSwitcher=switcher().getAttribute('aria-expanded');
+    const managerOpen=managerBtn().getAttribute('aria-expanded');
     const pressed=box.querySelector('.novel-item').getAttribute('aria-pressed');
+    await act(async()=>window.dispatchEvent(new dom.KeyboardEvent('keydown',{key:'Escape'})));
+    const managerClosed=managerBtn().getAttribute('aria-expanded');
+    // 结构树选中与分组折叠
     const toggle=box.querySelector('[title="收起地点"]');const expanded=toggle?.getAttribute('aria-expanded');
     await act(async()=>[...box.querySelectorAll('.tree-node')].find(n=>n.textContent==='旧灯塔').click());
     const current=box.querySelector('.tree-node.active').getAttribute('aria-current');
@@ -27,23 +45,35 @@ test("三栏书库选中与结构分组可访问，管理和新增入口保持�
     const collapsed=![...box.querySelectorAll('.tree-node')].some(n=>n.textContent==='旧灯塔');
     await act(async()=>box.querySelector('[title="展开地点"]').click());
     const restored=[...box.querySelectorAll('.tree-node')].some(n=>n.textContent==='旧灯塔');
+    // 管理弹层：右键菜单重命名
+    await act(async()=>managerBtn().click());
     await act(async()=>box.querySelector('.novel-item').dispatchEvent(new dom.MouseEvent('contextmenu',{bubbles:true})));
     await act(async()=>[...box.querySelectorAll('.context-menu button')].find(n=>n.textContent.includes('重命名')).click());
     await act(async()=>{const input=box.querySelector('.novel-item input');Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype,'value').set.call(input,'雾港新篇');input.dispatchEvent(new dom.Event('input',{bubbles:true}))});
     await act(async()=>box.querySelector('.novel-item input').dispatchEvent(new dom.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
+    // 行尾「⋯」唤出同一菜单（置顶切换）
+    await act(async()=>box.querySelector('.novel-menu-btn').click());
+    const menuByBtn=!!box.querySelector('.context-menu');
+    await act(async()=>[...box.querySelectorAll('.context-menu button')].find(n=>n.textContent==='取消置顶').click());
     await act(async()=>box.querySelector('[title="新增角色"]').click());
     const creating=!!box.querySelector('.character-form');
-    const result={pressed,expanded,current,content,collapsed,restored,renamed,creating,leaked:box.textContent.includes('novel-private')||box.textContent.includes('location-private')};
+    const result={idleLabel,switcherOpen,optionSelected,switcherClosed,label,mutualSwitcher,managerOpen,managerClosed,pressed,expanded,current,content,collapsed,restored,renamed,menuByBtn,pinned,creating,leaked:box.textContent.includes('novel-private')||box.textContent.includes('location-private')};
     await act(async()=>root.unmount());await dom.happyDOM.close();process.stdout.write(JSON.stringify(result));
   `;
   const proc=Bun.spawn([process.execPath,"--eval",script],{cwd:fileURLToPath(new URL("..",import.meta.url)),stdout:"pipe",stderr:"pipe"});
   const [out,err,code]=await Promise.all([new Response(proc.stdout).text(),new Response(proc.stderr).text(),proc.exited]);
   expect(err).toBe("");expect(code).toBe(0);
   const result=JSON.parse(out);
+  expect(result.idleLabel).toContain("选择小说");
+  expect(result.switcherOpen).toBe("true");expect(result.optionSelected).toBe("false");
+  expect(result.switcherClosed).toBe("false");expect(result.label).toContain("雾港来信");
+  expect(result.mutualSwitcher).toBe("false");expect(result.managerOpen).toBe("true");expect(result.managerClosed).toBe("false");
   expect(result.pressed).toBe("true");expect(result.expanded).toBe("true");expect(result.current).toBe("true");
   expect(result.content).toContain("主角藏身的废弃灯塔");
   expect(result.collapsed).toBe(true);expect(result.restored).toBe(true);
-  expect(result.renamed).toEqual({id:"novel-private",name:"雾港新篇"});expect(result.creating).toBe(true);expect(result.leaked).toBe(false);
+  expect(result.renamed).toEqual({id:"novel-private",name:"雾港新篇"});
+  expect(result.menuByBtn).toBe(true);expect(result.pinned).toEqual({id:"novel-private",p:false});
+  expect(result.creating).toBe(true);expect(result.leaked).toBe(false);
 });
 
 // 展示分区重组不能丢失可选字段、作者指导或世界禁忌，也不能给角色基准增加编辑入口。

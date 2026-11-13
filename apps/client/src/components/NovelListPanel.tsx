@@ -18,10 +18,14 @@ interface NovelListPanelProps {
   onDelete: (id: string) => void;
 }
 
-/** 右键菜单定位（clientX/Y + fixed） */
+/** 右键 /「⋯」菜单定位（fixed 定位：右键用光标坐标，「⋯」用按钮下缘坐标） */
 type MenuState = { novelId: string; x: number; y: number } | null;
 
-/** 左栏书库：小说列表（名称 + 置顶/收藏标识），右键菜单管理（重命名 / 置顶 / 收藏 / 写作偏好 / 删除） */
+/**
+ * 书库管理列表：小说条目（名称 + 置顶/收藏标识）+ 行尾「⋯」与右键菜单管理
+ * （重命名 / 置顶 / 收藏 / 写作偏好 / 删除）。经顶栏「书库管理」弹层呈现，由
+ * LibraryManager 承载开合；切换小说走相邻的 NovelSwitcher，不在此处。
+ */
 export function NovelListPanel({
   novels,
   error,
@@ -42,7 +46,7 @@ export function NovelListPanel({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
-  // 点击任意处关闭右键菜单（菜单项自身的 onClick 先执行，再冒泡到 window 关闭）
+  // 点击任意处关闭菜单（菜单项自身的 onClick 先执行，再冒泡到 window 关闭）
   useEffect(() => {
     if (!menu) return;
     const close = (): void => setMenu(null);
@@ -76,11 +80,16 @@ export function NovelListPanel({
     setRenameValue(novel.name ?? "");
   };
 
+  const openMenu = (novelId: string, x: number, y: number): void => {
+    setConfirmDeleteId(null);
+    setMenu({ novelId, x, y });
+  };
+
   return (
     <div className="library">
       <div className="library-head">
         <span className="browse-panel-icon"><Library size={19} aria-hidden /></span>
-        <div className="browse-panel-title"><strong>书库</strong><span>故事与灵感</span></div>
+        <div className="browse-panel-title"><strong>书库管理</strong><span>重命名 · 置顶 · 收藏 · 偏好</span></div>
         {novels ? <span className="browse-count" aria-label={`${novels.length} 本小说`}>{novels.length}</span> : null}
         <button className="icon-btn" onClick={onRefresh} title="刷新列表" aria-label="刷新列表">
           <RefreshCw className="ic-btn" aria-hidden />
@@ -118,7 +127,7 @@ export function NovelListPanel({
               />
             </li>
           ) : (
-            <li key={novel.id}>
+            <li key={novel.id} className="novel-row">
               <button
                 className={`novel-item${novel.id === selectedId ? " active" : ""}`}
                 aria-pressed={novel.id === selectedId}
@@ -126,8 +135,7 @@ export function NovelListPanel({
                 onClick={() => onSelect(novel.id)}
                 onContextMenu={(event) => {
                   event.preventDefault();
-                  setConfirmDeleteId(null);
-                  setMenu({ novelId: novel.id, x: event.clientX, y: event.clientY });
+                  openMenu(novel.id, event.clientX, event.clientY);
                 }}
               >
                 <span className="novel-cover" aria-hidden><BookOpen size={19} /></span>
@@ -139,12 +147,24 @@ export function NovelListPanel({
                   {novel.favorite ? <Star size={12} aria-hidden /> : null}
                 </span> : null}
               </button>
+              <button
+                className="novel-menu-btn"
+                title="管理小说"
+                aria-label={`管理 ${novel.name ?? "未命名小说"}`}
+                aria-haspopup="menu"
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openMenu(novel.id, rect.left, rect.bottom + 4);
+                }}
+              >
+                <MoreHorizontal size={15} aria-hidden />
+              </button>
             </li>
           ),
         )}
       </ul>
 
-      {novels && novels.length > 0 ? <p className="library-footer"><MoreHorizontal size={15} aria-hidden />右键小说可管理与设置偏好</p> : null}
+      {novels && novels.length > 0 ? <p className="library-footer"><MoreHorizontal size={15} aria-hidden />右键小说或点行尾「⋯」管理与设置偏好</p> : null}
 
       {menu && menuNovel ? (
         <div

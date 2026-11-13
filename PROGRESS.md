@@ -8,6 +8,8 @@
 
 ## 已完成
 
+- 2026-11-13 [feat] 顶栏小说切换器（用户需求：切换小说不常发生，为沉浸体验移到左上角、类 Android Studio 项目切换）：浏览页移除左侧书库栏（三栏变两栏：结构树 + 预览），小说切换改为顶栏左上角 `NovelSwitcher` 纯切换下拉——常显当前小说名 /「选择小说」占位、当前项高亮 + 勾选、↑↓/Home/End/Enter/Esc 键盘可达、空 / 加载 / 错误态面板内呈现（错误附重试）；书库管理收进切换器旁 `LibraryManager` 弹层（承载 `NovelListPanel`：行尾悬停「⋯」与右键菜单同源——重命名 / 置顶 / 收藏 / 写作偏好 / 删除强确认，行点击切换并收起；写作偏好 / 删除等模态弹窗期间不因点击外部误收起）；两弹层经 App 单一 popover 状态互斥（触发器互点不误关——data-popover-trigger 守卫）；顶栏以小说名替换应用名（OS 标题栏仍显 novel-agent）；700px 以下原「书库转顶部横条」断点退役。AC：更新 3 个引用旧书库栏的交互测试并新增切换器默认文案 / 互斥 / ⋯ 菜单断言，typecheck / lint / 全量 726 项（71 文件）通过；真实 Electron（CDP 驱动 + 隔离库）浅暗 × 1600/900/640px × 空库 / 选中 / 下拉 / 管理弹层 / 右键菜单共 22 组截图目测无溢出错乱（空库下拉「文案截断」经 DOM 量测排除为视觉模型误判：段落底 172px < 面板底 196px、scrollHeight==clientHeight）；临时验证钩子（NOVEL_VERIFY_*）已还原，git diff 无残留。规格见 docs/superpowers/specs/2026-11-13-novel-switcher-design.md。
+
 - 2026-11-13 [feat] 正文三段审校接入独立校审模型（用户直接指令：审核流程优先用模型设置里的校审模型，未配置回落 Agent 会话模型）：writeChapter 缺省校审模型由 agent-model 单例改为 providers/review-model 的 `getReviewModel()`——REVIEW_MODEL_*（设置页「校审模型」组，childEnv 三级优先级注入）三项齐全时三段审校走独立校审模型，任一未配置整体回落 Agent 会话模型（半配置不拼凑请求）；Options.reviewModel 注入语义与 headless 的 AGENT_MODEL_API_KEY 启动检查（回落路径兜底）保持。设置页校审组提示、.env.example、README 与两级 ARCHITECTURE 同步去掉「配置先行」表述。AC：typecheck 3 工程 / lint / 全量 726 项（71 文件）通过（净增 2：writeChapter 缺省模型解析用例 + 真实 SDK/HTTP 替身独立校审端点用例——审校走校审端点与模型名、写作端点不变、校审 Key 不进日志）；2026-10-12「校验用 Agent 会话模型」决策随之退役，见 DECISIONS。
 
 - 2026-11-13 [perf] 正文三段审校共享固定 system、完整资料/当前稿前缀及统一输出 schema，各阶段仅追加专项任务；资料含小说、相关部/幕大纲、章概述、世界观、角色/迁移、伏笔和文风。Claude 显式资料断点，评分/类别校验后映射旧报告，进度/三轮修订/保底与覆盖保护保持。AC：typecheck/lint/全量724项（71文件）通过；真实三provider SDK/HTTP替身覆盖前缀/schema/断点与稿件隔离，独立审查无阻塞。主实现、边界与计划见 workflows/ARCHITECTURE.md 同名章节及 docs/superpowers/plans/2026-11-13-chapter-review-prefix.md；未调用线上模型，线上缓存/费用与文学质量未验证。
@@ -16,9 +18,9 @@
 
 - 2026-11-11 [feat] 章节规划改为双栏卡片工作台：左栏本幕梗概/关键情节点与会话定位，右栏保留问答、完整章节方案和真实 Agent/工具调用；960px 以下资料默认折叠、导航横排，逐章确认项分离章名/概述/登场。CreationFlow 与 ChapterPlanFlow 共用 SessionTimeline 与 use-timeline-scroll，保持调用展开、活动等待关联和历史阅读不强制跟随。App 复用已加载详情传幕资料，协议/确认/入库/恢复与完成选幕契约保持。AC：新增2项真React+IPC交互测试，覆盖确认/修改/排队/去重/输入法/历史滚动/定位/错误恢复；typecheck/lint/709项测试（70文件）/客户端build通过；真实Electron浅暗×1600/900/640px×准备/输入/方案/错误共24组无横向溢出，截图目测与独立审查无阻塞。使用合成协议事件，无线上模型调用、无用户数据库写入。规格/计划见 docs/superpowers 同日 chapter-plan-workbench 文档。
 
-- 2026-11-11 [fix] macOS 模型设置输入无法粘贴、右键无菜单：根因为全平台清空应用菜单导致 macOS 原生编辑快捷键失效，且 Electron 默认不提供右键菜单。macOS 恢复 appMenu/editMenu/windowMenu，其他平台继续隐藏菜单栏；所有可编辑输入按 editFlags 提供原生撤销/重做/剪切/复制/粘贴/全选菜单，并绑定所属窗口与 frame。AC：真实 macOS 27.2 Electron 修复前后对比，三组共 9 个输入的右键事件→popup 调用从 0 变 1；桌面自动化实际完成全部 9 框粘贴（含 3 个 password）、原生右键菜单可见及 ⌘Z/⌘⇧Z 撤销/重做；非编辑区域不弹输入菜单。使用临时设置、合成文本、空书库替身，不保存用户设置。typecheck/lint/707 项测试与客户端 build 通过，独立审查无阻塞；合成 sendInputEvent 绕过 macOS 系统菜单，不作为原生快捷键验收依据。
-
 ## 历史归档
+
+- 2026-11-11 [归档摘要] macOS 模型设置输入无法粘贴、右键无菜单修复：根因为全平台清空应用菜单致 macOS 原生编辑快捷键失效——恢复 appMenu/editMenu/windowMenu（其他平台继续隐藏菜单栏）、可编辑输入按 editFlags 提供原生编辑右键菜单；真实 macOS 27.2 修复前后对比（9 输入右键 popup 0→1、自动化完成粘贴与 ⌘Z/⌘⇧Z）验证通过。完整记录见 Git 历史。
 
 - 2026-11-09 [归档摘要] 书库、结构树与预览按 DESIGN 统一，支持完整正文阅读及窄窗布局；707 项测试与 Electron build、浅暗主题宽窄窗口和键盘焦点检查通过。完整实现与验收见 Git 历史及 library-workspace 计划。
 
