@@ -38,9 +38,8 @@ const bootstrap = `
     const review = contentReview || styleReview || consistencyReview;
     if (!review) writingRound++;
     requests.push({ review, url: String(url), body });
-    const content = review ? JSON.stringify(styleReview
-      ? { score: 95, rationale: '句式贴近', suggestions: [] }
-      : { issues: contentReview && writingRound < 3 ? [{ kind: 'summary', description: '第' + writingRound + '稿缺少拾遗', suggestion: '补全拾遗' }] : [] })
+    const content = review ? JSON.stringify({ styleRating: styleReview ? 95 : null, rationale: '检查完成',
+      issues: contentReview && writingRound < 3 ? [{ kind: 'summary', description: '第' + writingRound + '稿缺少拾遗', suggestion: '补全拾遗' }] : [] })
       : '  第' + writingRound + '稿写作内容。 \\n';
     await Bun.sleep(5);
     if (String(url).endsWith('/messages')) return Response.json({
@@ -77,14 +76,14 @@ const directRun = `
   verifyDb.close();
 `;
 
-async function runProbe(provider: string, options: { fallback?: boolean; noUsage?: boolean; headless?: boolean; cacheUsage?: "missing" | "zero"; basicUsage?: string } = {}) {
+async function runProbe(provider: string, options: { fallback?: boolean; noUsage?: boolean; headless?: boolean; cacheUsage?: "missing" | "zero"; basicUsage?: string; reviewProvider?: string } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "novel-writing-sdk-"));
   try {
     const env = {
       ...process.env,
       NOVEL_DB_PATH: join(dir, "test.db"), NOVEL_OUTPUT_DIR: join(dir, "output"),
-      AGENT_MODEL_PROVIDER: options.fallback ? provider : "deepseek", AGENT_MODEL_API_KEY: "test-agent-secret",
-      AGENT_MODEL_NAME: options.fallback ? "claude-sonnet-4-5" : "deepseek-chat", AGENT_MODEL_BASE_URL: "https://review.invalid/v1",
+      AGENT_MODEL_PROVIDER: options.reviewProvider ?? (options.fallback ? provider : "deepseek"), AGENT_MODEL_API_KEY: "test-agent-secret",
+      AGENT_MODEL_NAME: (options.reviewProvider ?? (options.fallback ? provider : "deepseek")) === "claude" ? "claude-sonnet-4-5" : "deepseek-chat", AGENT_MODEL_BASE_URL: "https://review.invalid/v1",
       WRITING_MODEL_PROVIDER: options.fallback ? "" : provider, WRITING_MODEL_API_KEY: options.fallback ? "" : "test-writer-secret",
       WRITING_MODEL_NAME: options.fallback ? "" : provider === "claude" ? "claude-sonnet-4-5" : "test-writer",
       WRITING_MODEL_BASE_URL: options.fallback ? "" : "https://writer.invalid/v1",
@@ -191,4 +190,48 @@ test("headless 写作指标只进 stderr JSON，stdout 保持协议且不泄露�
   expect(stderr).not.toContain("写作内容");
   expect(stderr).not.toContain("九州大陆");
   expect(stdout).not.toContain("chapter-writing-usage");
+});
+
+// 删除末尾阶段任务后，实际 HTTP 请求必须完全相同，含 provider 注入的 schema。
+function sharedReviewRequest(body: Record<string, unknown>) {
+  const copy = structuredClone(body) as { messages: { content: string | unknown[] }[] };
+  const last = copy.messages.at(-1)!;
+  if (typeof last.content === "string") copy.messages.pop();
+  else {
+    last.content.pop();
+    if (last.content.length === 0) copy.messages.pop();
+  }
+  return copy;
+}
+
+test.each(["openai", "deepseek", "claude"])("%s 审校真实 HTTP：固定 schema、资料前缀、缓存断点及各稿隔离", async (provider) => {
+  const { stdout, stderr } = await runProbe("openai", { reviewProvider: provider });
+  expect(stderr).toBe("");
+  const { requests } = JSON.parse(stdout);
+  const reviews = requests.filter((request: { review: boolean }) => request.review);
+  expect(reviews).toHaveLength(9);
+  for (let round = 0; round < 3; round++) {
+    const stages = reviews.slice(round * 3, round * 3 + 3);
+    const prefix = sharedReviewRequest(stages[0].body);
+    for (const stage of stages) {
+      expect(sharedReviewRequest(stage.body)).toEqual(prefix);
+      const text = JSON.stringify(stage.body);
+      expect(text).toContain("第" + (round + 1) + "稿写作内容。");
+      expect(text).toContain("部梗概");
+      expect(text).toContain("幕梗概");
+      expect(text).not.toContain("稿缺少拾遗");
+      for (let other = 1; other <= 3; other++) {
+        if (other !== round + 1) expect(text).not.toContain("第" + other + "稿写作内容。");
+      }
+      if (provider === "claude") {
+        const blocks = stage.body.messages.flatMap((message: { content: unknown }) =>
+          Array.isArray(message.content) ? message.content : []);
+        const cached = blocks.filter((block: { cache_control?: unknown }) => block.cache_control);
+        expect(cached).toHaveLength(1);
+        expect(cached[0].text).toContain("第" + (round + 1) + "稿写作内容。");
+        expect(cached[0].text).not.toContain("你是一位文风比对评审");
+        expect(stage.body.cache_control).toBeUndefined();
+      }
+    }
+  }
 });

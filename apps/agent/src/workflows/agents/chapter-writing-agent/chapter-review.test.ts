@@ -1,242 +1,174 @@
-import { modelMessageSchema } from "ai";
-import { afterAll, describe, expect, mock, test } from "bun:test";
+import { modelMessageSchema, type ModelMessage } from "ai";
+import { describe, expect, mock, test } from "bun:test";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
-import { DEFAULT_STYLE_PASS_SCORE } from "@novel/shared";
-import type { ReviewIssue, Worldview } from "@novel/shared";
+import { DEFAULT_STYLE_PASS_SCORE, type ReviewIssue } from "@novel/shared";
 
-/**
- * chapter-review 模块单测：mock 掉 'ai' 模块（generateObject 按 prompt 段落标识
- * 脚本化返回三段校验结果），断言三段独立调用顺序与载荷、skipped 语义、
- * 通过判定与修订块格式——零 channel、零库。
- */
-
-type GenerateObjectArgs = { model: unknown; prompt: string; schema: unknown };
-let generateObjectCalls: GenerateObjectArgs[] = [];
-/** 按 prompt 段落标识脚本化返回（键为段落开场标识） */
-let scriptedResults: Record<string, unknown> = {};
-
+type ReviewCall = {
+  model: unknown;
+  system?: string;
+  prompt?: string;
+  messages?: ModelMessage[];
+  schema: { parse: (value: unknown) => unknown };
+};
+let calls: ReviewCall[] = [];
+let scriptedResults: unknown[] = [];
 const sdkModelMessageSchema = modelMessageSchema;
 mock.module("ai", () => ({
   modelMessageSchema: sdkModelMessageSchema,
   tool: (spec: unknown) => spec,
-  generateText: async () => {
-    throw new Error("校验模块不应调用 generateText");
-  },
-  generateObject: async (args: GenerateObjectArgs) => {
-    generateObjectCalls.push(args);
-    const prompt = args.prompt;
-    const key = prompt.includes("设定审校编辑")
-      ? "content"
-      : prompt.includes("文风比对评审")
-        ? "style"
-        : prompt.includes("内部自洽审校")
-          ? "consistency"
-          : null;
-    if (key === null || !(key in scriptedResults)) {
-      throw new Error(`未脚本化的 generateObject 调用（prompt 开头：${prompt.slice(0, 40)}）`);
-    }
-    return { object: scriptedResults[key] };
+  generateText: async () => { throw new Error("校验模块不应调用 generateText"); },
+  generateObject: async (args: ReviewCall) => {
+    calls.push(args);
+    const value = scriptedResults.shift();
+    if (value instanceof Error) throw value;
+    return { object: args.schema.parse(value) };
   },
 }));
-
-const { reviewChapter, isReportPassing, formatRevisionBlock } =
-  await import("./chapter-review");
-
+const { reviewChapter, isReportPassing, formatRevisionBlock } = await import("./chapter-review");
 const DUMMY_MODEL = { modelId: "dummy-review-model" } as unknown as LanguageModelV4;
-
-const worldviewFixture: Worldview = {
-  background: { geography: "九州大陆，灵脉断绝" },
-  taboos: ["不可出现现代科技"],
-};
-
-const CONTENT_ISSUES = {
+const CONTENT_ISSUES: { issues: ReviewIssue[] } = {
   issues: [{ kind: "worldview", description: "正文出现高铁", suggestion: "改为马车" }],
 };
-const STYLE_SCORED = { score: 82, rationale: "句式偏短促", suggestions: ["增加环境描写"] };
-const CONSISTENCY_ISSUES = {
-  issues: [{ description: "前文五个字后文四个字", suggestion: "统一为五个字" }],
+const CONSISTENCY_ISSUES: { issues: ReviewIssue[] } = {
+  issues: [{ kind: "consistency", description: "前文五个字后文四个字", suggestion: "统一为五个字" }],
 };
-
-/** 无绑定伏笔基线输入（多数用例复用） */
+function result(issues: unknown[] = [], styleRating: number | null = null, rationale = "检查完成") {
+  return { styleRating, issues, rationale };
+}
 function baseInput(overrides: Partial<Parameters<typeof reviewChapter>[0]> = {}) {
   return {
-    novelId: "n1",
-    chapterName: "第一章",
-    summary: "少年拾得碎片",
-    worldview: worldviewFixture,
-    foreshadowLines: [],
-    characterLines: [],
+    novelId: "n1", chapterName: "第一章", summary: "少年拾得碎片",
+    worldview: { background: { geography: "九州大陆，灵脉断绝" }, taboos: ["不可出现现代科技"] },
+    foreshadowLines: ["隐藏真相：碎片是密钥", "回收阶段：最终回收"],
+    characterLines: ["林恒：主角；性格迁移：热情→谨慎（进行中）"],
     styleSamples: [{ name: "江南式打斗", content: "刀光一闪。" }],
-    stylePassScore: DEFAULT_STYLE_PASS_SCORE,
-    content: "　　正文全文。",
-    round: 1,
+    stylePassScore: DEFAULT_STYLE_PASS_SCORE, content: "　　正文全文。", round: 1,
     ...overrides,
   };
 }
-
-function baseDeps(onProgress?: (phase: string, report?: unknown) => void) {
-  return { reviewModel: DUMMY_MODEL, ...(onProgress ? { onProgress } : {}) };
+function reset(results: unknown[] = [result(), result([], 92), result()]) {
+  calls = []; scriptedResults = [...results];
+}
+function payload(call: ReviewCall) { return JSON.stringify(call.messages ?? call.prompt); }
+function task(call: ReviewCall) {
+  const content = call.messages?.at(-1)?.content;
+  if (typeof content !== "string") throw new Error("缺少独立审校任务消息");
+  return content;
 }
 
-const cleanupFns: (() => void)[] = [];
-afterAll(() => {
-  cleanupFns.forEach((fn) => fn());
-});
-
-describe("reviewChapter", () => {
-  test("三段按序独立调用：①载世界观/概述/伏笔行 ②载文风样本 ③仅正文全文", async () => {
-    generateObjectCalls = [];
-    scriptedResults = { content: CONTENT_ISSUES, style: STYLE_SCORED, consistency: CONSISTENCY_ISSUES };
-
-    const report = await reviewChapter(
-      baseInput({
-        foreshadowLines: ["【本章伏笔】", "1. 表面行为：碎片刻痕"],
-        styleSamples: [
-          { name: "江南式打斗", content: "刀光一闪。" },
-          { name: "张爱玲腔", content: "生命是一袭华美的袍。" },
-        ],
-      }),
-      baseDeps(),
-    );
-
-    // 三段各自一次调用，顺序 ①→②→③
-    expect(generateObjectCalls).toHaveLength(3);
-    const [content, style, consistency] = generateObjectCalls;
-    expect(content!.prompt).toContain("设定审校编辑");
-    expect(content!.prompt).toContain("九州大陆，灵脉断绝");
-    expect(content!.prompt).toContain("第一章：少年拾得碎片");
-    expect(content!.prompt).toContain("1. 表面行为：碎片刻痕");
-    expect(content!.prompt).toContain("　　正文全文。");
-    expect(style!.prompt).toContain("文风比对评审");
-    expect(style!.prompt).toContain("（江南式打斗）");
-    expect(style!.prompt).toContain("刀光一闪。");
-    expect(style!.prompt).toContain("（张爱玲腔）");
-    expect(consistency!.prompt).toContain("内部自洽审校");
-    expect(consistency!.prompt).toContain("　　正文全文。");
-    // ③ 是章内自洽检查：不携带世界观与概述（避免无关上下文稀释注意力）
-    expect(consistency!.prompt).not.toContain("九州大陆");
-    expect(consistency!.prompt).not.toContain("少年拾得碎片");
-
-    // 报告组装：三段结果并入、kind 由 ③ 代码补全、passed 按判定填充
-    expect(report.round).toBe(1);
-    expect(report.content.issues).toHaveLength(1);
-    expect(report.style).toMatchObject({ skipped: false, score: 82 });
-    expect(report.consistency.issues).toEqual([
-      { kind: "consistency", description: "前文五个字后文四个字", suggestion: "统一为五个字" },
-    ]);
+describe("reviewChapter 共享前缀", () => {
+  test("三次独立请求共用完整资料前缀、固定 schema 和 Claude 资料断点，仅任务尾部不同", async () => {
+    reset([result(CONTENT_ISSUES.issues), result([], 82, "句式偏短促"), result(CONSISTENCY_ISSUES.issues)]);
+    const report = await reviewChapter(baseInput(), { reviewModel: DUMMY_MODEL });
+    expect(calls).toHaveLength(3);
+    const [content, style, consistency] = calls as [ReviewCall, ReviewCall, ReviewCall];
+    expect(content.system).toBeTruthy();
+    for (const call of calls) {
+      expect(call.model).toBe(DUMMY_MODEL);
+      expect(call.prompt).toBeUndefined();
+      expect(call.system).toBe(content.system);
+      expect(call.schema).toBe(content.schema);
+      expect(call.messages).toHaveLength(2);
+      expect(call.messages![0]).toEqual(content.messages![0]!);
+      expect(payload(call)).toContain("九州大陆，灵脉断绝");
+      expect(payload(call)).toContain("第一章：少年拾得碎片");
+      expect(payload(call)).toContain("碎片是密钥");
+      expect(payload(call)).toContain("热情→谨慎");
+      expect(payload(call)).toContain("刀光一闪。");
+      expect(payload(call)).toContain("　　正文全文。");
+      expect(payload(call).split("　　正文全文。")).toHaveLength(2);
+      expect(payload(call)).not.toContain("正文出现高铁");
+    }
+    expect(content.messages![0]).toMatchObject({ role: "user", content: [{ type: "text",
+      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } } }] });
+    expect(task(content)).toContain("设定审校编辑");
+    expect(task(style)).toContain("文风比对评审");
+    expect(task(consistency)).toContain("内部自洽审校");
+    expect(task(consistency)).toContain("不需要对照任何外部资料");
+    expect(report.content).toEqual(CONTENT_ISSUES);
+    expect(report.style).toEqual({ skipped: false, score: 82, rationale: "句式偏短促", suggestions: [] });
+    expect(report.consistency).toEqual(CONSISTENCY_ISSUES);
     expect(report.passed).toBeFalse();
   });
 
-  test("① 最终回收未揭露真相或未收尾时报告伏笔问题，并区分阶段回收", async () => {
-    generateObjectCalls = [];
-    const issue = {
-      kind: "foreshadow", description: "终章只写碎片发热，未解释密钥真相",
-      suggestion: "揭露碎片是密钥并解释刻痕与开锁的联系，在本章收尾",
-    } satisfies ReviewIssue;
-    scriptedResults = { content: { issues: [issue] }, consistency: { issues: [] } };
-    const report = await reviewChapter(baseInput({
-      foreshadowLines: ["【本章伏笔】", "隐藏真相：碎片是密钥", "回收阶段：最终回收"],
-      summary: "只发现刻痕线索，真相留待后章", styleSamples: [],
-      content: "他只看见碎片发热，决定下一章再追查。",
-    }), baseDeps());
-    const contentPrompt = generateObjectCalls[0]!.prompt;
-    const dimensions = contentPrompt.split("审查维度（逐条检查）：")[1]!;
-    expect(dimensions).toContain("最终回收");
-    expect(dimensions).toContain("未完整揭露真相");
-    expect(dimensions).toContain("未解释表面行为与真相的联系");
-    expect(dimensions).toContain("阶段回收不得提前完整揭露真相");
-    expect(dimensions).toContain("foreshadow 问题");
-    expect(dimensions).toContain("最终收尾要求优先于概述中推迟揭露或继续悬置的描述");
-    expect(dimensions).toContain("不得仅因落实最终收尾而报告 summary 问题");
-    expect(report.content.issues).toEqual([issue]);
+  test("最终回收与角色迁移的专项约束继续传给内容审校", async () => {
+    reset();
+    await reviewChapter(baseInput(), { reviewModel: DUMMY_MODEL });
+    const contentTask = task(calls[0]!);
+    expect(contentTask).toContain("未完整揭露真相");
+    expect(contentTask).toContain("未解释表面行为与真相的联系");
+    expect(contentTask).toContain("阶段回收不得提前完整揭露真相");
+    expect(contentTask).toContain("最终收尾要求优先于概述中推迟揭露或继续悬置的描述");
+    expect(contentTask).toContain("不得仅因落实最终收尾而报告 summary 问题");
+    expect(contentTask).toContain("4. character——角色变化是否符合");
+  });
+
+  test("不同文风阈值只改变末尾任务，schema 与共享前缀均保持稳定", async () => {
+    reset();
+    await reviewChapter(baseInput(), { reviewModel: DUMMY_MODEL });
+    const first = calls[1]!;
+    reset();
+    const report = await reviewChapter(baseInput({ stylePassScore: 95 }), { reviewModel: DUMMY_MODEL });
+    expect(calls[1]!.schema).toBe(first.schema);
+    expect(calls[1]!.messages![0]).toEqual(first.messages![0]!);
+    expect(task(calls[1]!)).toContain("95 分及以上为合格");
     expect(report.passed).toBeFalse();
-    expect(formatRevisionBlock(report)).toContain("（伏笔）");
   });
 
-  test("① 载入本章角色状态与变化计划，并给出 character 审查维度", async () => {
-    generateObjectCalls = [];
-    scriptedResults = { content: { issues: [] }, style: STYLE_SCORED, consistency: { issues: [] } };
-
-    await reviewChapter(
-      baseInput({
-        characterLines: [
-          "【登场角色状态（角色基准卡 + 已结束迁移后的状态）】",
-          "林恒（定位：主角；性格：热情）",
-          "【本章角色变化计划（创作计划，不是已经发生的事实）】",
-          "- 性格（进行中，第 2 章起至第 5 章）：旧值「热情」→ 目标「谨慎」",
-        ],
-      }),
-      baseDeps(),
-    );
-
-    const content = generateObjectCalls.find((call) => call.prompt.includes("设定审校编辑"))!;
-    expect(content.prompt).toContain("【本章角色状态与变化计划（正文应遵守）】");
-    expect(content.prompt).toContain("旧值「热情」→ 目标「谨慎」");
-    expect(content.prompt).toContain("4. character——角色变化是否符合");
-    // 无角色行时不注入该段（现状回归）
-    generateObjectCalls = [];
-    await reviewChapter(baseInput(), baseDeps());
-    const bare = generateObjectCalls.find((call) => call.prompt.includes("设定审校编辑"))!;
-    expect(bare.prompt).not.toContain("【本章角色状态与变化计划（正文应遵守）】");
-  });
-
-  test("② 文风段合格线随入参走：prompt 与 schema 描述使用注入阈值", async () => {
-    generateObjectCalls = [];
-    scriptedResults = { content: { issues: [] }, style: STYLE_SCORED, consistency: { issues: [] } };
-
-    await reviewChapter(baseInput({ stylePassScore: 85 }), baseDeps());
-
-    expect(generateObjectCalls).toHaveLength(3);
-    const style = generateObjectCalls[1]!;
-    expect(style.prompt).toContain("85 分及以上为合格");
-    expect(style.prompt).toContain("未达 85 分必须给出具体可操作的修改建议");
-  });
-
-  test("无文风样本：② 跳过零调用，报告 style.skipped=true 且计为通过", async () => {
-    generateObjectCalls = [];
-    scriptedResults = { content: { issues: [] }, consistency: { issues: [] } };
-
-    const report = await reviewChapter(baseInput({ styleSamples: [] }), baseDeps());
-
-    expect(generateObjectCalls).toHaveLength(2);
+  test("无文风样本跳过调用，保留 skipped 与进度事件", async () => {
+    reset([result(), result()]);
+    const events: unknown[] = [];
+    const report = await reviewChapter(baseInput({ styleSamples: [] }), {
+      reviewModel: DUMMY_MODEL, onProgress: (phase, stage) => events.push(stage ?? phase),
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.messages![0]).toEqual(calls[1]!.messages![0]!);
     expect(report.style).toEqual({ skipped: true });
     expect(report.passed).toBeTrue();
+    expect(events).toContainEqual({ phase: "review-style", result: { skipped: true } });
   });
 
-  test("onProgress 逐段开始及结束回调：每段结束立即带该段结果", async () => {
-    generateObjectCalls = [];
-    scriptedResults = { content: CONTENT_ISSUES, style: STYLE_SCORED, consistency: CONSISTENCY_ISSUES };
-    const events: { phase: string; result?: unknown }[] = [];
-
-    await reviewChapter(baseInput(), baseDeps((phase, stageResult) => {
-      events.push({ phase, result: stageResult });
-    }));
-
-    expect(events.map((event) => event.phase)).toEqual([
-      "review-content", "review-content", "review-style", "review-style",
-      "review-consistency", "review-consistency",
-    ]);
-    expect(events[0]!.result).toBeUndefined();
-    expect(events[1]!.result).toMatchObject({ phase: "review-content", result: CONTENT_ISSUES });
-    expect(events[3]!.result).toMatchObject({ phase: "review-style", result: { score: 82 } });
-    expect(events[5]!.result).toMatchObject({ phase: "review-consistency", result: { issues: [{ kind: "consistency" }] } });
+  test("文风问题转换为现有修订建议，三段报告即时回传", async () => {
+    reset([result(), result([{ kind: "style", description: "句式过长", suggestion: "缩短动作句" }], 70, "节奏不符"), result()]);
+    const phases: string[] = [];
+    const stages: unknown[] = [];
+    const report = await reviewChapter(baseInput(), { reviewModel: DUMMY_MODEL,
+      onProgress: (phase, stage) => { phases.push(phase); if (stage) stages.push(stage); },
+    });
+    expect(phases).toEqual(["review-content", "review-content", "review-style", "review-style", "review-consistency", "review-consistency"]);
+    expect(stages).toHaveLength(3);
+    expect(report.style).toEqual({ skipped: false, score: 70, rationale: "节奏不符", suggestions: ["句式过长：缩短动作句"] });
+    expect(formatRevisionBlock(report)).toContain("缩短动作句");
+    expect(report.passed).toBeFalse();
   });
 
-  test("全部通过路径：报告 passed=true", async () => {
-    generateObjectCalls = [];
-    scriptedResults = {
-      content: { issues: [] },
-      style: { score: 92, rationale: "贴合", suggestions: [] },
-      consistency: { issues: [] },
-    };
-    const report = await reviewChapter(baseInput(), baseDeps());
-    expect(report.passed).toBeTrue();
+  test.each([
+    ["文风评分缺失", [result(), result()]],
+    ["文风评分越界", [result(), result([], 101)]],
+    ["文风评分非整数", [result(), result([], 80.5)]],
+    ["内容问题类别漂移", [result([{ kind: "consistency", description: "矛盾", suggestion: "统一" }])]],
+    ["自洽问题类别漂移", [result(), result([], 92), result(CONTENT_ISSUES.issues)]],
+    ["报告缺少问题清单", [{ styleRating: null, rationale: "完成" }]],
+  ])("%s 不得被静默当作通过", async (_name, results) => {
+    reset(results as unknown[]);
+    await expect(reviewChapter(baseInput(), { reviewModel: DUMMY_MODEL })).rejects.toThrow();
   });
 
-  test("校验调用抛错：直接透传不吞错", async () => {
-    generateObjectCalls = [];
-    scriptedResults = {};
-    await expect(reviewChapter(baseInput(), baseDeps())).rejects.toThrow("未脚本化的 generateObject 调用");
+  test("新稿重新建立公共正文前缀，不携带旧稿或上轮报告", async () => {
+    reset();
+    await reviewChapter(baseInput(), { reviewModel: DUMMY_MODEL });
+    const first = calls[0]!;
+    reset();
+    await reviewChapter(baseInput({ content: "修订后的正文。", round: 2 }), { reviewModel: DUMMY_MODEL });
+    expect(calls[0]!.schema).toBe(first.schema);
+    expect(calls[0]!.system).toBe(first.system);
+    expect(payload(calls[0]!)).toContain("修订后的正文。");
+    expect(payload(calls[0]!)).not.toContain("　　正文全文。");
+  });
+
+  test("校验异常直接透传", async () => {
+    reset([new Error("模型请求失败")]);
+    await expect(reviewChapter(baseInput(), { reviewModel: DUMMY_MODEL })).rejects.toThrow("模型请求失败");
   });
 });
 

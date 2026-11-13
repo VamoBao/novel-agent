@@ -30,7 +30,22 @@ import type { WriteProgressEvent } from "./index";
  */
 
 type GenerateTextArgs = { model: unknown; messages: ModelMessage[] };
-type GenerateObjectArgs = { model: unknown; prompt: string };
+type GenerateObjectArgs = { model: unknown; prompt: string; messages?: ModelMessage[]; system?: string };
+function reviewPrompt(args: { prompt?: string; messages?: ModelMessage[] }): string {
+  return args.prompt ?? (args.messages ?? []).map((message) => typeof message.content === "string"
+    ? message.content : message.content.map((part) => part.type === "text" ? part.text : "").join("\n")).join("\n");
+}
+// 既有场景脚本描述对外 ReviewReport；HTTP/SDK 边界统一提供新的模型输出格式。
+function stageObject(key: "content" | "style" | "consistency", value: unknown) {
+  const entry = value as { score?: number; rationale?: string; suggestions?: string[];
+    issues?: { kind?: string; description: string; suggestion: string }[] };
+  return { styleRating: key === "style" ? entry.score ?? null : null,
+    rationale: entry.rationale ?? "检查完成",
+    issues: key === "style"
+      ? (entry.suggestions ?? []).map((suggestion) => ({ kind: "style", description: "文风需调整", suggestion }))
+      : (entry.issues ?? []).map((issue) => ({ ...issue, kind: issue.kind ?? key })),
+  };
+}
 let generateTextCalls: GenerateTextArgs[] = [];
 let generateTextResult = "";
 /** 多轮正文脚本：非空时逐轮 shift，耗尽后回落 generateTextResult */
@@ -89,8 +104,10 @@ mock.module("ai", () => ({
   tool: (spec: unknown) => spec,
   generateObject: async (args: GenerateObjectArgs) => {
     if (reviewScript.error) throw reviewScript.error;
-    generateObjectCalls.push(args);
-    return { object: nextReviewObject(reviewScriptKey(args.prompt)) };
+    const prompt = reviewPrompt(args);
+    generateObjectCalls.push({ ...args, prompt });
+    const key = reviewScriptKey(prompt);
+    return { object: stageObject(key, nextReviewObject(key)) };
   },
   generateText: async (args: GenerateTextArgs) => {
     generateTextCalls.push({ ...args, ...(args.messages ? { messages: structuredClone(args.messages) } : {}) });
@@ -962,6 +979,30 @@ describe("writeChapter", () => {
     expect(saved).not.toContain(draft);
   });
 
+  test("三项审校共用小说、部幕大纲与正文资料，修订链路保持原报告格式", async () => {
+    const ctx = await setupDb();
+    cleanupAll.push(ctx.cleanup);
+    generateTextCalls = [];
+    generateTextResult = PROSE;
+    ctx.novelStore.updateNovel(NOVEL_ID, { narrativePov: "第三人称限知", description: "争夺灵脉" });
+    ctx.styleReferenceStore.addStyleReference(NOVEL_ID, { name: "样本", content: "文风文本。" });
+    await writeChapter({ channel: new FakeChannel([]), novelId: NOVEL_ID, model: DUMMY_MODEL, ...ctx });
+    expect(generateObjectCalls).toHaveLength(3);
+    for (const call of generateObjectCalls) {
+      const prefix = JSON.stringify(call.messages?.[0]);
+      expect(prefix).toContain("书名：灵脉拾遗");
+      expect(prefix).toContain("第三人称限知");
+      expect(prefix).toContain("争夺灵脉");
+      expect(prefix).toContain("第一部：灵脉断绝，少年拾遗");
+      expect(prefix).toContain("第一幕：市集风波");
+      expect(prefix).toContain("幕关键情节点：拾得灵脉碎片；宗门追查");
+      expect(prefix).toContain("少年在市集拾得碎片");
+      expect(prefix).toContain("林恒");
+      expect(prefix).toContain("文风文本。");
+      expect(prefix).toContain(PROSE.split("\n")[0]!.trim());
+    }
+  });
+
   test("校验一次通过：三段校验调用注入模型，进度事件按序触发，saving 事件携带通过报告", async () => {
     const ctx = await setupDb();
     cleanupAll.push(ctx.cleanup);
@@ -1017,9 +1058,9 @@ describe("writeChapter", () => {
     generateTextCalls = [];
     generateTextResult = "";
     generateTextQueue = [PROSE, "　　修订后的正文，矛盾已统一为五个字。"];
-    // 首轮内容校验报 1 处问题，修订轮转绿；文风未启用（跳过段）
+    // 首轮自洽校验报 1 处问题，修订轮转绿；文风未启用（跳过段）
     reviewScript = {
-      content: [
+      consistency: [
         { issues: [{ kind: "consistency", description: "五个字写成四个字", suggestion: "统一为五个字" }] },
         { issues: [] },
       ],

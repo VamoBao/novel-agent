@@ -177,7 +177,7 @@ apps/agent/src/
         │   ├── index.ts                 # writeChapter：上下文→写作→审校/修订→落盘入库/覆盖
         │   ├── chapter-context.ts       # 本章角色基准/迁移计划、树版本与跨幕前后章上下文
         │   ├── foreshadow-context.ts    # 正文伏笔卡片、登场章正文预算与阶段/最终回收提示
-        │   ├── chapter-review.ts        # 独立三段审校、通过判定与整改报告格式化
+        │   ├── chapter-review.ts        # 三段审校共享前缀/统一 schema、判定与整改报告格式化
         │   ├── index.test.ts
         │   ├── sdk.test.ts              # 独立进程真实 SDK/SQLite，替换 HTTP 边界
         │   ├── chapter-context.test.ts
@@ -441,3 +441,9 @@ React/CLI 确认门展示全部回收计划，预览逐幕列已绑定章或待�
 `onUsage(WriteChapterUsage)` 返回每次成功写作调用的小说/章、轮次、阶段、provider/modelId、durationMs 和输入/输出/缓存读写计数。根据 `usage.raw` 白名单判断供应商是否提供相应字段，再使用 SDK 标准计数；缺失记 null、显式零记 0，raw 不输出。headless 写入 stderr 单行 JSON（type=`chapter-writing-usage`），Electron 继承该流；stdout 协议及客户端内容提示不变，诊断不包含 API Key、Base URL、正文、报告或请求载荷。调用抛错时不生成用量事件；durationMs 仅覆盖该次写作调用，包含 SDK 自动重试时间，不包含审校或落盘，不是整个会话耗时。
 
 真实 SDK/SQLite/HTTP 边界替身回归见 `workflows/agents/chapter-writing-agent/sdk.test.ts`；该验证不模拟服务端 KV 缓存，也不证明线上命中率、账单或文学质量。
+
+## 正文审校共享前缀（2026-11-13）
+
+正文三段审校保留独立调用，各阶段共用固定 system、资料消息和统一模型输出 schema，仅末尾任务变化。资料含小说、相关部/幕大纲与情节点、章概述、世界观、角色/迁移、伏笔、文风及当前稿；部/幕资料与写作共用组装结果。统一输出 `{ styleRating: number | null, issues: { kind, description, suggestion }[], rationale: string }` 经阶段评分/类别校验转换为既有 shared ReviewReport，客户端协议和三轮修订/失败保护保持。
+
+Claude 显式缓存断点位于共享资料末尾，其他 provider 使用自身前缀缓存机制；阈值只进任务，schema/system 保持稳定。各阶段不带其他报告，每稿仅审最新正文。真实三 provider SDK/HTTP 边界测试覆盖请求前缀、schema、断点和稿件隔离；线上命中率/费用及文学质量未验证。主说明见 workflows/ARCHITECTURE.md 同名章节，写作 onUsage 的统计范围保持。

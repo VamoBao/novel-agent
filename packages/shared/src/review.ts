@@ -4,7 +4,8 @@ import { z } from "zod";
  * 章节正文校验报告 schema：write-chapter 校验-修订闭环（chapter-review.ts 三段校验）
  * 的结构化产出，随 write-progress 协议消息透传客户端展示（仅会话内传递，不入库落盘）。
  *
- * 三段校验各自独立单轮 LLM 调用（上下文互不继承），结果合并为一份报告：
+ * 三段校验各自独立单轮 LLM 调用，共享资料/正文前缀与统一模型输出 schema，
+ * 不继承其他阶段报告；模型结果在 agent 内转换为本展示契约：
  * - content 内容约束：正文与世界观 / 章节概述 / 本章伏笔的符合性（issue 列表）
  * - style 文风对比：正文与启用参考文风的相似度评分（0-100，按会话生效阈值判定；无启用文风 skipped）
  * - consistency 前后自洽：正文内部的描述矛盾（issue 列表）

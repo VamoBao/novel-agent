@@ -314,28 +314,36 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
   const reviewModel = options.reviewModel ?? agentSessionModel;
   const { onProgress } = options;
 
-  // 初稿资料与要求只组装一次，后续严格追加消息，保留完整请求前缀。
-  const initialPrompt = [
-    "你是一位经验丰富的小说作者，请依据下面的资料把指定章节的剧情概述扩写为小说正文。",
-    "",
+  // 写作和审校共享相同的小说与相关部/幕资料，避免两处独立拼装漂移。
+  const novelLines: string[] = [
     "【小说】",
     `书名：${novel.name ?? "未命名小说"}`,
     novel.description ? `一句话简介：${novel.description}` : null,
     novel.narrativePov
       ? `叙事视角：${novel.narrativePov}（正文叙述全程保持该视角——人称与信息范围不得中途漂移，限知视角不得写出视角内角色不可知的信息）`
       : null,
-    "",
-    "【世界观】",
-    JSON.stringify(storedWorldview.worldview),
-    "",
-    ...(characterContext.lines.length > 0 ? characterContext.lines : ["【登场角色参考】", "（暂无入库角色）"]),
-    "",
+  ].filter((line): line is string => line !== null);
+  const outlineLines: string[] = [
     "【所属部】",
     `${part.node.name}：${part.node.summary ?? "（缺部梗概）"}`,
     "",
     "【所属幕】",
     `${act.node.name}：${act.node.summary ?? "（缺幕梗概）"}`,
     act.node.keyPlotPoints ? `幕关键情节点：${act.node.keyPlotPoints.join("；")}` : null,
+  ].filter((line): line is string => line !== null);
+
+  // 初稿资料与要求只组装一次，后续严格追加消息，保留完整请求前缀。
+  const initialPrompt = [
+    "你是一位经验丰富的小说作者，请依据下面的资料把指定章节的剧情概述扩写为小说正文。",
+    "",
+    ...novelLines,
+    "",
+    "【世界观】",
+    JSON.stringify(storedWorldview.worldview),
+    "",
+    ...(characterContext.lines.length > 0 ? characterContext.lines : ["【登场角色参考】", "（暂无入库角色）"]),
+    "",
+    ...outlineLines,
     "",
     "【本章】",
     `${chapter.node.name}：${chapter.node.summary}`,
@@ -435,6 +443,8 @@ export async function writeChapter(options: WriteChapterOptions): Promise<WriteC
         novelId,
         chapterName: chapter.node.name,
         summary: chapter.node.summary ?? "",
+        novelLines,
+        outlineLines,
         worldview: storedWorldview.worldview,
         foreshadowLines: foreshadowContext.lines,
         characterLines: characterContext.lines,
