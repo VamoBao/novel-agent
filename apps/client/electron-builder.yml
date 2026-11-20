@@ -1,0 +1,35 @@
+# electron-builder 打包配置（apps/client 目录内运行，产物落 release/——gitignore）：
+# - 主/预加载/渲染进程均为 electron-vite bundle（out/），无运行时 node_modules——files 只带 out/**
+# - agent 独立二进制经 extraResources 随包：bun run build:agent 先把产物暂存到
+#   resources/bin/<os>-<arch>/，此处按当前构建平台宏选目录并扁平落安装包 resources/bin/
+#   （asar 内无法 exec，客户端 electron/agent-bin.ts 按该路径 spawn）
+# - 图标暂缺：沿用 Electron 默认图标（electron-builder 警告但不阻塞）
+appId: com.novelagent.app
+productName: novel-agent
+directories:
+  output: release
+files:
+  - out/**
+extraResources:
+  - from: resources/bin/${os}-${arch}
+    to: bin
+    filter:
+      - "**/*"
+linux:
+  target: AppImage
+  category: Utility
+  executableName: novel-agent
+  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+win:
+  # zip（便携包）可在 Linux 交叉构建；nsis 安装器在 Linux 上需要 wine——正式安装包
+  # 在 Windows/macOS 机器构建时把 target 改回 nsis（并按需移除 signAndEditExecutable）
+  target: zip
+  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+  # Linux 交叉打包无 wine 时跳过 exe 元数据编辑（rcedit）——图标/版本信息保持 Electron
+  # 默认；需要完整 exe 元数据时在 Windows/macOS 机器构建或安装 wine 后移除此开关
+  signAndEditExecutable: false
+# macOS 需在 mac 机器构建（含签名公证，后续独立需求）；配置先行
+mac:
+  target: dmg
+  category: public.app-category.productivity
+  executableName: novel-agent

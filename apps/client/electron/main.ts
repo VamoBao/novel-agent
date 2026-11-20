@@ -223,13 +223,26 @@ const agentProcess = new AgentProcess({
   onExit: (code) => BrowserWindow.getAllWindows()[0]?.webContents.send("agent:exit", code),
 });
 
+/** WSL2 检测：/proc/version 含 microsoft（真实 Windows/macOS 与普通 Linux 无此标记，
+ *  读取失败按非 WSL 处理——win/mac 无 /proc） */
+function isWsl(): boolean {
+  try {
+    return fs.readFileSync("/proc/version", "utf8").toLowerCase().includes("microsoft");
+  } catch {
+    return false;
+  }
+}
+
 // WSL2 / 虚拟桌面环境下 GPU 进程与 sandbox 初始化失败会直接 FATAL，禁用后以软件渲染运行
-// （本地单机应用、渲染进程不加载远程内容，风险可控；打包分发时再评估恢复 sandbox）
-app.disableHardwareAcceleration();
-app.commandLine.appendSwitch("disable-gpu");
-app.commandLine.appendSwitch("no-sandbox");
-// GPU 子进程在本环境启动即崩（error_code=1002），并入主进程以软件渲染运行
-app.commandLine.appendSwitch("in-process-gpu");
+// （仅 WSL 环境禁用；分发的安装包在真实桌面恢复正常硬件渲染与沙箱——本地单机应用、
+// 渲染进程不加载远程内容，WSL 内禁 sandbox 风险可控）
+if (isWsl()) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+  app.commandLine.appendSwitch("no-sandbox");
+  // GPU 子进程在本环境启动即崩（error_code=1002），并入主进程以软件渲染运行
+  app.commandLine.appendSwitch("in-process-gpu");
+}
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({

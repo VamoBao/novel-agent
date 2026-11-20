@@ -1,3 +1,12 @@
+## 2026-11-20 electron-builder 打包接入：宏命名扁平 bin、win zip 降级、GPU 条件化（用户确认，打包分发第二步；图标按用户指示跳过）
+
+- **背景**：agent 二进制化（第一步）后需要安装包把客户端与二进制一起分发；electron-builder 26.18.0 接入 apps/client。三个实现期决策：
+- **暂存目录宏命名 + 打包后扁平 bin**：extraResources 需按构建平台选目录。备选：三份平台配置文件各写一条 from（平台配置合并语义有歧义、易漂移）；改用**暂存目录以 electron-builder 宏命名**（`resources/bin/<os>-<arch>/`，win/mac 而非 windows/darwin——shared `agentBinOsDir`），一份 yml 用 `from: resources/bin/${os}-${arch}` 自动选目录并扁平落安装包 `resources/bin/`，客户端解析路径同步简化（少一层目录）。Bun target 标识（`bun-windows-x64` 等）仍由 shared `AGENT_BIN_TARGETS` 映射，目录名与 target 解耦。
+- **Windows 目标 zip 而非 nsis**：Linux 交叉构建 NSIS 需要 wine（`signAndEditExecutable: false` 跳过 rcedit 的 exe 元数据编辑后 NSIS 步骤仍 spawn wine 失败）。结论：win target 定为 zip（205MB 便携包，内容含 `resources/bin/` 双 `.exe`，结构断言通过）；正式 NSIS 安装包在 Windows/macOS 机器构建时改回（yml 注释说明）。本机不装 wine（重依赖，偏离「标准命令可复现」）。
+- **productName 进 package.json + executableName 显式**：asar 内 package.json 缺 `productName` 时 Electron 应用名回退 `@novel/client`——userData 落 `@novel/client` 目录、Linux 可执行名变 `@novelclient`（默认取包名）。补 `productName: novel-agent`（Electron 读）+ yml 显式 `executableName`（Linux/mac），版本号 0.0.0→1.0.0 对齐根。**连带发现并修复于打包冒烟**——userData 目录名影响用户 settings.json 与库的实际落点，属分发正确性问题。
+- **GPU/sandbox 开关 WSL 条件化**：原无条件禁用是 WSL2 兼容补丁，会强制真实用户软件渲染且关沙箱。改为 `/proc/version` 含 microsoft 才禁用（读取失败=非 Linux=不禁用）；WSL2 dev 与打包冒烟均复验通过。
+- **验证边界**：Linux `--dir` 产物本机全链路冒烟（query 二进制建库迁移 + headless 二进制会话写库 + spawn 日志命中 resources/bin 路径 + 原配置零污染）；`bun run dist` 一条命令出 AppImage 188MB；win zip 结构断言过、**win/darwin 运行时未验证**（留待真机/CI，如实记录）。
+
 ## 2026-11-20 agent 二进制化（bun build --compile）与客户端 spawn 双态（用户确认，打包分发第一步）
 
 - **背景**：筹备把 Electron 客户端 + agent 打包为安装包分发（2026-10-17 数据布局改造的后续）。当前客户端 main 进程以 `bun run apps/agent/src/headless.ts` / `query.ts` spawn agent——要求用户机器安装 Bun 且携带整个源码树与 node_modules，打包后源码树不存在。

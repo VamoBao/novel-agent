@@ -7,9 +7,8 @@ import { AGENT_BIN_TARGETS, agentBinFileName, type AgentBinEntry } from "@novel/
  *
  * - dev：`bun run <仓库相对入口路径>` + cwd=仓库根——与历史行为完全一致（需本机安装 Bun）。
  * - 打包：直接执行 extraResources 内的编译二进制（bun build --compile 产物，Bun runtime
- *   与 bun:sqlite 内嵌）——asar 内无法 exec 可执行文件，故二进制经 electron-builder
- *   extraResources 落 resources/bin/<bun-target>/（由 scripts/build-agent.ts 产出，
- *   目标映射与文件名共用 @novel/shared agent-bin）。
+ *   与 bun:sqlite 内嵌）——asar 内无法 exec 可执行文件，故 electron-builder 打包时把
+ *   scripts/build-agent.ts 的暂存产物按平台扁平落到 resources/bin/（win32 带 .exe）。
  *
  * 数据路径不依赖 cwd：客户端 childEnv() 注入绝对 NOVEL_DB_PATH / NOVEL_OUTPUT_DIR；
  * 打包态 cwd 取二进制所在目录仅为确定性（不继承安装器/快捷方式带来的任意工作目录）。
@@ -54,7 +53,7 @@ export function resolveAgentSpawnCommand(
       `不支持的运行平台：${context.platform}-${context.arch}（已编译目标：${Object.keys(AGENT_BIN_TARGETS).join("、")}；新增平台需扩展 @novel/shared agent-bin 后经 bun run build:agent 重编译并重新打包）`,
     );
   }
-  const binPath = join(context.resourcesPath, "bin", target, agentBinFileName(entry, target));
+  const binPath = join(context.resourcesPath, "bin", agentBinFileName(entry, context.platform));
   if (!existsSync(binPath)) {
     throw new Error(
       `agent 二进制缺失：${binPath}（安装包 resources/bin 应随 extraResources 携带编译产物；请重新执行 bun run build:agent 并重新打包）`,

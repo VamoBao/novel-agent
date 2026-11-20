@@ -1,6 +1,9 @@
 {
   "name": "@novel/client",
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "小说创作 AI Agent 桌面客户端",
+  "author": "VamoBao",
+  "productName": "novel-agent",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",
@@ -8,6 +11,8 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "dist": "electron-vite build && electron-builder --publish never",
+    "dist:dir": "electron-vite build && electron-builder --dir --publish never",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -23,6 +28,7 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.0",
     "electron": "^38.0.0",
+    "electron-builder": "^26.18.0",
     "electron-vite": "^4.0.0",
     "happy-dom": "^21.0.1",
     "typescript": "6",

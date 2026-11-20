@@ -1,25 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { AGENT_BIN_TARGETS, agentBinFileName } from "@novel/shared";
+import { join } from "node:path";
+import { agentBinFileName } from "@novel/shared";
 import { resolveAgentSpawnCommand, type AgentBinContext } from "./agent-bin";
 
-/** 测试用目标断言（noUncheckedIndexedAccess 下索引访问可能 undefined） */
-function targetOf(platform: NodeJS.Platform, arch: string): string {
-  const target = AGENT_BIN_TARGETS[`${platform}-${arch}`];
-  if (target === undefined) throw new Error(`测试平台未映射：${platform}-${arch}`);
-  return target;
-}
-
-/** 建一个含指定平台两枚二进制（空文件——解析器只验存在性）的临时 resources 目录 */
-function fixtureResources(platform: NodeJS.Platform, arch: string): string {
+/** 建一个含指定平台两枚二进制（空文件——解析器只验存在性）的临时 resources 目录；
+ *  打包后 extraResources 扁平落 resources/bin/（win32 带 .exe） */
+function fixtureResources(platform: NodeJS.Platform): string {
   const resources = mkdtempSync(join(tmpdir(), "novel-agent-bin-fixture-"));
-  const target = targetOf(platform, arch);
-  const dir = join(resources, "bin", target);
+  const dir = join(resources, "bin");
   mkdirSync(dir, { recursive: true });
   for (const entry of ["headless", "query"] as const) {
-    writeFileSync(join(dir, agentBinFileName(entry, target)), "");
+    writeFileSync(join(dir, agentBinFileName(entry, platform)), "");
   }
   return resources;
 }
@@ -56,27 +49,26 @@ describe("resolveAgentSpawnCommand：dev 态（与历史行为一致）", () => 
   });
 });
 
-describe("resolveAgentSpawnCommand：打包态（extraResources 二进制）", () => {
-  const cases: ReadonlyArray<{ platform: NodeJS.Platform; arch: string; exe: boolean }> = [
-    { platform: "linux", arch: "x64", exe: false },
-    { platform: "win32", arch: "x64", exe: true },
-    { platform: "darwin", arch: "x64", exe: false },
-    { platform: "darwin", arch: "arm64", exe: false },
+describe("resolveAgentSpawnCommand：打包态（extraResources 扁平 bin/）", () => {
+  const cases: ReadonlyArray<{ platform: NodeJS.Platform; arch: string }> = [
+    { platform: "linux", arch: "x64" },
+    { platform: "win32", arch: "x64" },
+    { platform: "darwin", arch: "x64" },
+    { platform: "darwin", arch: "arm64" },
   ];
 
-  for (const { platform, arch, exe } of cases) {
-    test(`${platform}-${arch}：目标目录正确，Windows 带 .exe，cwd 为二进制目录`, () => {
-      const resources = fixtureResources(platform, arch);
+  for (const { platform, arch } of cases) {
+    test(`${platform}-${arch}：resources/bin/ 直取，cwd 为 bin 目录`, () => {
+      const resources = fixtureResources(platform);
       try {
-        const target = targetOf(platform, arch);
         for (const entry of ["headless", "query"] as const) {
-          const name = agentBinFileName(entry, target);
-          if (exe) expect(name.endsWith(".exe")).toBe(true);
+          const name = agentBinFileName(entry, platform);
+          if (platform === "win32") expect(name.endsWith(".exe")).toBe(true);
           const resolved = resolveAgentSpawnCommand(entry, contextOf(true, platform, arch, resources));
           expect(resolved).toEqual({
-            command: join(resources, "bin", target, name),
+            command: join(resources, "bin", name),
             baseArgs: [],
-            cwd: dirname(join(resources, "bin", target, name)),
+            cwd: join(resources, "bin"),
           });
         }
       } finally {
@@ -86,7 +78,7 @@ describe("resolveAgentSpawnCommand：打包态（extraResources 二进制）", (
   }
 
   test("未映射平台组合（win32-arm64）：抛可读错误并列出已编译目标", () => {
-    const resources = fixtureResources("win32", "x64");
+    const resources = fixtureResources("win32");
     try {
       expect(() => resolveAgentSpawnCommand("headless", contextOf(true, "win32", "arm64", resources))).toThrow(
         /不支持的运行平台：win32-arm64/,
@@ -99,8 +91,7 @@ describe("resolveAgentSpawnCommand：打包态（extraResources 二进制）", (
   test("二进制缺失：抛可读错误并带完整路径与补救提示", () => {
     const resources = mkdtempSync(join(tmpdir(), "novel-agent-bin-empty-"));
     try {
-      const target = targetOf("linux", "x64");
-      const missing = join(resources, "bin", target, "novel-headless");
+      const missing = join(resources, "bin", "novel-headless");
       expect(() => resolveAgentSpawnCommand("headless", contextOf(true, "linux", "x64", resources))).toThrow(
         new RegExp(`agent 二进制缺失.*${missing.replaceAll("/", "\\/")}`),
       );
