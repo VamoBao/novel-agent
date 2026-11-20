@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { AgentProcess } from "./agent-process";
+import { resolveAgentSpawnCommand } from "./agent-bin";
 import {
   characterEntrySchema,
   characterMigrationEntrySchema,
@@ -11,6 +12,7 @@ import {
   novelDetailSchema,
   novelListItemSchema,
   styleReferenceEntrySchema,
+  type AgentBinEntry,
   type AgentStartOptions,
   type Character,
   type CharacterEntry,
@@ -100,6 +102,18 @@ function defaultOutputDir(): string {
     : path.join(resolveRepoRoot(), "output");
 }
 
+/** agent 子进程 spawn 命令（双态，见 electron/agent-bin.ts）：dev = bun run 源码入口
+ *  （cwd 仓库根，与历史行为一致）；打包态 = extraResources 内编译二进制（无 Bun 依赖） */
+function agentSpawnCommand(entry: AgentBinEntry) {
+  return resolveAgentSpawnCommand(entry, {
+    packaged: app.isPackaged,
+    platform: process.platform,
+    arch: process.arch,
+    resourcesPath: process.resourcesPath,
+    repoRoot: resolveRepoRoot(),
+  });
+}
+
 /** agent / 查询 CLI 子进程共用环境：数据路径传绝对路径（相对路径会随 spawn cwd 漂移）——
  *  库文件走 defaultDbPath（打包态 userData、开发态仓库 data/），产物目录经 resolveOutputDir
  *  三级优先级解析（设置「产物输出目录」> .env > 继承环境变量 > defaultOutputDir）。
@@ -134,13 +148,14 @@ function childEnv(): NodeJS.ProcessEnv {
 }
 
 /**
- * 执行一次性库查询 CLI（apps/agent/src/query.ts）：收集 stdout 单行 JSON 原样返回，
+ * 执行一次性库查询 CLI：收集 stdout 单行 JSON 原样返回，
  * 结构由调用方用 shared schema 复验；超时 / 非零退出（stderr 为错误信息）→ reject。
  */
 function runLibraryQuery(args: string[], timeoutMs = 8000): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const child = spawn("bun", ["run", "apps/agent/src/query.ts", ...args], {
-      cwd: resolveRepoRoot(),
+    const { command, baseArgs, cwd } = agentSpawnCommand("query");
+    const child = spawn(command, [...baseArgs, ...args], {
+      cwd,
       env: childEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -179,7 +194,6 @@ function runLibraryQuery(args: string[], timeoutMs = 8000): Promise<unknown> {
 
 const agentProcess = new AgentProcess({
   spawn: (options) => {
-    const repoRoot = resolveRepoRoot();
     // 会话模式映射为 headless argv（create → 无参；plan-chapters / regen-outline → 传 ID；
     // polish-character → 表单 JSON 随 argv 传入，编辑流带角色 ID、新建流不带；
     // write-chapter → 章节点正文生成，写作模型配置随根 .env 注入）
@@ -197,9 +211,10 @@ const agentProcess = new AgentProcess({
             : options.mode === "write-chapter"
               ? ["write-chapter", options.novelId, options.chapterNodeId]
               : [];
-    console.log(`[agent] spawn（cwd=${repoRoot}）`);
-    return spawn("bun", ["run", "apps/agent/src/headless.ts", ...sessionArgs], {
-      cwd: repoRoot,
+    const { command, baseArgs, cwd } = agentSpawnCommand("headless");
+    console.log(`[agent] spawn（${command}，cwd=${cwd}）`);
+    return spawn(command, [...baseArgs, ...sessionArgs], {
+      cwd,
       env: childEnv(),
       stdio: ["pipe", "pipe", "inherit"],
     });

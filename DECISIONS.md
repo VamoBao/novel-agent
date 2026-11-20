@@ -1,3 +1,10 @@
+## 2026-11-20 agent 二进制化（bun build --compile）与客户端 spawn 双态（用户确认，打包分发第一步）
+
+- **背景**：筹备把 Electron 客户端 + agent 打包为安装包分发（2026-10-17 数据布局改造的后续）。当前客户端 main 进程以 `bun run apps/agent/src/headless.ts` / `query.ts` spawn agent——要求用户机器安装 Bun 且携带整个源码树与 node_modules，打包后源码树不存在。
+- **备选方案**：①要求用户自行安装 Bun 并随安装包分发源码（分发体积大、普通用户不可接受）；②agent 重写为 Node 兼容（better-sqlite3 / node:crypto UUIDv7 替换 Bun API——`bun:sqlite`、`Bun.randomUUIDv7`、`import.meta.main` 遍布 state 层，重写面大且引入原生模块编译负担）；③`bun build --compile` 编译为独立可执行文件（Bun runtime 与 bun:sqlite 内嵌，POC 实测 192/153 模块打包、argv/sqlite/迁移链/跨二进制读库全部正常、Linux 上可交叉编译全平台目标）。
+- **权衡依据**：compile 模式对现有代码零改动（POC 验证 `process.argv.slice(2)`、`import.meta.main`、`Bun.randomUUIDv7`、`bun:sqlite` 建库迁移全链路正常），开发态工作流完全不变；产物约 60~84MB/平台（Bun runtime 占大头），换「目标机零依赖」。asar 内无法 exec 可执行文件——二进制必须经 electron-builder extraResources 置于 asar 外（本步先约定目录结构，打包配置为下一步独立需求）。
+- **结论**（经用户确认任务包）：①新增根 `scripts/build-agent.ts`（`bun run build:agent`）编译两入口 × 4 目标（linux/windows-x64、darwin x64/arm64），产物按 Bun target 分目录落 `apps/client/resources/bin/`（gitignore），当前平台产物构建后自动冒烟（headless hello 握手 + query 读同一临时库——不调用真实模型）；②平台映射与文件名收敛到 shared `agent-bin.ts`（构建脚本与客户端解析器共用唯一事实源）；③客户端新增 `electron/agent-bin.ts` 纯函数双态解析：dev 保持 `bun run <ts>` + cwd 仓库根（与历史逐字段一致），打包态执行 `resources/bin/<target>/` 二进制（存在性预检、未映射平台/缺失给可读错误）；④main.ts 两处 spawn（agent 会话 + library 查询 CLI）改经解析器。验证：全量 739 项（净增 13）+ 真实 Electron dev 隔离库冒烟（AUTOSTART 拉起 create 会话、spawn 形态与改前一致、临时库 novels/workflow_runs 各 1 行后原库无损恢复）。win/darwin 产物真机运行验证留待打包产物（--dir）阶段。
+
 ## 2026-11-09 新建小说采用卡片创作工作台与真实执行事件（用户确认）
 
 - 背景：新建小说页的通知段落与单个待答表单缺乏过程连续性，提交后回答消失，工具/子 Agent 尚无实时 UI 事件；用户要求与书库一样现代化，所有流程内容以卡片展示。

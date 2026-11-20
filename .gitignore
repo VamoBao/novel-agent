@@ -6,6 +6,9 @@ out
 dist
 *.tgz
 
+# agent 编译二进制（bun run build:agent 产物，electron-builder extraResources 消费）
+apps/client/resources/
+
 # code coverage
 coverage
 *.lcov

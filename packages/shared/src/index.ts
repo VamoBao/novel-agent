@@ -155,3 +155,4 @@ export {
   type NovelDetail,
   type NovelDeletedResult,
 } from "./query";
+export { AGENT_BIN_TARGETS, agentBinFileName, type AgentBinEntry } from "./agent-bin";
